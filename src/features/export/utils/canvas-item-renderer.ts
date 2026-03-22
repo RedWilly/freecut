@@ -121,7 +121,7 @@ export interface ItemRenderContext {
   mediabunnyDisabledItems: Set<string>;
   mediabunnyFailureCountByItem: Map<string, number>;
   ensureVideoItemReady?: (itemId: string) => Promise<boolean>;
-  getCachedPredecodedBitmap?: (src: string, timestamp: number) => ImageBitmap | null;
+  getCachedPredecodedBitmap?: (src: string, timestamp: number, toleranceSeconds?: number) => ImageBitmap | null;
 
   // Image / GIF state
   imageElements: Map<string, WorkerLoadedImage>;
@@ -515,10 +515,17 @@ async function renderVideoItem(
 
   // === TRY PRE-DECODED BITMAP (from background Web Worker) ===
   // Check for a pre-decoded bitmap from the decoder prewarm worker.
-  // This covers occluded variable-speed clips that become visible mid-playback —
-  // the worker decoded the frame off the main thread, so drawing it is ~0ms.
-  if (isPreviewMode && isVariableSpeed && 'src' in item && item.src && rctx.getCachedPredecodedBitmap) {
-    const bitmap = rctx.getCachedPredecodedBitmap(item.src, sourceTime);
+  // Only used as a fallback when the DOM video element and mediabunny are
+  // both unavailable (e.g. first frame after a large timeline jump where
+  // the worker pre-seeked off-thread). Don't check this for clips that
+  // have a live DOM video element — the 0.5s cache tolerance would show
+  // stale frames during normal playback/scrub.
+  const hasDomVideo = isPreviewMode && rctx.domVideoElementProvider
+    ? (() => { const v = rctx.domVideoElementProvider!(item.id); return v && v.readyState >= 2 && v.videoWidth > 0; })()
+    : false;
+  const hasMediabunny = useMediabunny.has(item.id);
+  if (isPreviewMode && !hasDomVideo && !hasMediabunny && 'src' in item && item.src && rctx.getCachedPredecodedBitmap) {
+    const bitmap = rctx.getCachedPredecodedBitmap(item.src, sourceTime, tier2ToleranceSeconds);
     if (bitmap) {
       const drawDimensions = calculateMediaDrawDimensions(
         bitmap.width,
@@ -527,7 +534,6 @@ async function renderVideoItem(
         canvasSettings,
       );
       ctx.drawImage(bitmap, drawDimensions.x, drawDimensions.y, drawDimensions.width, drawDimensions.height);
-      // Kick off mediabunny init in the background for subsequent frames
       if (rctx.ensureVideoItemReady) {
         void rctx.ensureVideoItemReady(item.id);
       }

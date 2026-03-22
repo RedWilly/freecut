@@ -229,6 +229,12 @@ export const VideoPreview = memo(function VideoPreview({
   const scrubRenderInFlightRef = useRef(false);
   const scrubRenderGenerationRef = useRef(0);
   const scrubRequestedFrameRef = useRef<number | null>(null);
+  // Dedicated background renderer for transition pre-rendering.
+  // Separate from the main scrub renderer so pre-renders don't conflict
+  // with the rAF pump's render loop (different canvas, different decoders).
+  const bgTransitionRendererRef = useRef<CompositionRenderer | null>(null);
+  const bgTransitionInitPromiseRef = useRef<Promise<CompositionRenderer | null> | null>(null);
+  const bgTransitionRenderInFlightRef = useRef(false);
   const scrubPrewarmQueueRef = useRef<number[]>([]);
   const scrubPrewarmQueuedSetRef = useRef<Set<number>>(new Set());
   const scrubPrewarmedFramesRef = useRef<number[]>([]);
@@ -1781,6 +1787,10 @@ export const VideoPreview = memo(function VideoPreview({
     }
 
     transitionSessionWindowRef.current = null;
+    // Remove transition-hold marks so video-content resumes normal premount behavior.
+    for (const el of transitionSessionPinnedElementsRef.current.values()) {
+      if (el) delete el.dataset.transitionHold;
+    }
     transitionSessionPinnedElementsRef.current.clear();
     transitionSessionBufferedFramesRef.current.clear();
   }, [pushTransitionTrace]);
@@ -1873,12 +1883,42 @@ export const VideoPreview = memo(function VideoPreview({
       return null;
     }
 
+    // Look up the clip's speed so the DOM video element advances at the
+    // correct rate. Without this, variable-speed clips (e.g. 1.23x) play
+    // at the browser's native 1x rate and fall behind the expected sourceTime.
+    const clipSpeed = (
+      sessionWindow?.leftClip.id === itemId ? (sessionWindow.leftClip.speed ?? 1)
+        : sessionWindow?.rightClip.id === itemId ? (sessionWindow.rightClip.speed ?? 1)
+          : 1
+    );
+
+    const ensurePlaying = (el: HTMLVideoElement) => {
+      if (isPlaying) {
+        el.dataset.transitionHold = '1';
+        if (Math.abs(el.playbackRate - clipSpeed) > 0.01) {
+          el.playbackRate = clipSpeed;
+        }
+        if (el.paused) {
+          el.play().catch(() => {});
+        }
+      }
+    };
+
     const pinned = transitionSessionPinnedElementsRef.current.get(itemId) ?? null;
     if (pinned && pinned.isConnected && pinned.readyState >= 2 && pinned.videoWidth > 0) {
+      ensurePlaying(pinned);
       return pinned;
     }
 
+    // Clear hold on previously pinned element before replacing
+    const prev = transitionSessionPinnedElementsRef.current.get(itemId) ?? null;
+    if (prev && prev !== pinned) {
+      delete prev.dataset.transitionHold;
+    }
     const next = getBestDomVideoElementForItem(itemId);
+    if (next && next.readyState >= 2) {
+      ensurePlaying(next);
+    }
     transitionSessionPinnedElementsRef.current.set(itemId, next);
     return next;
   }, [transitionWindowUsesDomProvider]);
@@ -1908,8 +1948,12 @@ export const VideoPreview = memo(function VideoPreview({
     return getUpcomingTransitionStartFrame(frame, pausedTransitionPrearmFrames);
   }, [getUpcomingTransitionStartFrame, pausedTransitionPrearmFrames]);
 
-  const getPlayingComplexTransitionPrewarmStartFrame = useCallback((frame: number) => {
-    return getUpcomingTransitionStartFrame(frame, playingComplexTransitionPrearmFrames, { complexOnly: true });
+  // Prearm covering ALL transitions, not just complex ones. When
+  // forceFastScrubOverlay is active — the canvas overlay renders every
+  // transition type, so all need their session pinned and DOM video
+  // elements playing before entry.
+  const getPlayingAnyTransitionPrewarmStartFrame = useCallback((frame: number) => {
+    return getUpcomingTransitionStartFrame(frame, playingComplexTransitionPrearmFrames);
   }, [getUpcomingTransitionStartFrame, playingComplexTransitionPrearmFrames]);
 
   const forceFastScrubOverlay = showGpuEffectsOverlay;
@@ -1973,7 +2017,47 @@ export const VideoPreview = memo(function VideoPreview({
 
     scrubOffscreenCanvasRef.current = null;
     scrubOffscreenCtxRef.current = null;
+
+    if (bgTransitionRendererRef.current) {
+      try { bgTransitionRendererRef.current.dispose(); } catch { /* */ }
+      bgTransitionRendererRef.current = null;
+    }
+    bgTransitionInitPromiseRef.current = null;
+    bgTransitionRenderInFlightRef.current = false;
   }, [clearPendingFastScrubHandoff, clearTransitionPlaybackSession]);
+
+  // Background transition renderer — independent instance for pre-rendering
+  // transition frames without conflicting with the main rAF pump renderer.
+  const ensureBgTransitionRenderer = useCallback(async (): Promise<CompositionRenderer | null> => {
+    if (!FAST_SCRUB_RENDERER_ENABLED || typeof OffscreenCanvas === 'undefined' || isResolving) return null;
+    if (bgTransitionRendererRef.current) return bgTransitionRendererRef.current;
+    if (bgTransitionInitPromiseRef.current) return bgTransitionInitPromiseRef.current;
+
+    bgTransitionInitPromiseRef.current = (async () => {
+      try {
+        const canvas = new OffscreenCanvas(renderSize.width, renderSize.height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        const renderer = await createCompositionRenderer(fastScrubInputProps, canvas, ctx, {
+          mode: 'preview',
+          getPreviewTransformOverride,
+          getPreviewEffectsOverride,
+          getPreviewCornerPinOverride,
+          getPreviewPathVerticesOverride,
+        });
+        if ('warmGpuPipeline' in renderer) {
+          void renderer.warmGpuPipeline();
+        }
+        bgTransitionRendererRef.current = renderer;
+        return renderer;
+      } catch {
+        return null;
+      } finally {
+        bgTransitionInitPromiseRef.current = null;
+      }
+    })();
+    return bgTransitionInitPromiseRef.current;
+  }, [fastScrubInputProps, getPreviewTransformOverride, getPreviewEffectsOverride, getPreviewCornerPinOverride, getPreviewPathVerticesOverride, isResolving, renderSize.width, renderSize.height]);
 
   const ensureFastScrubRenderer = useCallback(async (): Promise<CompositionRenderer | null> => {
     if (!FAST_SCRUB_RENDERER_ENABLED) return null;
@@ -2391,7 +2475,8 @@ export const VideoPreview = memo(function VideoPreview({
         // GPU not available — renderer will fall back to CPU path.
       }
     })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time mount
+  }, []);
 
   // Background warm-up of full renderer once media URLs are resolved.
   useEffect(() => {
@@ -2555,6 +2640,10 @@ export const VideoPreview = memo(function VideoPreview({
       if (scrubRenderInFlightRef.current) return;
       scrubRenderInFlightRef.current = true;
       const generation = scrubRenderGenerationRef.current;
+      // Fast bail-out: check if this pump has been superseded by a newer
+      // seek/play cycle. Checked after every await to abandon stale work
+      // as early as possible, freeing GPU/decoder resources for the new frame.
+      const isStale = () => scrubRenderGenerationRef.current !== generation;
 
       try {
         const enqueuePrewarmFrame = (frame: number) => {
@@ -2768,6 +2857,9 @@ export const VideoPreview = memo(function VideoPreview({
             hideFastScrubOverlay();
             break;
           }
+          // For background prewarm frames, bail if a newer scrub target arrived.
+          // Priority frames proceed regardless — their rendered content is always useful.
+          if (!isPriorityFrame && isStale()) break;
 
           // Enable DOM video element provider during playback for zero-copy rendering.
           // During playback, the Player's <video> elements are already at
@@ -2806,6 +2898,9 @@ export const VideoPreview = memo(function VideoPreview({
             // Visible scrub targets still use full composition rendering.
             const renderStartMs = performance.now();
             await renderer.renderFrame(frameToRender);
+            // Don't check isStale() here — the priority frame is fully rendered
+            // and should always be displayed. Discarding it wastes the decode work
+            // and reduces scrub hit rate.
             const renderMs = performance.now() - renderStartMs;
             scrubOffscreenRenderedFrameRef.current = frameToRender;
             // Dev: capture ALL frame times to window global for jitter debugging
@@ -2843,7 +2938,7 @@ export const VideoPreview = memo(function VideoPreview({
             // nearby sources. Avoid full composition work for non-visible frames.
             await renderer.prewarmFrame(frameToRender);
           }
-          if (!scrubMountedRef.current) break;
+          if (!scrubMountedRef.current || isStale()) break;
 
           if (isPriorityFrame) {
 
@@ -2905,16 +3000,21 @@ export const VideoPreview = memo(function VideoPreview({
         hidePlaybackTransitionOverlay();
         disposeFastScrubRenderer();
       } finally {
-        // Only release the lock if this pump owns the current generation.
-        // A playback-start force-clear bumps the generation, so stale pumps
-        // don't accidentally release a newer pump's lock.
         if (scrubRenderGenerationRef.current === generation) {
+          // Current generation — this pump owns the lock. Release normally.
           scrubRenderInFlightRef.current = false;
           const deferredPrepareFrame = deferredPlaybackTransitionPrepareFrameRef.current;
           if (deferredPrepareFrame !== null) {
             scheduleOpportunisticTransitionPrepare();
           }
+          if (scrubRequestedFrameRef.current !== null) {
+            void pumpRenderLoop();
+          }
         }
+        // Stale generation — a newer seek/play bumped the generation while
+        // we were in-flight. DON'T release the lock here; the playback-start
+        // force-clear or the new pump's finally handles it. Releasing would
+        // allow a concurrent pump to start and share mutable canvas state.
       }
     };
 
@@ -2931,25 +3031,78 @@ export const VideoPreview = memo(function VideoPreview({
     let playbackPrewarmInFlight = false;
     const pausePrewarmedItemIds = new Set<string>();
 
+    let lastRafPresentedFrame = -1;
+
     const playbackRafPump = () => {
       playbackRafId = null;
       if (!scrubMountedRef.current) return;
       const playbackState = usePlaybackStore.getState();
       if (!playbackState.isPlaying || !forceFastScrubOverlay) return;
       const currentFrame = playbackState.currentFrame;
-      // Only pump when the frame has actually advanced — avoids redundant
-      // renders at 60Hz rAF when the Player runs at 30fps.
+
       if (currentFrame !== lastRafRenderedFrame) {
         lastRafRenderedFrame = currentFrame;
-        scrubRequestedFrameRef.current = currentFrame;
-        if (!scrubRenderInFlightRef.current) {
-          void pumpRenderLoop();
+        // Check if this frame was pre-rendered by the transition prepare.
+        // If so, present it immediately (0ms) instead of going through the
+        // async pumpRenderLoop (which would take 180-240ms for the first
+        // transition frame due to mediabunny decode).
+        const buffered = transitionSessionBufferedFramesRef.current.get(currentFrame);
+        if (buffered) {
+          drawSourceToDisplay(buffered, currentFrame);
+          scrubOffscreenRenderedFrameRef.current = currentFrame;
+          lastRafPresentedFrame = currentFrame;
+        } else {
+          scrubRequestedFrameRef.current = currentFrame;
+          if (!scrubRenderInFlightRef.current) {
+            void pumpRenderLoop();
+          }
         }
+      } else if (
+        lastRafPresentedFrame !== currentFrame
+        && scrubOffscreenRenderedFrameRef.current === currentFrame
+      ) {
+        // Frame hasn't advanced but the async render completed since the
+        // last vsync. Present it now synchronously to eliminate 3:2 pulldown
+        // judder (50ms/16ms alternating intervals on 30fps@60Hz displays).
+        drawToDisplay(currentFrame);
+        lastRafPresentedFrame = currentFrame;
       }
+
       playbackRafId = requestAnimationFrame(playbackRafPump);
     };
 
+    // Threshold for triggering background worker preseek on large jumps.
+    // Below this threshold, mediabunny sequential advance is fast (~1ms).
+    // Above it, a keyframe seek is needed (300-600ms) — the worker does it off-thread.
+    const JUMP_PRESEEK_THRESHOLD_FRAMES = Math.round(fps * 3);
+
     const unsubscribe = usePlaybackStore.subscribe((state, prev) => {
+      // Background preseek on large timeline jumps — fire off-thread decoder
+      // seek for all visible video clips at the new position so the first
+      // renderFrame after the jump uses the cached bitmap (~0ms) instead of
+      // blocking on mediabunny keyframe seek (~300-600ms).
+      if (
+        state.currentFrame !== prev.currentFrame
+        && Math.abs(state.currentFrame - prev.currentFrame) >= JUMP_PRESEEK_THRESHOLD_FRAMES
+        && !state.isPlaying
+      ) {
+        const frame = state.currentFrame;
+        for (const track of combinedTracks) {
+          for (const item of track.items) {
+            if (item.type !== 'video' || !('src' in item) || !item.src) continue;
+            if (frame < item.from || frame >= item.from + item.durationInFrames) continue;
+            // Skip if sourceFps isn't populated yet (metadata still loading) —
+            // sourceStart is in source-native FPS, so wrong fps produces wrong timestamps.
+            if (!item.sourceFps) continue;
+            const localFrame = frame - item.from;
+            const sourceStart = item.sourceStart ?? item.trimStart ?? 0;
+            const speed = item.speed ?? 1;
+            const sourceTime = (sourceStart / item.sourceFps) + (localFrame / fps) * speed;
+            void workerBackgroundPreseek(item.src, sourceTime);
+          }
+        }
+      }
+
       // Start/stop rAF render pump on play state transitions
       if (state.isPlaying && forceFastScrubOverlay && !prev.isPlaying) {
         if (playbackRafId === null) {
@@ -3036,25 +3189,41 @@ export const VideoPreview = memo(function VideoPreview({
       } else if (!state.isPlaying && playbackRafId !== null) {
         cancelAnimationFrame(playbackRafId);
         playbackRafId = null;
+        // Clear transition session on stop so the prearm guard doesn't
+        // block prearming on the next play. Without this, a session pinned
+        // during the previous playback stays alive and prevents the
+        // prearm from firing for the next transition.
+        lastPlayingPrearmTargetRef.current = null;
+        clearTransitionPlaybackSession();
       }
 
       if (state.isPlaying && forceFastScrubOverlay) {
-        const complexPrewarmStartFrame = getPlayingComplexTransitionPrewarmStartFrame(state.currentFrame);
-        if (complexPrewarmStartFrame !== null) {
-          // Pin the session so the render loop knows a transition is active.
-          // Also schedule a deferred (opportunistic) prep — this warms up
-          // mediabunny decoders for the transition clips without blocking
-          // pumpRenderLoop. The prep runs between frames via setTimeout(0).
-          const transitionWindow = getTransitionWindowByStartFrame(complexPrewarmStartFrame);
+        // When the canvas overlay is active, ALL transition types need their
+        // session pinned and DOM video elements playing. Previously only
+        // complex transitions (effects/variable speed) were prearmed here,
+        // leaving simple transitions (fade, wipe, slide, etc.) without a
+        // pinned session — causing frozen incoming clips and dropped frames.
+        // First check if we're already inside a transition — pin that session
+        // so the DOM video provider is available immediately.
+        const activeTransitionWindow = getTransitionWindowForFrame(state.currentFrame);
+        if (activeTransitionWindow && !transitionSessionWindowRef.current) {
+          pinTransitionPlaybackSession(activeTransitionWindow);
+          lastPlayingPrearmTargetRef.current = activeTransitionWindow.startFrame;
+        }
+
+        // Only prearm an upcoming transition if no active session is pinned.
+        // Prearming while inside a transition would evict the active session
+        // and break the DOM video provider for the current transition clips.
+        const prearmStartFrame = (!activeTransitionWindow && !transitionSessionWindowRef.current)
+          ? getPlayingAnyTransitionPrewarmStartFrame(state.currentFrame)
+          : null;
+        if (prearmStartFrame !== null) {
+          const transitionWindow = getTransitionWindowByStartFrame(prearmStartFrame);
           if (transitionWindow) {
             pinTransitionPlaybackSession(transitionWindow);
           }
-          // Pre-initialize mediabunny decoders for transition clips without
-          // blocking the render loop. This fire-and-forget warmup runs in the
-          // background so the first transition frame doesn't pay the 300-500ms
-          // WASM decoder init cost.
-          if (lastPlayingPrearmTargetRef.current !== complexPrewarmStartFrame) {
-            lastPlayingPrearmTargetRef.current = complexPrewarmStartFrame;
+          if (lastPlayingPrearmTargetRef.current !== prearmStartFrame) {
+            lastPlayingPrearmTargetRef.current = prearmStartFrame;
             if (transitionWindow) {
               const renderer = scrubRendererRef.current;
               if (renderer && 'prewarmItems' in renderer) {
@@ -3063,17 +3232,27 @@ export const VideoPreview = memo(function VideoPreview({
                   transitionWindow.startFrame,
                 );
               }
+              // Fire background worker preseek for transition clips so the
+              // cached bitmap is ready as a fallback if mediabunny/DOM video
+              // can't deliver the first frame fast enough.
+              for (const clip of [transitionWindow.leftClip, transitionWindow.rightClip]) {
+                if (clip.type === 'video' && 'src' in clip && clip.src && clip.sourceFps) {
+                  const localFrame = transitionWindow.startFrame - clip.from;
+                  const sourceStart = clip.sourceStart ?? clip.trimStart ?? 0;
+                  const clipSpeed = clip.speed ?? 1;
+                  const sourceTime = (sourceStart / clip.sourceFps) + (localFrame / fps) * clipSpeed;
+                  void workerBackgroundPreseek(clip.src, sourceTime);
+                }
+              }
             }
-            pushTransitionTrace('playing_complex_prearm', {
-              targetFrame: complexPrewarmStartFrame,
+            pushTransitionTrace('playing_prearm', {
+              targetFrame: prearmStartFrame,
             });
           }
-        } else {
-          // No upcoming complex transition — clean up if we've moved past
-          // the active transition window (not just entered it).
+        } else if (!activeTransitionWindow) {
           lastPlayingPrearmTargetRef.current = null;
-          const activeWindow = transitionSessionWindowRef.current;
-          if (activeWindow && state.currentFrame >= activeWindow.endFrame) {
+          const prevActiveWindow = transitionSessionWindowRef.current;
+          if (prevActiveWindow && state.currentFrame >= prevActiveWindow.endFrame) {
             clearTransitionPlaybackSession();
           }
         }
@@ -3152,21 +3331,39 @@ export const VideoPreview = memo(function VideoPreview({
         const pausedPrewarmStartFrame = getPausedTransitionPrewarmStartFrame(state.currentFrame);
         if (pausedPrewarmStartFrame !== null) {
           if (forceFastScrubOverlay) {
-            // When GPU effects overlay is active, use non-blocking prewarmItems
-            // instead of preparePlaybackTransitionFrame. The prep would set
-            // scrubRenderInFlightRef=true and block pumpRenderLoop for 300ms+
-            // when playback resumes.
             const tw = getTransitionWindowByStartFrame(pausedPrewarmStartFrame);
             if (tw) {
               pinTransitionPlaybackSession(tw);
               if (lastPausedPrearmTargetRef.current !== pausedPrewarmStartFrame) {
                 void (async () => {
-                  const renderer = await ensureFastScrubRenderer();
-                  if (renderer && 'prewarmItems' in renderer) {
-                    await renderer.prewarmItems(
+                  const mainRenderer = await ensureFastScrubRenderer();
+                  if (mainRenderer && 'prewarmItems' in mainRenderer) {
+                    await mainRenderer.prewarmItems(
                       [tw.leftClip.id, tw.rightClip.id],
-                      state.currentFrame,
+                      tw.startFrame,
                     );
+                  }
+                  // Background pre-render (separate renderer, no lock conflict)
+                  if (bgTransitionRenderInFlightRef.current) return;
+                  bgTransitionRenderInFlightRef.current = true;
+                  try {
+                    const bgRenderer = await ensureBgTransitionRenderer();
+                    if (bgRenderer && !usePlaybackStore.getState().isPlaying) {
+                      await bgRenderer.renderFrame(tw.startFrame);
+                      // Cache directly from the bg renderer's canvas (not the
+                      // main renderer's scrubOffscreenCanvasRef which is stale).
+                      if ('getCanvas' in bgRenderer) {
+                        const bgCanvas = (bgRenderer as { getCanvas: () => OffscreenCanvas }).getCanvas();
+                        const snapshot = new OffscreenCanvas(bgCanvas.width, bgCanvas.height);
+                        const snapshotCtx = snapshot.getContext('2d');
+                        if (snapshotCtx) {
+                          snapshotCtx.drawImage(bgCanvas, 0, 0);
+                          transitionSessionBufferedFramesRef.current.set(tw.startFrame, snapshot);
+                        }
+                      }
+                    }
+                  } catch { /* */ } finally {
+                    bgTransitionRenderInFlightRef.current = false;
                   }
                 })();
               }
@@ -3391,7 +3588,10 @@ export const VideoPreview = memo(function VideoPreview({
         lastBackwardRequestedFrameRef.current = null;
       }
 
-      // New scrub target should preempt stale background prewarm work.
+      // Clear stale prewarm queue so the pump processes the new target
+      // instead of old prewarm frames. Don't bump generation or clear the
+      // lock here — the pump's single-mutex design handles scrub correctly:
+      // the in-flight pump picks up the new target on its next iteration.
       scrubPrewarmQueueRef.current = [];
       scrubPrewarmQueuedSetRef.current.clear();
       scrubRequestedFrameRef.current = nextRequestedFrame;
@@ -3460,17 +3660,21 @@ export const VideoPreview = memo(function VideoPreview({
 
     const initialPlaybackState = usePlaybackStore.getState();
     if (initialPlaybackState.isPlaying && forceFastScrubOverlay) {
-      const complexPrewarmStartFrame = getPlayingComplexTransitionPrewarmStartFrame(initialPlaybackState.currentFrame);
-      if (complexPrewarmStartFrame !== null) {
-        lastPlayingPrearmTargetRef.current = complexPrewarmStartFrame;
-        // Pin session only — render loop handles per-frame rendering.
-        const transitionWindow = getTransitionWindowByStartFrame(complexPrewarmStartFrame);
-        if (transitionWindow) {
-          pinTransitionPlaybackSession(transitionWindow);
+      // Check if playback starts inside an active transition — pin that
+      // session immediately so the render pump has the DOM video provider.
+      const activeWindow = getTransitionWindowForFrame(initialPlaybackState.currentFrame);
+      if (activeWindow) {
+        pinTransitionPlaybackSession(activeWindow);
+        lastPlayingPrearmTargetRef.current = activeWindow.startFrame;
+      } else {
+        const prearmStartFrame = getPlayingAnyTransitionPrewarmStartFrame(initialPlaybackState.currentFrame);
+        if (prearmStartFrame !== null) {
+          lastPlayingPrearmTargetRef.current = prearmStartFrame;
+          const transitionWindow = getTransitionWindowByStartFrame(prearmStartFrame);
+          if (transitionWindow) {
+            pinTransitionPlaybackSession(transitionWindow);
+          }
         }
-        pushTransitionTrace('playing_complex_prearm', {
-          targetFrame: complexPrewarmStartFrame,
-        });
       }
     }
     if (!initialPlaybackState.isPlaying && initialPlaybackState.previewFrame === null) {
@@ -3478,18 +3682,37 @@ export const VideoPreview = memo(function VideoPreview({
       if (pausedPrewarmStartFrame !== null) {
         lastPausedPrearmTargetRef.current = pausedPrewarmStartFrame;
         if (forceFastScrubOverlay) {
-          // Non-blocking prewarm — avoid schedulePlaybackTransitionPrepare which
-          // blocks the render loop via scrubRenderInFlightRef on playback resume.
+          // Pre-render the transition start frame using a DEDICATED background
+          // renderer (separate canvas + decoders). This doesn't hold
+          // scrubRenderInFlightRef and doesn't conflict with the rAF pump.
+          // The rAF pump checks transitionSessionBufferedFramesRef and presents
+          // the pre-rendered frame instantly (0ms vs 180-240ms first-frame stall).
           const tw = getTransitionWindowByStartFrame(pausedPrewarmStartFrame);
           if (tw) {
             pinTransitionPlaybackSession(tw);
             void (async () => {
-              const renderer = await ensureFastScrubRenderer();
-              if (renderer && 'prewarmItems' in renderer) {
-                await renderer.prewarmItems(
+              // Warm main renderer's decoders
+              const mainRenderer = await ensureFastScrubRenderer();
+              if (mainRenderer && 'prewarmItems' in mainRenderer) {
+                await mainRenderer.prewarmItems(
                   [tw.leftClip.id, tw.rightClip.id],
-                  initialPlaybackState.currentFrame,
+                  tw.startFrame,
                 );
+              }
+              // Pre-render via background renderer (separate instance)
+              if (bgTransitionRenderInFlightRef.current) return;
+              bgTransitionRenderInFlightRef.current = true;
+              try {
+                const bgRenderer = await ensureBgTransitionRenderer();
+                if (bgRenderer && !usePlaybackStore.getState().isPlaying) {
+                  await bgRenderer.renderFrame(tw.startFrame);
+                  cacheTransitionSessionFrame(tw.startFrame);
+                  pushTransitionTrace('bg_prerender', { frame: tw.startFrame });
+                }
+              } catch (error) {
+                logger.debug('Background transition pre-render failed:', error);
+              } finally {
+                bgTransitionRenderInFlightRef.current = false;
               }
             })();
           }
