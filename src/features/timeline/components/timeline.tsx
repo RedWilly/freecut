@@ -11,8 +11,8 @@ import { useSelectionStore } from '@/shared/state/selection';
 import { useEditorStore } from '@/shared/state/editor';
 import { useTimelineStore } from '../stores/timeline-store';
 import { usePlaybackStore } from '@/shared/state/playback';
-import { HOTKEYS, HOTKEY_OPTIONS } from '@/config/hotkeys';
-import { useSettingsStore } from '@/features/timeline/deps/settings';
+import { HOTKEY_OPTIONS } from '@/config/hotkeys';
+import { useSettingsStore, useResolvedHotkeys } from '@/features/timeline/deps/settings';
 
 import { Button } from '@/components/ui/button';
 import { Plus, Minus } from 'lucide-react';
@@ -46,6 +46,7 @@ interface TimelineProps {
  * Follows modular architecture with granular Zustand selectors
  */
 export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChange }: TimelineProps) {
+  const hotkeys = useResolvedHotkeys();
   const editorDensity = useSettingsStore((s) => s.editorDensity);
   const editorLayout = getEditorLayout(editorDensity);
   const {
@@ -137,9 +138,9 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
     setEditorPanelOpen(false);
   }, [setEditorPanelOpen]);
 
-  // Keyboard shortcut: Ctrl/Cmd+K to toggle keyframe editor
+  // Keyboard shortcut: Ctrl/Cmd+Shift+A to toggle keyframe editor
   useHotkeys(
-    HOTKEYS.TOGGLE_KEYFRAME_EDITOR,
+    hotkeys.TOGGLE_KEYFRAME_EDITOR,
     (event) => {
       event.preventDefault();
       handleToggleKeyframeTab();
@@ -149,21 +150,22 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   );
 
   // Keyboard shortcut: Ctrl/Cmd+G to group selected tracks
+  // Needs capture: true to override browser's "Find next" shortcut
   useHotkeys(
-    HOTKEYS.GROUP_TRACKS,
+    hotkeys.GROUP_TRACKS,
     (event) => {
       event.preventDefault();
       if (canGroupSelection) {
         createGroup(selectedTrackIds);
       }
     },
-    HOTKEY_OPTIONS,
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
     [canGroupSelection, selectedTrackIds, createGroup]
   );
 
   // Keyboard shortcut: Ctrl/Cmd+Shift+G to ungroup
   useHotkeys(
-    HOTKEYS.UNGROUP_TRACKS,
+    hotkeys.UNGROUP_TRACKS,
     (event) => {
       event.preventDefault();
       // If active track is a group, ungroup it
@@ -172,7 +174,7 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
         ungroup(activeTrack.id);
       }
     },
-    HOTKEY_OPTIONS,
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
     [activeTrackId, tracks, ungroup]
   );
 

@@ -107,4 +107,38 @@ describe('settings-store', () => {
       expect(state.defaultWhisperLanguage).toBe(DEFAULT_SETTINGS.defaultWhisperLanguage);
     });
   });
+
+  describe('replaceHotkeyOverrides', () => {
+    it('replaces hotkey overrides with a sanitized imported preset', () => {
+      useSettingsStore.getState().setHotkeyBinding('PLAY_PAUSE', 'shift+space');
+
+      useSettingsStore.getState().replaceHotkeyOverrides(
+        {
+          EXPORT: 'Ctrl+E',
+          PLAY_PAUSE: 'space',
+          UNKNOWN_COMMAND: 'q',
+        } as never
+      );
+
+      expect(useSettingsStore.getState().hotkeyOverrides).toEqual({
+        EXPORT: 'mod+e',
+      });
+    });
+
+    it('does not update state for equivalent overrides with different key order', () => {
+      useSettingsStore.getState().replaceHotkeyOverrides({
+        PLAY_PAUSE: 'shift+space',
+        EXPORT: 'ctrl+e',
+      });
+
+      const previousState = useSettingsStore.getState();
+
+      useSettingsStore.getState().replaceHotkeyOverrides({
+        EXPORT: 'ctrl+e',
+        PLAY_PAUSE: 'shift+space',
+      });
+
+      expect(useSettingsStore.getState()).toBe(previousState);
+    });
+  });
 });
