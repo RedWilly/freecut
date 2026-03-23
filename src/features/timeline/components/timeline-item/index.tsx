@@ -52,6 +52,14 @@ import type { RazorSnapTarget } from '../../utils/razor-snap';
 import { getFilteredItemSnapEdges } from '../../utils/timeline-snap-utils';
 import { canLinkItems, expandSelectionWithLinkedItems, getLinkedItemIds, hasLinkedItems } from '../../utils/linked-items';
 import { getVisibleTrackIds } from '../../utils/group-utils';
+import {
+  resolveSmartBodyIntent,
+  resolveSmartTrimIntent,
+  smartTrimIntentToHandle,
+  smartTrimIntentToMode,
+  type SmartBodyIntent,
+  type SmartTrimIntent,
+} from '../../utils/smart-trim-zones';
 import { useMarkersStore } from '../../stores/markers-store';
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store';
 import { useCompositionsStore } from '../../stores/compositions-store';
@@ -72,11 +80,20 @@ import { getAudioFadePixels, getAudioFadeSecondsFromOffset, type AudioFadeHandle
 import { getAudioFadeCurveControlPoint, getAudioFadeCurveFromOffset } from '../../utils/audio-fade-curve';
 import { getAudioVolumeDbFromOffset, getAudioVisualizationScale, getAudioVolumeLineY } from '../../utils/audio-volume';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { findHandleNeighborWithTransitions } from '../../utils/transition-linked-neighbors';
 const CAPTION_GENERATION_OVERLAY_ID = 'caption-generation';
 const EMPTY_SEGMENT_OVERLAYS = [] as const;
+const ACTIVE_CURSOR_CLASSES = [
+  'timeline-cursor-trim-left',
+  'timeline-cursor-trim-right',
+  'timeline-cursor-trim-center',
+  'timeline-cursor-slip-smart',
+  'timeline-cursor-slide-smart',
+  'timeline-cursor-gauge',
+] as const;
 
 // Width in pixels for edge hover detection (trim/rate-stretch handles)
-const EDGE_HOVER_ZONE = 8;
+const EDGE_HOVER_ZONE = 12;
 const AUDIO_FADE_EPSILON = 0.0001;
 const AUDIO_VOLUME_EPSILON = 0.05;
 const AUDIO_ENVELOPE_VIEWBOX_HEIGHT = 100;
@@ -213,20 +230,22 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
   // Track which edge is being hovered for showing trim/rate-stretch handles
   const [hoveredEdge, setHoveredEdge] = useState<'start' | 'end' | null>(null);
+  const [smartTrimIntent, setSmartTrimIntent] = useState<SmartTrimIntent>(null);
+  const [smartBodyIntent, setSmartBodyIntent] = useState<SmartBodyIntent>(null);
 
   // Track which edge was closer when context menu was triggered
   const [closerEdge, setCloserEdge] = useState<'left' | 'right' | null>(null);
 
   // Track blocked drag attempt tooltip (shown on mousedown in rate-stretch mode)
-  const [dragBlockedTooltip, setDragBlockedTooltip] = useState<{ x: number; y: number } | null>(null);
+  const [pointerHint, setPointerHint] = useState<{ x: number; y: number; message: string; tone?: 'warning' | 'danger' } | null>(null);
 
   // Hide drag blocked tooltip on mouseup
   useEffect(() => {
-    if (!dragBlockedTooltip) return;
-    const handleMouseUp = () => setDragBlockedTooltip(null);
+    if (!pointerHint) return;
+    const handleMouseUp = () => setPointerHint(null);
     window.addEventListener('mouseup', handleMouseUp);
     return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, [dragBlockedTooltip]);
+  }, [pointerHint]);
 
   // Track if this item or neighbors are being dragged (for join indicators)
   const [dragAffectsJoin, setDragAffectsJoin] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
@@ -239,13 +258,74 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const { isDragging, dragOffset, handleDragStart } = useTimelineDrag(item, timelineDuration, trackLocked, transformRef);
 
   // Trim functionality - disabled if track is locked
-  const { isTrimming, trimHandle, trimDelta, handleTrimStart } = useTimelineTrim(item, timelineDuration, trackLocked);
+  const { isTrimming, trimHandle, trimDelta, isRollingEdit, trimConstrained, trimConstraintLabel, handleTrimStart } = useTimelineTrim(item, timelineDuration, trackLocked);
 
   // Rate stretch functionality - disabled if track is locked
-  const { isStretching, stretchHandle, handleStretchStart, getVisualFeedback } = useRateStretch(item, timelineDuration, trackLocked);
+  const { isStretching, stretchHandle, stretchConstrained, stretchConstraintLabel, handleStretchStart, getVisualFeedback } = useRateStretch(item, timelineDuration, trackLocked);
 
   // Slip/Slide functionality - disabled if track is locked
-  const { isSlipSlideActive, handleSlipSlideStart } = useTimelineSlipSlide(item, timelineDuration, trackLocked);
+  const { isSlipSlideActive, slipSlideMode, slipSlideConstrained, slipSlideConstraintLabel, handleSlipSlideStart } = useTimelineSlipSlide(item, timelineDuration, trackLocked);
+
+  const activeGlobalCursorClass = useMemo(() => {
+    if (isTrimming) {
+      if (trimHandle === 'start') {
+        return isRollingEdit ? 'timeline-cursor-trim-center' : 'timeline-cursor-trim-left';
+      }
+      if (trimHandle === 'end') {
+        return isRollingEdit ? 'timeline-cursor-trim-center' : 'timeline-cursor-trim-right';
+      }
+    }
+
+    if (isStretching) {
+      return 'timeline-cursor-gauge';
+    }
+
+    if (isSlipSlideActive) {
+      return slipSlideMode === 'slide'
+        ? 'timeline-cursor-slide-smart'
+        : 'timeline-cursor-slip-smart';
+    }
+
+    return null;
+  }, [isRollingEdit, isSlipSlideActive, isStretching, isTrimming, slipSlideMode, trimHandle]);
+
+  useEffect(() => {
+    document.body.classList.remove(...ACTIVE_CURSOR_CLASSES);
+    if (activeGlobalCursorClass) {
+      document.body.classList.add(activeGlobalCursorClass);
+    }
+
+    return () => {
+      document.body.classList.remove(...ACTIVE_CURSOR_CLASSES);
+    };
+  }, [activeGlobalCursorClass]);
+
+  useEffect(() => {
+    const activeMessage = isTrimming
+      ? trimConstraintLabel
+      : isStretching
+      ? stretchConstraintLabel
+      : isSlipSlideActive
+      ? slipSlideConstraintLabel
+      : null;
+
+    if (!activeMessage) {
+      setPointerHint((current) => (current?.tone === 'danger' ? null : current));
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      setPointerHint({
+        x: event.clientX,
+        y: event.clientY,
+        message: activeMessage,
+        tone: 'danger',
+      });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [isSlipSlideActive, isStretching, isTrimming, slipSlideConstraintLabel, stretchConstraintLabel, trimConstraintLabel]);
 
   const wasDraggingRef = useRef(false);
 
@@ -371,7 +451,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
       // Slip/slide use dragState as a gesture lifecycle signal, but should not
       // enter visual "drag ghost + dimmed opacity" mode.
-      const isSlipOrSlideEdit = state.activeTool === 'slip' || state.activeTool === 'slide';
+      const isSlipOrSlideEdit = state.activeTool === 'slip' || state.activeTool === 'slide' || isSlipSlideActive;
       const isParticipating = !isSlipOrSlideEdit
         && state.dragState?.isDragging
         && state.dragState.draggedItemIds.includes(item.id);
@@ -969,16 +1049,71 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   // Handle mouse move for edge hover detection
   const hoveredEdgeRef = useRef(hoveredEdge);
   hoveredEdgeRef.current = hoveredEdge;
+  const smartTrimIntentRef = useRef(smartTrimIntent);
+  smartTrimIntentRef.current = smartTrimIntent;
+  const smartBodyIntentRef = useRef(smartBodyIntent);
+  smartBodyIntentRef.current = smartBodyIntent;
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (trackLocked || activeToolRef.current === 'razor' || isAnyDragActiveRef.current) {
       if (hoveredEdgeRef.current !== null) setHoveredEdge(null);
+      if (smartTrimIntentRef.current !== null) setSmartTrimIntent(null);
+      if (smartBodyIntentRef.current !== null) setSmartBodyIntent(null);
       return;
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     const itemWidth = rect.width;
+
+    if (activeToolRef.current === 'trim-edit' || activeToolRef.current === 'select') {
+      const items = useTimelineStore.getState().items;
+      const transitions = useTransitionsStore.getState().transitions;
+      const hasLeftNeighbor = !!findHandleNeighborWithTransitions(item, 'start', items, transitions);
+      const hasRightNeighbor = !!findHandleNeighborWithTransitions(item, 'end', items, transitions);
+      const nextIntent = resolveSmartTrimIntent({
+        x,
+        width: itemWidth,
+        hasLeftNeighbor,
+        hasRightNeighbor,
+        currentIntent: smartTrimIntentRef.current,
+        edgeZonePx: EDGE_HOVER_ZONE,
+      });
+      const nextHoveredEdge = smartTrimIntentToHandle(nextIntent);
+
+      if (smartTrimIntentRef.current !== nextIntent) {
+        setSmartTrimIntent(nextIntent);
+      }
+      if (hoveredEdgeRef.current !== nextHoveredEdge) {
+        setHoveredEdge(nextHoveredEdge);
+      }
+
+      if (activeToolRef.current === 'select') {
+        if (smartBodyIntentRef.current !== null) setSmartBodyIntent(null);
+        return;
+      }
+
+      if (nextIntent) {
+        if (smartBodyIntentRef.current !== null) setSmartBodyIntent(null);
+        return;
+      }
+
+      const nextBodyIntent = resolveSmartBodyIntent({
+        y,
+        height: rect.height,
+        labelRowHeight: parseFloat(EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight),
+        isMediaItem: item.type === 'video' || item.type === 'audio',
+        currentIntent: smartBodyIntentRef.current,
+      });
+      if (smartBodyIntentRef.current !== nextBodyIntent) {
+        setSmartBodyIntent(nextBodyIntent);
+      }
+      return;
+    }
+
+    if (smartTrimIntentRef.current !== null) setSmartTrimIntent(null);
+    if (smartBodyIntentRef.current !== null) setSmartBodyIntent(null);
 
     if (x <= EDGE_HOVER_ZONE) {
       if (hoveredEdgeRef.current !== 'start') setHoveredEdge('start');
@@ -987,14 +1122,28 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     } else {
       if (hoveredEdgeRef.current !== null) setHoveredEdge(null);
     }
-  }, [trackLocked]);
+  }, [item, trackLocked, smartBodyIntent, smartTrimIntent]);
 
   // Cursor class based on state
   const cursorClass = trackLocked
     ? 'cursor-not-allowed opacity-60'
     : activeTool === 'razor'
     ? 'cursor-scissors'
-    : hoveredEdge !== null && (activeTool === 'select' || activeTool === 'rate-stretch' || activeTool === 'rolling-edit' || activeTool === 'ripple-edit')
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'roll-start'
+    ? 'cursor-trim-center'
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'roll-end'
+    ? 'cursor-trim-center'
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'ripple-start'
+    ? 'cursor-trim-left'
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'ripple-end'
+    ? 'cursor-trim-right'
+    : activeTool === 'trim-edit' && smartBodyIntent === 'slide-body'
+    ? 'cursor-slide-smart'
+    : activeTool === 'trim-edit' && smartBodyIntent === 'slip-body'
+    ? 'cursor-slip-smart'
+    : activeTool === 'trim-edit' && smartBodyIntent !== null
+    ? 'cursor-ew-resize'
+    : hoveredEdge !== null && (activeTool === 'trim-edit' || activeTool === 'rate-stretch' || activeTool === 'rolling-edit' || activeTool === 'ripple-edit')
     ? 'cursor-ew-resize'
     : activeTool === 'rate-stretch'
     ? 'cursor-gauge'
@@ -1004,7 +1153,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     ? (item.type === 'video' || item.type === 'audio' ? 'cursor-ew-resize' : 'cursor-not-allowed')
     : isBeingDragged
     ? 'cursor-grabbing'
-    : 'cursor-grab';
+    : 'cursor-default';
 
   // Check if join is available for selected items - computed on demand
   const getCanJoinSelected = useCallback(() => {
@@ -1775,13 +1924,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   }, [item]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (activeTool === 'trim-edit' && !trackLocked && smartBodyIntent) {
+      if (item.type === 'video' || item.type === 'audio') {
+        handleSlipSlideStart(e, smartBodyIntent === 'slide-body' ? 'slide' : 'slip');
+      }
+      return;
+    }
+
     // Slip/Slide tool: initiate on clip body for media items
     if ((activeTool === 'slip' || activeTool === 'slide') && !trackLocked) {
       if (item.type === 'video' || item.type === 'audio') {
         handleSlipSlideStart(e, activeTool);
       } else {
-        // Show blocked tooltip for non-media items (same pattern as rate-stretch)
-        setDragBlockedTooltip({ x: e.clientX, y: e.clientY });
+        setPointerHint({ x: e.clientX, y: e.clientY, message: 'Use slip/slide on media clips only', tone: 'warning' });
       }
       return;
     }
@@ -1791,7 +1946,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const x = e.clientX - rect.left;
       const isOnEdge = x <= EDGE_HOVER_ZONE || x >= rect.width - EDGE_HOVER_ZONE;
       if (!isOnEdge) {
-        setDragBlockedTooltip({ x: e.clientX, y: e.clientY });
+        setPointerHint({ x: e.clientX, y: e.clientY, message: "Can't move clips in rate stretch mode", tone: 'warning' });
         return;
       }
     }
@@ -1799,12 +1954,21 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     if ((activeTool === 'rolling-edit' || activeTool === 'ripple-edit') && !trackLocked && hoveredEdge === null) return;
     if (trackLocked || isTrimming || isStretching || isSlipSlideActive || activeTool === 'razor' || activeTool === 'rate-stretch' || activeTool === 'rolling-edit' || activeTool === 'ripple-edit' || activeTool === 'slip' || activeTool === 'slide' || hoveredEdge !== null) return;
     handleDragStart(e);
-  }, [activeTool, trackLocked, isStretching, isTrimming, isSlipSlideActive, hoveredEdge, handleDragStart, handleSlipSlideStart, item.type]);
+  }, [activeTool, trackLocked, smartBodyIntent, isStretching, isTrimming, isSlipSlideActive, hoveredEdge, handleDragStart, handleSlipSlideStart, item.type]);
 
   // Track which edge is closer when right-clicking for context menu
   const handleMouseLeave = useCallback(() => {
     setHoveredEdge(null);
+    setSmartTrimIntent(null);
   }, []);
+
+  const handleSmartTrimStart = useCallback((e: React.MouseEvent, handle: 'start' | 'end') => {
+    const forcedMode = activeToolRef.current === 'trim-edit' || activeToolRef.current === 'select'
+      ? smartTrimIntentToMode(smartTrimIntentRef.current)
+      : null;
+
+    handleTrimStart(e, handle, forcedMode ? { forcedMode } : undefined);
+  }, [handleTrimStart]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1999,6 +2163,20 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
           <div className="absolute inset-px rounded-[3px] overflow-hidden">
             <SegmentStatusOverlays overlays={segmentOverlays} />
 
+            {isSlipSlideActive && slipSlideConstrained && slipSlideMode === 'slide' && (
+              <div
+                className="absolute inset-x-0 top-0 z-30 pointer-events-none border-b border-red-300/85 bg-red-500/12"
+                style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight }}
+              />
+            )}
+
+            {isSlipSlideActive && slipSlideConstrained && slipSlideMode === 'slip' && (
+              <div
+                className="absolute inset-x-0 bottom-0 z-30 pointer-events-none border-t border-red-300/85 bg-red-500/10"
+                style={{ top: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight }}
+              />
+            )}
+
             {item.type === 'audio' && (
               <div
                 ref={audioControlsRef}
@@ -2108,9 +2286,12 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             trimHandle={trimHandle}
             activeTool={activeTool}
             hoveredEdge={hoveredEdge}
+            trimConstrained={trimConstrained}
+            startCursorClass={smartTrimIntent === 'roll-start' ? 'cursor-trim-center' : 'cursor-trim-left'}
+            endCursorClass={smartTrimIntent === 'roll-end' ? 'cursor-trim-center' : 'cursor-trim-right'}
             hasJoinableLeft={hasJoinableLeft}
             hasJoinableRight={hasJoinableRight}
-            onTrimStart={handleTrimStart}
+            onTrimStart={handleSmartTrimStart}
             onJoinLeft={handleJoinLeft}
             onJoinRight={handleJoinRight}
           />
@@ -2121,6 +2302,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             isAnyDragActive={isAnyDragActiveRef.current}
             isStretching={isStretching}
             stretchHandle={stretchHandle}
+            stretchConstrained={stretchConstrained}
             activeTool={activeTool}
             hoveredEdge={hoveredEdge}
             isMediaItem={isMediaItem}
@@ -2166,7 +2348,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             width: `${transitionDropGhost.width}px`,
             zIndex: 35,
             background: 'rgba(248,250,252,0.08)',
-            backdropFilter: 'blur(2px)',
           }}
         >
           <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(248,250,252,0.08),rgba(255,255,255,0.02)_48%,rgba(255,255,255,0.02)_52%,rgba(248,250,252,0.08))]" />
@@ -2215,8 +2396,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         width={width}
       />
 
-      {/* Drag blocked tooltip */}
-      <DragBlockedTooltip position={dragBlockedTooltip} />
+      <DragBlockedTooltip hint={pointerHint} />
     </>
   );
 }, (prevProps, nextProps) => {

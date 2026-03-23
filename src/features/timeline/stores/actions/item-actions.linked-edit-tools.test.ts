@@ -147,6 +147,31 @@ describe('linked edit tools', () => {
     expect(itemById['audio-2']).toMatchObject({ from: 80 });
   });
 
+  it('allows ripple trim on a transitioned edge and keeps the cut aligned', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({ id: 'video-1', linkedGroupId: 'group-1', sourceEnd: 80, sourceDuration: 140 }),
+      makeAudioItem({ id: 'audio-1', linkedGroupId: 'group-1', sourceEnd: 80, sourceDuration: 140 }),
+      makeVideoItem({ id: 'video-2', from: 60, linkedGroupId: 'group-2', mediaId: 'media-2', sourceStart: 12, sourceEnd: 72, sourceDuration: 140 }),
+      makeAudioItem({ id: 'audio-2', from: 60, linkedGroupId: 'group-2', mediaId: 'media-2', sourceStart: 12, sourceEnd: 72, sourceDuration: 140 }),
+      makeVideoItem({ id: 'video-3', from: 120, durationInFrames: 30, linkedGroupId: 'group-3', mediaId: 'media-3' }),
+      makeAudioItem({ id: 'audio-3', from: 120, durationInFrames: 30, linkedGroupId: 'group-3', mediaId: 'media-3' }),
+    ]);
+    addTransition('video-1', 'video-2', 'crossfade', 12);
+
+    rippleTrimItem('video-1', 'end', -8);
+
+    const itemById = useItemsStore.getState().itemById;
+    expect(itemById['video-1']).toMatchObject({ durationInFrames: 52 });
+    expect(itemById['audio-1']).toMatchObject({ durationInFrames: 52 });
+    expect(itemById['video-2']).toMatchObject({ from: 52 });
+    expect(itemById['audio-2']).toMatchObject({ from: 52 });
+    expect(itemById['video-3']).toMatchObject({ from: 112 });
+    expect(itemById['audio-3']).toMatchObject({ from: 112 });
+    expect(useTransitionsStore.getState().transitions).toEqual([
+      expect.objectContaining({ leftClipId: 'video-1', rightClipId: 'video-2', durationInFrames: 12 }),
+    ]);
+  });
+
   it('slips a linked audio edit back onto video and repairs transition duration', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({ id: 'video-1', sourceEnd: 80, sourceDuration: 120, linkedGroupId: 'group-1' }),

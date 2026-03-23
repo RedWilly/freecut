@@ -1,5 +1,5 @@
 /**
- * Tool shortcuts: V (Select), C (Razor), Shift+C (Split at cursor), R (Rate Stretch), N (Rolling Edit), B (Ripple Edit), Y (Slip), U (Slide).
+ * Tool shortcuts: V (Select), T (Trim Edit), C (Razor), Shift+C (Split at cursor), R (Rate Stretch), N (Rolling Edit), B (Ripple Edit), Y (Slip), U (Slide).
  */
 
 import { useHotkeys } from 'react-hotkeys-hook';
@@ -24,6 +24,17 @@ export function useToolShortcuts(callbacks: TimelineShortcutCallbacks) {
     },
     HOTKEY_OPTIONS,
     [setActiveTool]
+  );
+
+  // Tool: T - Toggle Trim Edit Tool
+  useHotkeys(
+    hotkeys.TRIM_EDIT_TOOL,
+    (event) => {
+      event.preventDefault();
+      setActiveTool(activeTool === 'trim-edit' ? 'select' : 'trim-edit');
+    },
+    HOTKEY_OPTIONS,
+    [activeTool, setActiveTool]
   );
 
   // Tool: C - Toggle Razor/Cut Mode

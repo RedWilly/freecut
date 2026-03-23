@@ -455,7 +455,6 @@ export const TransitionItem = memo(function TransitionItem({
               'pointer-events-none relative h-full w-full rounded-sm border',
               'border-slate-100/80 bg-slate-100/10',
               'shadow-[inset_0_0_0_1px_rgba(15,23,42,0.18),0_0_0_1px_rgba(15,23,42,0.04)]',
-              'backdrop-blur-[1px]',
               'hover:bg-slate-100/14 hover:border-slate-50/90'
             )}
           >

@@ -52,6 +52,7 @@ export const HOTKEYS = {
 
   // Tools
   SELECTION_TOOL: 'v',
+  TRIM_EDIT_TOOL: 't',
   RAZOR_TOOL: 'c',
   SPLIT_AT_CURSOR: 'shift+c',
   RATE_STRETCH_TOOL: 'r',
@@ -307,6 +308,7 @@ export const HOTKEY_DESCRIPTIONS: Record<HotkeyKey, string> = {
 
   // Tools
   SELECTION_TOOL: 'Selection tool',
+  TRIM_EDIT_TOOL: 'Trim edit tool',
   RAZOR_TOOL: 'Razor tool',
   SPLIT_AT_CURSOR: 'Split at cursor',
   RATE_STRETCH_TOOL: 'Rate stretch tool',

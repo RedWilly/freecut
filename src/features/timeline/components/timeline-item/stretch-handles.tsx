@@ -6,6 +6,7 @@ interface StretchHandlesProps {
   isAnyDragActive: boolean;
   isStretching: boolean;
   stretchHandle: 'start' | 'end' | null;
+  stretchConstrained: boolean;
   activeTool: string;
   hoveredEdge: 'start' | 'end' | null;
   isMediaItem: boolean;
@@ -21,6 +22,7 @@ export const StretchHandles = memo(function StretchHandles({
   isAnyDragActive,
   isStretching,
   stretchHandle,
+  stretchConstrained,
   activeTool,
   hoveredEdge,
   isMediaItem,
@@ -40,24 +42,33 @@ export const StretchHandles = memo(function StretchHandles({
 
   return (
     <>
-      {/* Left stretch handle - w-2 (8px) matches EDGE_HOVER_ZONE */}
+      {/* Left stretch handle - wider hit area, thin visible indicator */}
       <div
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-2 bg-orange-500 cursor-ew-resize transition-opacity duration-75",
+          'absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize transition-opacity duration-75',
           showLeftHandle ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onMouseDown={(e) => onStretchStart(e, 'start')}
-      />
+      >
+        <div className={cn(
+          'absolute inset-y-0 left-0 w-[2px] rounded-l-sm bg-orange-500 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]',
+          stretchConstrained && stretchHandle === 'start' && 'bg-red-300 shadow-[0_0_0_1px_rgba(252,165,165,0.45)]'
+        )} />
+      </div>
 
-      {/* Right stretch handle - w-2 (8px) matches EDGE_HOVER_ZONE */}
+      {/* Right stretch handle - wider hit area, thin visible indicator */}
       <div
         className={cn(
-          "absolute right-0 top-0 bottom-0 w-2 bg-orange-500 cursor-ew-resize transition-opacity duration-75",
+          'absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize transition-opacity duration-75',
           showRightHandle ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onMouseDown={(e) => onStretchStart(e, 'end')}
-      />
+      >
+        <div className={cn(
+          'absolute inset-y-0 right-0 w-[2px] rounded-r-sm bg-orange-500 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]',
+          stretchConstrained && stretchHandle === 'end' && 'bg-red-300 shadow-[0_0_0_1px_rgba(252,165,165,0.45)]'
+        )} />
+      </div>
     </>
   );
 });
-

@@ -13,6 +13,7 @@ import {
   MoveHorizontal,
   ArrowRightLeft,
   BetweenHorizontalEnd,
+  BetweenHorizontalStart,
   X,
   MousePointer2,
   Undo2,
@@ -272,7 +273,7 @@ export const TimelineHeader = memo(function TimelineHeader({
           Timeline
         </h2>
 
-        {/* Select/Razor Tools */}
+        {/* Timeline Tools */}
         <div className="flex items-center gap-1 px-1.5 py-1 bg-secondary/50 rounded-md border border-border">
           <Button
             variant="ghost"
@@ -285,6 +286,19 @@ export const TimelineHeader = memo(function TimelineHeader({
             data-tooltip="Select Tool (V)"
           >
             <MousePointer2 className="w-3.5 h-3.5" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`h-7 w-7 ${
+              activeTool === 'trim-edit' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
+            }`}
+            onClick={() => setActiveTool(activeTool === 'trim-edit' ? 'select' : 'trim-edit')}
+            aria-label="Trim edit tool"
+            data-tooltip="Trim Edit Tool (T)"
+          >
+            <BetweenHorizontalStart className="w-3.5 h-3.5" />
           </Button>
 
           <Button

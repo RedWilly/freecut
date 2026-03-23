@@ -30,6 +30,8 @@ interface StretchState {
   initialSpeed: number;
   currentDelta: number; // Track current delta for visual feedback
   isLoopingMedia: boolean; // GIFs and images can loop infinitely
+  isConstrained: boolean;
+  constraintLabel: string | null;
 }
 
 function getExactTimelineDurationForSource(
@@ -175,6 +177,8 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
     initialSpeed: 1,
     currentDelta: 0,
     isLoopingMedia: false,
+    isConstrained: false,
+    constraintLabel: null,
   });
 
   const stretchStateRef = useRef(stretchState);
@@ -221,14 +225,18 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
     const deltaTime = pixelsToTime(deltaX);
     let deltaFrames = Math.round(deltaTime * fps);
 
-    const { handle, initialFrom, initialDuration, sourceDuration, sourceFps, isLoopingMedia } = stretchStateRef.current;
+    const { handle, initialFrom, initialDuration, sourceDuration, sourceFps, initialSpeed, isLoopingMedia } = stretchStateRef.current;
 
     // For looping media (GIFs): don't change duration, only track delta for speed calculation
     // Dragging right = faster (positive delta), dragging left = slower (negative delta)
     if (isLoopingMedia) {
+      const speedDelta = deltaFrames / 30 * 0.1;
+      const unconstrainedSpeed = initialSpeed + speedDelta;
+      const previewSpeed = Math.round(Math.max(MIN_SPEED, Math.min(MAX_SPEED, unconstrainedSpeed)) * 100) / 100;
+      const isConstrained = Math.abs(previewSpeed - unconstrainedSpeed) > 0.0001;
       // Update local state for speed calculation (duration stays same)
-      if (deltaFrames !== stretchStateRef.current.currentDelta) {
-        setStretchState(prev => ({ ...prev, currentDelta: deltaFrames }));
+      if (deltaFrames !== stretchStateRef.current.currentDelta || isConstrained !== stretchStateRef.current.isConstrained) {
+        setStretchState(prev => ({ ...prev, currentDelta: deltaFrames, isConstrained, constraintLabel: isConstrained ? 'speed limit' : null }));
       }
       // No snap target visualization for GIFs since clip doesn't move
       return;
@@ -276,9 +284,19 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       }
     }
 
+    const proposedDuration = handle === 'start'
+      ? initialDuration - deltaFrames
+      : initialDuration + deltaFrames;
+    const isConstrained = proposedDuration < limits.min || proposedDuration > limits.max;
+
     // Update local state for visual feedback
-    if (deltaFrames !== stretchStateRef.current.currentDelta) {
-      setStretchState(prev => ({ ...prev, currentDelta: deltaFrames }));
+    if (deltaFrames !== stretchStateRef.current.currentDelta || isConstrained !== stretchStateRef.current.isConstrained) {
+      setStretchState(prev => ({
+        ...prev,
+        currentDelta: deltaFrames,
+        isConstrained,
+        constraintLabel: isConstrained ? 'speed limit' : null,
+      }));
     }
 
     // Update snap target visualization (only when changed)
@@ -370,6 +388,8 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
         initialSpeed: 1,
         currentDelta: 0,
         isLoopingMedia: false,
+        isConstrained: false,
+        constraintLabel: null,
       });
     }
   });
@@ -439,6 +459,8 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
         initialSpeed: currentSpeed,
         currentDelta: 0,
         isLoopingMedia,
+        isConstrained: false,
+        constraintLabel: null,
       });
     },
     [trackLocked, getItemFromStore]
@@ -497,6 +519,8 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
     isStretching: stretchState.isStretching,
     stretchHandle: stretchState.handle,
     stretchDelta: stretchState.currentDelta,
+    stretchConstrained: stretchState.isConstrained,
+    stretchConstraintLabel: stretchState.constraintLabel,
     handleStretchStart,
     getVisualFeedback,
   };
