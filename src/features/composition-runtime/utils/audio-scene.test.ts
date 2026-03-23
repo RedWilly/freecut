@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildStandaloneAudioSegments, buildTransitionVideoAudioSegments } from './audio-scene';
+import {
+  buildCompoundAudioTransitionSegments,
+  buildStandaloneAudioSegments,
+  buildTransitionVideoAudioSegments,
+} from './audio-scene';
 
 describe('audio scene', () => {
   it('merges continuous standalone audio segments', () => {
@@ -185,6 +189,71 @@ describe('audio scene', () => {
       }),
       expect.objectContaining({
         itemId: 'audio-2',
+        from: 25,
+        durationInFrames: 35,
+        crossfadeFadeIn: 10,
+      }),
+    ]);
+  });
+
+  it('builds compound wrapper audio transition segments with overlap fades', () => {
+    const segments = buildCompoundAudioTransitionSegments([
+      {
+        id: 'compound-audio-1',
+        type: 'audio',
+        trackId: 'track-1',
+        from: 0,
+        durationInFrames: 30,
+        label: 'Compound Audio 1',
+        compositionId: 'comp-1',
+        sourceStart: 0,
+        sourceEnd: 35,
+        sourceDuration: 120,
+        sourceFps: 30,
+        muted: false,
+        trackVolumeDb: 0,
+        trackVisible: true,
+        src: '',
+      },
+      {
+        id: 'compound-audio-2',
+        type: 'audio',
+        trackId: 'track-1',
+        from: 30,
+        durationInFrames: 30,
+        label: 'Compound Audio 2',
+        compositionId: 'comp-2',
+        sourceStart: 5,
+        sourceEnd: 35,
+        sourceDuration: 120,
+        sourceFps: 30,
+        muted: false,
+        trackVolumeDb: 0,
+        trackVisible: true,
+        src: '',
+      },
+    ], [
+      {
+        id: 'transition-compound-audio-1',
+        type: 'crossfade',
+        leftClipId: 'compound-audio-1',
+        rightClipId: 'compound-audio-2',
+        trackId: 'track-1',
+        durationInFrames: 10,
+        timing: 'linear',
+        presentation: 'fade',
+      },
+    ], 30);
+
+    expect(segments).toEqual([
+      expect.objectContaining({
+        itemId: 'compound-audio-1',
+        from: 0,
+        durationInFrames: 35,
+        crossfadeFadeOut: 10,
+      }),
+      expect.objectContaining({
+        itemId: 'compound-audio-2',
         from: 25,
         durationInFrames: 35,
         crossfadeFadeIn: 10,

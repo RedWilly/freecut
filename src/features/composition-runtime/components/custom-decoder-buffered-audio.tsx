@@ -58,6 +58,7 @@ interface CustomDecoderBufferedAudioProps {
   audioFadeOutCurveX?: number;
   crossfadeFadeIn?: number;
   crossfadeFadeOut?: number;
+  volumeMultiplier?: number;
 }
 
 export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProps> = React.memo(({
@@ -78,6 +79,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
   audioFadeOutCurveX = 0.52,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  volumeMultiplier = 1,
 }) => {
   const { fps } = useVideoConfig();
   const sequenceContext = useSequenceContext();
@@ -172,7 +174,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
   const linearVolume = Math.pow(10, effectiveVolumeDb / 20);
   const itemVolume = muted ? 0 : Math.max(0, linearVolume * fadeMultiplier);
   const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
-  const audioVolume = itemVolume * effectiveMasterVolume;
+  const audioVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier);
 
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
 

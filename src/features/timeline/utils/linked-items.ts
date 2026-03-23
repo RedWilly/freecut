@@ -28,6 +28,25 @@ export function getLinkedItemIds(items: TimelineItem[], itemId: string): string[
   return getLinkedItems(items, itemId).map((item) => item.id);
 }
 
+export function getUniqueLinkedItemAnchorIds(items: TimelineItem[], itemIds: string[]): string[] {
+  const anchors: string[] = [];
+  const visitedIds = new Set<string>();
+
+  for (const itemId of itemIds) {
+    if (visitedIds.has(itemId)) continue;
+
+    const linkedIds = getLinkedItemIds(items, itemId);
+    if (linkedIds.length === 0) continue;
+
+    anchors.push(itemId);
+    for (const linkedId of linkedIds) {
+      visitedIds.add(linkedId);
+    }
+  }
+
+  return anchors;
+}
+
 export function hasLinkedItems(items: TimelineItem[], itemId: string): boolean {
   return getLinkedItemIds(items, itemId).length > 1;
 }

@@ -515,7 +515,6 @@ export const useItemsStore = create<ItemsState & ItemsActions>()(
       const state = get();
       const item = state.items.find((i) => i.id === id);
       if (!item) return null;
-      if (item.type === 'composition') return null;
       const splitAt = roundFrame(splitFrame);
 
       const itemStart = roundFrame(item.from);

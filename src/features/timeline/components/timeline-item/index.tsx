@@ -987,7 +987,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
     // Razor tool: split item at click position
     if (activeToolRef.current === 'razor') {
-      if (item.type === 'composition') return;
       const tracksContainer = e.currentTarget.closest('.timeline-tracks') as HTMLElement | null;
       const tracksRect = tracksContainer?.getBoundingClientRect();
       const cursorX = tracksRect

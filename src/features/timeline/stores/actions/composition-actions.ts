@@ -10,6 +10,7 @@ import {
   getTrackKind,
   type TrackKind,
 } from '../../utils/classic-tracks';
+import { sourceToTimelineFrames, timelineToSourceFrames } from '../../utils/source-calculations';
 import { getCompositionOwnedAudioSources } from '../../utils/composition-clip-summary';
 import { expandSelectionWithLinkedItems } from '../../utils/linked-items';
 import { useItemsStore } from '../items-store';
@@ -26,7 +27,7 @@ import {
   getLinkedCompositionVisualCompanion,
   isCompositionAudioItem,
 } from '@/shared/utils/linked-media';
-import { execute } from './shared';
+import { applyTransitionRepairs, execute } from './shared';
 
 function getTrackKindForSelectedItems(track: TimelineTrack | undefined, trackItems: TimelineItem[]): TrackKind {
   return getTrackKind(track ?? { id: '', name: '', height: DEFAULT_TRACK_HEIGHT, locked: false, visible: true, muted: false, solo: false, order: 0, items: [] })
@@ -124,6 +125,71 @@ function mapRestoredTrackGroup(params: {
       order: (anchorTrack.order ?? 0) - distanceFromBottom * 0.01,
     });
   }
+}
+
+function mapSubCompItemToWrapperWindow(params: {
+  subItem: TimelineItem;
+  wrapper: CompositionItem | (AudioItem & { compositionId: string });
+  timelineFps: number;
+  subCompFps: number;
+}): TimelineItem | null {
+  const { subItem, wrapper, timelineFps, subCompFps } = params;
+  const wrapperSpeed = wrapper.speed ?? 1;
+  const wrapperSourceFps = wrapper.sourceFps ?? subCompFps;
+  const wrapperSourceStart = wrapper.sourceStart ?? wrapper.trimStart ?? 0;
+  const wrapperSourceEnd = wrapper.sourceEnd
+    ?? (wrapperSourceStart + timelineToSourceFrames(wrapper.durationInFrames, wrapperSpeed, timelineFps, wrapperSourceFps));
+  const subItemStart = subItem.from;
+  const subItemEnd = subItem.from + subItem.durationInFrames;
+  const overlapStart = Math.max(subItemStart, wrapperSourceStart);
+  const overlapEnd = Math.min(subItemEnd, wrapperSourceEnd);
+
+  if (overlapEnd <= overlapStart) {
+    return null;
+  }
+
+  const mappedFrom = wrapper.from + sourceToTimelineFrames(
+    overlapStart - wrapperSourceStart,
+    wrapperSpeed,
+    wrapperSourceFps,
+    timelineFps,
+  );
+  const mappedEnd = wrapper.from + sourceToTimelineFrames(
+    overlapEnd - wrapperSourceStart,
+    wrapperSpeed,
+    wrapperSourceFps,
+    timelineFps,
+  );
+  const mappedDuration = Math.max(1, mappedEnd - mappedFrom);
+  const mappedItem: TimelineItem = {
+    ...subItem,
+    from: mappedFrom,
+    durationInFrames: mappedDuration,
+    speed: (subItem.speed ?? 1) * wrapperSpeed,
+  };
+
+  if (subItem.type === 'video' || subItem.type === 'audio' || subItem.type === 'composition') {
+    const childSourceFps = subItem.sourceFps ?? subCompFps;
+    const childSpeed = subItem.speed ?? 1;
+    const clippedStartFrames = overlapStart - subItemStart;
+    const clippedEndFrames = subItemEnd - overlapEnd;
+    const nextSourceStart = (subItem.sourceStart ?? 0) + timelineToSourceFrames(
+      clippedStartFrames,
+      childSpeed,
+      subCompFps,
+      childSourceFps,
+    );
+
+    mappedItem.sourceStart = nextSourceStart;
+    if (subItem.sourceEnd !== undefined) {
+      mappedItem.sourceEnd = Math.max(
+        nextSourceStart + 1,
+        subItem.sourceEnd - timelineToSourceFrames(clippedEndFrames, childSpeed, subCompFps, childSourceFps),
+      );
+    }
+  }
+
+  return mappedItem;
 }
 
 /**
@@ -415,7 +481,10 @@ export function dissolvePreComp(compositionItemId: string): boolean {
 
     const { tracks } = useItemsStore.getState();
     const wrapperIds = [visualWrapper?.id, audioWrapper?.id].filter((id): id is string => !!id);
-    const compFrom = visualWrapper?.from ?? audioWrapper?.from ?? 0;
+    const wrapperWindowAnchor = visualWrapper ?? audioWrapper;
+    if (!wrapperWindowAnchor) return false;
+    const compFrom = wrapperWindowAnchor.from;
+    const timelineFps = useTimelineSettingsStore.getState().fps;
 
     let nextTracks = tracks;
 
@@ -507,29 +576,45 @@ export function dissolvePreComp(compositionItemId: string): boolean {
 
     // Reposition items back to absolute timeline positions with correct track mapping
     const itemIdMapping = new Map<string, string>();
-    const restoredItems: TimelineItem[] = subComp.items.map((item) => {
+    const restoredItems: TimelineItem[] = subComp.items.flatMap((item) => {
+      const mappedItem = mapSubCompItemToWrapperWindow({
+        subItem: item,
+        wrapper: wrapperWindowAnchor,
+        timelineFps,
+        subCompFps: subComp.fps,
+      });
+      if (!mappedItem) return [];
+
       const newId = crypto.randomUUID();
       itemIdMapping.set(item.id, newId);
-      return {
-        ...item,
+      return [{
+        ...mappedItem,
         id: newId,
-        from: item.from + compFrom,
         trackId: trackIdMapping.get(item.trackId) ?? visualAnchorTrackId ?? audioAnchorTrackId ?? item.trackId,
-      };
+      }];
     });
 
     // Restore transitions with remapped IDs
     const subTransitions = subComp.transitions ?? [];
     if (subTransitions.length > 0) {
       const currentTransitions = useTransitionsStore.getState().transitions;
-      const restoredTransitions = subTransitions.map((t) => ({
-        ...t,
-        id: crypto.randomUUID(),
-        leftClipId: itemIdMapping.get(t.leftClipId) ?? t.leftClipId,
-        rightClipId: itemIdMapping.get(t.rightClipId) ?? t.rightClipId,
-        trackId: trackIdMapping.get(t.trackId) ?? t.trackId,
-      }));
+      const restoredTransitions = subTransitions.flatMap((t) => {
+        const leftClipId = itemIdMapping.get(t.leftClipId);
+        const rightClipId = itemIdMapping.get(t.rightClipId);
+        if (!leftClipId || !rightClipId) return [];
+
+        return [{
+          ...t,
+          id: crypto.randomUUID(),
+          leftClipId,
+          rightClipId,
+          trackId: trackIdMapping.get(t.trackId) ?? t.trackId,
+        }];
+      });
       useTransitionsStore.getState().setTransitions([...currentTransitions, ...restoredTransitions]);
+      if (restoredItems.length > 0) {
+        applyTransitionRepairs(restoredItems.map((item) => item.id));
+      }
     }
 
     // Restore keyframes with remapped item IDs

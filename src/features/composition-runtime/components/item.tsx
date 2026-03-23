@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill } from '@/features/composition-runtime/deps/player';
 import { useDebugStore } from '@/features/composition-runtime/deps/stores';
-import type { TimelineItem, ShapeItem } from '@/types/timeline';
+import type { AudioItem, TimelineItem, ShapeItem } from '@/types/timeline';
 import type { TransformProperties } from '@/types/transform';
 import { DebugOverlay } from './debug-overlay';
 import { PitchCorrectedAudio } from './pitch-corrected-audio';
@@ -43,6 +43,8 @@ interface ItemProps {
   masks?: MaskInfo[];
   /** Current composition nesting depth (prevents infinite recursion) */
   renderDepth?: number;
+  compositionRenderMode?: 'full' | 'visual-only' | 'audio-only';
+  audioGainMultiplier?: number;
 }
 
 /**
@@ -59,7 +61,7 @@ interface ItemProps {
  *
  * Memoized to prevent unnecessary re-renders when parent (MainComposition) updates.
  */
-export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], renderDepth = 0 }) => {
+export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], renderDepth = 0, compositionRenderMode = 'full', audioGainMultiplier = 1 }) => {
   // Use muted prop directly - MainComposition already passes track.muted
   // Avoiding store subscription here prevents re-render issues with @legacy-video/media Audio
 
@@ -206,6 +208,22 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
   }
 
   if (item.type === 'audio') {
+    if (item.compositionId) {
+      if (renderDepth >= MAX_RENDER_DEPTH) {
+        return null;
+      }
+
+      return (
+        <CompositionContent
+          item={item as AudioItem & { compositionId: string }}
+          parentMuted={muted}
+          renderDepth={renderDepth + 1}
+          renderMode="audio-only"
+          audioGainMultiplier={audioGainMultiplier}
+        />
+      );
+    }
+
     // Guard against missing src (media resolution failed)
     if (!item.src) {
       return null; // Audio can fail silently
@@ -239,6 +257,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
         audioFadeOutCurve={item.audioFadeOutCurve}
         audioFadeInCurveX={item.audioFadeInCurveX}
         audioFadeOutCurveX={item.audioFadeOutCurveX}
+        volumeMultiplier={audioGainMultiplier}
       />
     );
   }
@@ -330,7 +349,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
     // Pass parent muted so muting the track silences all sub-comp audio
     return (
       <ItemVisualWrapper item={item} masks={masks}>
-        <CompositionContent item={item} parentMuted={muted} renderDepth={renderDepth + 1} />
+        <CompositionContent item={item} parentMuted={muted} renderDepth={renderDepth + 1} renderMode={compositionRenderMode} audioGainMultiplier={audioGainMultiplier} />
       </ItemVisualWrapper>
     );
   }

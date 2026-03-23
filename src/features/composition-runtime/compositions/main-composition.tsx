@@ -1,9 +1,11 @@
 ﻿import React, { useMemo, useCallback } from 'react';
 import { AbsoluteFill, Sequence } from '@/features/composition-runtime/deps/player';
+import { timelineToSourceFrames } from '@/features/composition-runtime/deps/timeline';
 import { useCurrentFrame, useVideoConfig } from '../hooks/use-player-compat';
 import type { CompositionInputProps } from '@/types/export';
 import type { TimelineItem } from '@/types/timeline';
 import { Item, type MaskInfo } from '../components/item';
+import { CompositionContent } from '../components/composition-content';
 import { PitchCorrectedAudio } from '../components/pitch-corrected-audio';
 import { CustomDecoderAudio } from '../components/custom-decoder-audio';
 import { useMediaLibraryStore } from '@/features/composition-runtime/deps/stores';
@@ -15,9 +17,11 @@ import { ItemEffectWrapper, type AdjustmentLayerWithTrackOrder } from '../compon
 import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider } from '../contexts/composition-space-context';
 import {
+  buildCompoundAudioTransitionSegments,
   buildStandaloneAudioSegments,
   buildTransitionVideoAudioSegments,
   type AudioSegment,
+  type CompoundAudioSegment,
   type VideoAudioSegment,
 } from '../utils/audio-scene';
 import {
@@ -36,6 +40,7 @@ import {
 import {
   getManagedLinkedAudioTransitions,
   hasLinkedAudioCompanion,
+  isCompositionAudioItem,
 } from '@/shared/utils/linked-media';
 
 const TRANSITION_AUDIO_PREMOUNT_SECONDS = 0.5;
@@ -90,9 +95,10 @@ const MaskedItem: React.FC<{
   item: TimelineItem;
   muted: boolean;
   itemTrackOrder: number;
-}> = ({ item, muted, itemTrackOrder }) => {
+  compositionRenderMode?: 'full' | 'visual-only' | 'audio-only';
+}> = ({ item, muted, itemTrackOrder, compositionRenderMode = 'full' }) => {
   const masks = React.useContext(ActiveMasksContext);
-  return <Item item={item} muted={muted} masks={getMasksForTrackOrder(masks, itemTrackOrder)} />;
+  return <Item item={item} muted={muted} masks={getMasksForTrackOrder(masks, itemTrackOrder)} compositionRenderMode={compositionRenderMode} />;
 };
 
 
@@ -147,6 +153,14 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
   // This prevents audio from being affected by visual layer changes (mask add/delete, item moves)
   // Use ALL tracks for stable DOM structure, with trackVisible for conditional playback
   const audioItems: EnrichedAudioItem[] = renderPlan.audioItems;
+  const compoundAudioItems = useMemo(
+    () => audioItems.filter((item): item is EnrichedAudioItem & { compositionId: string } => isCompositionAudioItem(item)),
+    [audioItems],
+  );
+  const directSourceAudioItems = useMemo(
+    () => audioItems.filter((item) => !isCompositionAudioItem(item)),
+    [audioItems],
+  );
 
   const managedLinkedAudioTransitions = useMemo(
     () => getManagedLinkedAudioTransitions(tracks.flatMap((track) => track.items), transitions),
@@ -161,12 +175,20 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
     return ids;
   }, [managedLinkedAudioTransitions]);
   const managedLinkedAudioItems = useMemo(
-    () => audioItems.filter((item) => managedLinkedAudioIds.has(item.id)),
-    [audioItems, managedLinkedAudioIds],
+    () => directSourceAudioItems.filter((item) => managedLinkedAudioIds.has(item.id)),
+    [directSourceAudioItems, managedLinkedAudioIds],
   );
   const standaloneAudioItems = useMemo(
-    () => audioItems.filter((item) => !managedLinkedAudioIds.has(item.id)),
-    [audioItems, managedLinkedAudioIds],
+    () => directSourceAudioItems.filter((item) => !managedLinkedAudioIds.has(item.id)),
+    [directSourceAudioItems, managedLinkedAudioIds],
+  );
+  const managedCompoundAudioItems = useMemo(
+    () => compoundAudioItems.filter((item) => managedLinkedAudioIds.has(item.id)),
+    [compoundAudioItems, managedLinkedAudioIds],
+  );
+  const standaloneCompoundAudioItems = useMemo(
+    () => compoundAudioItems.filter((item) => !managedLinkedAudioIds.has(item.id)),
+    [compoundAudioItems, managedLinkedAudioIds],
   );
   const managedLinkedAudioItemsById = useMemo(
     () => new Map(managedLinkedAudioItems.map((item) => [item.id, item])),
@@ -186,6 +208,25 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
       }];
     }),
     [managedLinkedAudioItemsById, managedLinkedAudioTransitions],
+  );
+  const managedCompoundAudioItemsById = useMemo(
+    () => new Map(managedCompoundAudioItems.map((item) => [item.id, item])),
+    [managedCompoundAudioItems],
+  );
+  const managedCompoundAudioTransitionDefs = useMemo(
+    () => managedLinkedAudioTransitions.flatMap(({ transition, leftAudio, rightAudio }) => {
+      const left = managedCompoundAudioItemsById.get(leftAudio.id);
+      const right = managedCompoundAudioItemsById.get(rightAudio.id);
+      if (!left || !right) return [];
+
+      return [{
+        ...transition,
+        leftClipId: left.id,
+        rightClipId: right.id,
+        trackId: left.trackId,
+      }];
+    }),
+    [managedCompoundAudioItemsById, managedLinkedAudioTransitions],
   );
 
   // Merge continuous split audio clips into single segments to prevent
@@ -213,6 +254,10 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
   const linkedAudioTransitionSegments = useMemo(
     () => buildTransitionVideoAudioSegments(managedLinkedAudioItems, managedLinkedAudioTransitionDefs, fps),
     [managedLinkedAudioItems, managedLinkedAudioTransitionDefs, fps],
+  );
+  const managedCompoundAudioSegments = useMemo<CompoundAudioSegment[]>(
+    () => buildCompoundAudioTransitionSegments(managedCompoundAudioItems, managedCompoundAudioTransitionDefs, fps),
+    [fps, managedCompoundAudioItems, managedCompoundAudioTransitionDefs],
   );
   const transitionAudioSegments = useMemo(
     () => [...videoAudioSegments, ...linkedAudioTransitionSegments],
@@ -422,6 +467,59 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
             );
           })}
 
+          {managedCompoundAudioSegments.map((segment) => {
+            const compoundItem = managedCompoundAudioItemsById.get(segment.itemId);
+            if (!compoundItem) return null;
+
+            const segmentItem = {
+              ...compoundItem,
+              from: segment.from,
+              durationInFrames: segment.durationInFrames,
+              sourceStart: segment.trimBefore,
+              sourceEnd: segment.trimBefore + timelineToSourceFrames(
+                segment.durationInFrames,
+                segment.playbackRate ?? 1,
+                fps,
+                segment.sourceFps ?? fps,
+              ),
+              speed: segment.playbackRate,
+            };
+
+            return (
+              <Sequence
+                key={segment.key}
+                from={segment.from}
+                durationInFrames={segment.durationInFrames}
+                premountFor={Math.round(fps * TRANSITION_AUDIO_PREMOUNT_SECONDS)}
+              >
+                <CompositionContent
+                  item={segmentItem}
+                  parentMuted={segment.muted}
+                  renderMode="audio-only"
+                  audioGainMultiplier={Math.pow(10, segment.volumeDb / 20)}
+                  crossfadeFadeInFrames={segment.crossfadeFadeIn}
+                  crossfadeFadeOutFrames={segment.crossfadeFadeOut}
+                />
+              </Sequence>
+            );
+          })}
+
+          {standaloneCompoundAudioItems.map((item) => (
+            <Sequence
+              key={`compound-audio-${item.id}`}
+              from={item.from}
+              durationInFrames={item.durationInFrames}
+              premountFor={Math.round(fps * STANDALONE_AUDIO_PREMOUNT_SECONDS)}
+            >
+              <CompositionContent
+                item={item}
+                parentMuted={item.muted || !item.trackVisible}
+                renderMode="audio-only"
+                audioGainMultiplier={Math.pow(10, ((item.volume ?? 0) + (item.trackVolumeDb ?? 0)) / 20)}
+              />
+            </Sequence>
+          ))}
+
           {/* ALL VISUAL LAYERS - videos and non-media in SINGLE wrapper for proper z-index stacking */}
           {/* This ensures items from different tracks respect z-index across all types */}
           <FrameActiveMasksProvider
@@ -463,8 +561,9 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                           >
                             <MaskedItem
                               item={item}
-                              muted={track.muted || !track.trackVisible}
+                              muted={track.muted || !track.trackVisible || (item.type === 'composition' && hasLinkedAudioCompanion(audioItems, item))}
                               itemTrackOrder={trackOrder}
+                              compositionRenderMode={item.type === 'composition' && hasLinkedAudioCompanion(audioItems, item) ? 'visual-only' : 'full'}
                             />
                           </ItemEffectWrapper>
                         </Sequence>

@@ -26,6 +26,7 @@ interface CustomDecoderAudioProps {
   audioFadeOutCurveX?: number;
   crossfadeFadeIn?: number;
   crossfadeFadeOut?: number;
+  volumeMultiplier?: number;
 }
 
 interface DecodedWavEntry {
@@ -265,6 +266,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
   audioFadeOutCurveX = 0.52,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  volumeMultiplier = 1,
 }) => {
   const [decodedSrc, setDecodedSrc] = useState<string | null>(null);
 
@@ -311,6 +313,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
       audioFadeOutCurveX={audioFadeOutCurveX}
       crossfadeFadeIn={crossfadeFadeIn}
       crossfadeFadeOut={crossfadeFadeOut}
+      volumeMultiplier={volumeMultiplier}
     />
   );
 };

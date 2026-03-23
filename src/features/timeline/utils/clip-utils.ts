@@ -16,8 +16,10 @@ export function canJoinItems(leftItem: TimelineItem, rightItem: TimelineItem): b
   if (leftItem.originId !== rightItem.originId) return false;
   // Must be on same track
   if (leftItem.trackId !== rightItem.trackId) return false;
-  // Must be from same source media
-  if (leftItem.mediaId !== rightItem.mediaId) return false;
+  // Must be from the same source / compound
+  const leftSourceKey = leftItem.compositionId ?? leftItem.mediaId;
+  const rightSourceKey = rightItem.compositionId ?? rightItem.mediaId;
+  if (!leftSourceKey || leftSourceKey !== rightSourceKey) return false;
   // Must be adjacent (left ends where right begins)
   if (!areFramesAligned(leftItem.from + leftItem.durationInFrames, rightItem.from)) return false;
   // Must have same speed

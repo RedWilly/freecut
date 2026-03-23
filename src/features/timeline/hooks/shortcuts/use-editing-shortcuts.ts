@@ -9,7 +9,7 @@ import { useTimelineStore } from '../../stores/timeline-store';
 import { useSelectionStore } from '@/shared/state/selection';
 import { HOTKEY_OPTIONS } from '@/config/hotkeys';
 import { canJoinMultipleItems } from '@/features/timeline/utils/clip-utils';
-import { canLinkItems, hasLinkedItems } from '@/features/timeline/utils/linked-items';
+import { canLinkItems, getUniqueLinkedItemAnchorIds, hasLinkedItems } from '@/features/timeline/utils/linked-items';
 import { insertFreezeFrame, linkItems, unlinkItems } from '../../stores/actions/item-actions';
 import type { TransformProperties } from '@/types/transform';
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts';
@@ -288,15 +288,16 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       const { previewFrame, currentFrame } = usePlaybackStore.getState();
       const splitFrame = previewFrame ?? currentFrame;
 
-      const itemsToSplit = items.filter((item) => {
-        if (item.type === 'composition') return false;
+      const overlappingItemIds = items.filter((item) => {
         const itemStart = item.from;
         const itemEnd = item.from + item.durationInFrames;
         return splitFrame > itemStart && splitFrame < itemEnd;
-      });
+      }).map((item) => item.id);
 
-      for (const item of itemsToSplit) {
-        splitItem(item.id, splitFrame);
+      const itemsToSplit = getUniqueLinkedItemAnchorIds(items, overlappingItemIds);
+
+      for (const itemId of itemsToSplit) {
+        splitItem(itemId, splitFrame);
       }
     },
     { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },

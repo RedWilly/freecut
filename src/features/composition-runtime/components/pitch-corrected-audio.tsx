@@ -49,6 +49,7 @@ interface PitchCorrectedAudioProps {
   crossfadeFadeIn?: number;
   /** Crossfade fade out duration in FRAMES (for transitions - overrides audioFadeOut) */
   crossfadeFadeOut?: number;
+  volumeMultiplier?: number;
 }
 
 /**
@@ -77,6 +78,7 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
   audioFadeOutCurveX = 0.52,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  volumeMultiplier = 1,
 }) => {
   // Get local frame from Sequence context (0-based within this Sequence)
   const sequenceContext = useSequenceContext();
@@ -213,7 +215,7 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
 
   // Apply master preview volume from playback controls
   const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
-  const finalVolume = itemVolume * effectiveMasterVolume;
+  const finalVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier);
 
   // Use HTML5 audio with native preservesPitch.
   // Export uses Canvas + WebCodecs (client-render-engine.ts) which handles audio separately.

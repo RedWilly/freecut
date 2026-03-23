@@ -285,4 +285,186 @@ describe('CompositionContent keyframes', () => {
     expect(screen.getByTestId('sub-item-sub-video')).toHaveAttribute('data-muted', 'true');
     expect(screen.getByTestId('sub-item-sub-audio')).toHaveAttribute('data-muted', 'false');
   });
+
+  it('renders only visual sub-items in visual-only mode', () => {
+    const subTracks: TimelineTrack[] = [
+      {
+        id: 'sub-track-video',
+        name: 'V1',
+        kind: 'video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+      {
+        id: 'sub-track-audio',
+        name: 'A1',
+        kind: 'audio',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 1,
+        items: [],
+      },
+    ];
+
+    const subComp: TestSubComposition = {
+      id: 'sub-comp-visual-only',
+      name: 'Visual only precomp',
+      items: [
+        {
+          id: 'sub-video-visual-only',
+          type: 'video',
+          trackId: 'sub-track-video',
+          from: 0,
+          durationInFrames: 60,
+          label: 'Nested video',
+          src: 'blob:video',
+          mediaId: 'media-1',
+        },
+        {
+          id: 'sub-audio-visual-only',
+          type: 'audio',
+          trackId: 'sub-track-audio',
+          from: 0,
+          durationInFrames: 60,
+          label: 'Nested audio',
+          src: 'blob:audio',
+          mediaId: 'media-1',
+        },
+      ],
+      tracks: subTracks,
+      transitions: [],
+      keyframes: [],
+      fps: 30,
+      width: 1280,
+      height: 720,
+      durationInFrames: 60,
+    };
+
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    });
+
+    const compositionItem: CompositionItem = {
+      id: 'parent-comp-item-visual-only',
+      type: 'composition',
+      compositionId: subComp.id,
+      trackId: 'parent-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Nested comp',
+      compositionWidth: 1280,
+      compositionHeight: 720,
+    };
+
+    render(
+      <VideoConfigProvider fps={30} width={1280} height={720} durationInFrames={120}>
+        <CompositionContent item={compositionItem} renderMode="visual-only" />
+      </VideoConfigProvider>
+    );
+
+    expect(screen.getByTestId('sub-item-sub-video-visual-only')).toBeInTheDocument();
+    expect(screen.queryByTestId('sub-item-sub-audio-visual-only')).toBeNull();
+  });
+
+  it('renders only audio sub-items for compound audio wrappers in audio-only mode', () => {
+    const subTracks: TimelineTrack[] = [
+      {
+        id: 'sub-track-video',
+        name: 'V1',
+        kind: 'video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+      {
+        id: 'sub-track-audio',
+        name: 'A1',
+        kind: 'audio',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 1,
+        items: [],
+      },
+    ];
+
+    const subComp: TestSubComposition = {
+      id: 'sub-comp-audio-only',
+      name: 'Audio only precomp',
+      items: [
+        {
+          id: 'sub-video-audio-only',
+          type: 'video',
+          trackId: 'sub-track-video',
+          from: 0,
+          durationInFrames: 60,
+          label: 'Nested video',
+          src: 'blob:video',
+          mediaId: 'media-1',
+        },
+        {
+          id: 'sub-audio-audio-only',
+          type: 'audio',
+          trackId: 'sub-track-audio',
+          from: 0,
+          durationInFrames: 60,
+          label: 'Nested audio',
+          src: 'blob:audio',
+          mediaId: 'media-1',
+        },
+      ],
+      tracks: subTracks,
+      transitions: [],
+      keyframes: [],
+      fps: 30,
+      width: 1280,
+      height: 720,
+      durationInFrames: 60,
+    };
+
+    useCompositionsStore.setState({
+      compositions: [subComp],
+      compositionById: { [subComp.id]: subComp },
+      mediaDependencyIds: [],
+      mediaDependencyVersion: 0,
+    });
+
+    render(
+      <VideoConfigProvider fps={30} width={1280} height={720} durationInFrames={120}>
+        <CompositionContent
+          item={{
+            id: 'parent-comp-audio-wrapper',
+            type: 'audio',
+            trackId: 'parent-audio-track',
+            from: 0,
+            durationInFrames: 60,
+            label: 'Nested comp audio',
+            compositionId: subComp.id,
+            src: '',
+          }}
+          renderMode="audio-only"
+        />
+      </VideoConfigProvider>
+    );
+
+    expect(screen.queryByTestId('sub-item-sub-video-audio-only')).toBeNull();
+    expect(screen.getByTestId('sub-item-sub-audio-audio-only')).toBeInTheDocument();
+  });
 });

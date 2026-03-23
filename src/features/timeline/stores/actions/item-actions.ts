@@ -698,22 +698,51 @@ export function joinItems(itemIds: string[]): void {
     const itemsToJoin = items
       .filter((item) => itemIds.includes(item.id))
       .toSorted((left, right) => left.from - right.from);
-    const primaryItem = itemsToJoin[0];
-    const removedIds = itemsToJoin.slice(1).map((item) => item.id);
+    if (itemsToJoin.length < 2) return;
 
-    useItemsStore.getState()._joinItems(itemIds);
+    const joinGroups = [itemIds];
+    if (itemsToJoin.length === 2) {
+      const [leftItem, rightItem] = itemsToJoin;
+      if (leftItem && rightItem) {
+        const counterpartPair = getSynchronizedLinkedCounterpartPair(items, leftItem.id, rightItem.id);
+        if (counterpartPair) {
+          joinGroups.push([counterpartPair.leftCounterpart.id, counterpartPair.rightCounterpart.id]);
+        }
+      }
+    }
 
-    if (primaryItem && removedIds.length > 0) {
+    const groupDescriptors = joinGroups
+      .map((groupItemIds) => items
+        .filter((item) => groupItemIds.includes(item.id))
+        .toSorted((left, right) => left.from - right.from))
+      .filter((groupItems) => groupItems.length >= 2)
+      .map((groupItems) => ({
+        itemIds: groupItems.map((item) => item.id),
+        primaryId: groupItems[0]!.id,
+        removedIds: groupItems.slice(1).map((item) => item.id),
+      }));
+
+    for (const group of groupDescriptors) {
+      useItemsStore.getState()._joinItems(group.itemIds);
+    }
+
+    const replacementByRemovedId = new Map<string, string>();
+    for (const group of groupDescriptors) {
+      for (const removedId of group.removedIds) {
+        replacementByRemovedId.set(removedId, group.primaryId);
+      }
+    }
+
+    if (replacementByRemovedId.size > 0) {
       const transitions = useTransitionsStore.getState().transitions;
-      const removedIdSet = new Set(removedIds);
       const updatedTransitions = transitions.flatMap((transition) => {
         const nextTransition = {
           ...transition,
-          leftClipId: removedIdSet.has(transition.leftClipId) ? primaryItem.id : transition.leftClipId,
-          rightClipId: removedIdSet.has(transition.rightClipId) ? primaryItem.id : transition.rightClipId,
+          leftClipId: replacementByRemovedId.get(transition.leftClipId) ?? transition.leftClipId,
+          rightClipId: replacementByRemovedId.get(transition.rightClipId) ?? transition.rightClipId,
         };
 
-        if (itemIds.includes(nextTransition.leftClipId) && itemIds.includes(nextTransition.rightClipId)) {
+        if (nextTransition.leftClipId === nextTransition.rightClipId) {
           return [];
         }
 
@@ -721,12 +750,12 @@ export function joinItems(itemIds: string[]): void {
       });
 
       useTransitionsStore.getState().setTransitions(updatedTransitions);
-      applyTransitionRepairs([primaryItem.id]);
+      applyTransitionRepairs(groupDescriptors.map((group) => group.primaryId));
     }
 
-    // Remove keyframes for joined items (except first)
-    if (itemIds.length > 1) {
-      useKeyframesStore.getState()._removeKeyframesForItems(itemIds.slice(1));
+    const removedIds = groupDescriptors.flatMap((group) => group.removedIds);
+    if (removedIds.length > 0) {
+      useKeyframesStore.getState()._removeKeyframesForItems(removedIds);
     }
 
     useTimelineSettingsStore.getState().markDirty();

@@ -10,6 +10,7 @@ import { useTimelineSettingsStore } from '../timeline-settings-store';
 import { useCompositionsStore } from '../compositions-store';
 import { useCompositionNavigationStore } from '../composition-navigation-store';
 import { createPreComp, dissolvePreComp } from './composition-actions';
+import { splitItem } from './item-actions';
 
 function makeTrack(overrides: Partial<TimelineTrack> & Pick<TimelineTrack, 'id' | 'name' | 'order' | 'kind'>): TimelineTrack {
   return {
@@ -141,5 +142,30 @@ describe('composition-actions split wrappers', () => {
     expect(restoredItems.find((item) => item.type === 'video')).toMatchObject({ trackId: 'track-v1', from: 0, durationInFrames: 60 });
     expect(restoredItems.find((item) => item.type === 'audio' && !item.compositionId)).toMatchObject({ trackId: 'track-a1', from: 0, durationInFrames: 60 });
     expect(useCompositionsStore.getState().compositions).toHaveLength(0);
+  });
+
+  it('dissolves only the selected split wrapper window and keeps sibling wrappers', () => {
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+      makeTrack({ id: 'track-a1', name: 'A1', kind: 'audio', order: 1 }),
+    ]);
+    useItemsStore.getState().setItems([
+      makeVideoItem(),
+      makeAudioItem(),
+    ]);
+    useSelectionStore.getState().selectItems(['video-1']);
+
+    const created = createPreComp('Compound 1');
+    expect(created?.type).toBe('composition');
+    splitItem(created!.id, 30);
+
+    expect(dissolvePreComp(created!.id)).toBe(true);
+
+    const items = useItemsStore.getState().items;
+    expect(items.find((item) => item.type === 'video' && !item.compositionId)).toMatchObject({ trackId: 'track-v1', from: 0, durationInFrames: 30, sourceStart: 0, sourceEnd: 30 });
+    expect(items.find((item) => item.type === 'audio' && !item.compositionId)).toMatchObject({ trackId: 'track-a1', from: 0, durationInFrames: 30, sourceStart: 0, sourceEnd: 30 });
+    expect(items.filter((item) => item.type === 'composition')).toHaveLength(1);
+    expect(items.filter((item) => item.type === 'audio' && item.compositionId)).toHaveLength(1);
+    expect(useCompositionsStore.getState().compositions).toHaveLength(1);
   });
 });

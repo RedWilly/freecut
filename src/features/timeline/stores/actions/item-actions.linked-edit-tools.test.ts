@@ -317,6 +317,48 @@ describe('linked edit tools', () => {
     expect(useItemsStore.getState().items).toHaveLength(4);
   });
 
+  it('splits linked compound wrappers together', () => {
+    useItemsStore.getState().setItems([
+      makeCompositionItem({ id: 'comp-1', compositionId: 'composition-1', sourceStart: 10, sourceEnd: 70, sourceDuration: 120, linkedGroupId: 'group-1' }),
+      makeAudioItem({ id: 'comp-audio-1', mediaId: undefined, src: '', label: 'Compound 1', compositionId: 'composition-1', sourceStart: 10, sourceEnd: 70, sourceDuration: 120, linkedGroupId: 'group-1' }),
+    ]);
+
+    splitItem('comp-1', 30);
+
+    const items = useItemsStore.getState().items;
+    const leftVisual = items.find((item) => item.id === 'comp-1');
+    const rightVisual = items.find((item) => item.type === 'composition' && item.id !== 'comp-1');
+    const leftAudio = items.find((item) => item.id === 'comp-audio-1');
+    const rightAudio = items.find((item) => item.type === 'audio' && item.id !== 'comp-audio-1');
+
+    expect(leftVisual).toMatchObject({ from: 0, durationInFrames: 30, sourceStart: 10, sourceEnd: 40 });
+    expect(rightVisual).toMatchObject({ from: 30, durationInFrames: 30, sourceStart: 40, sourceEnd: 70 });
+    expect(leftAudio).toMatchObject({ from: 0, durationInFrames: 30, sourceStart: 10, sourceEnd: 40 });
+    expect(rightAudio).toMatchObject({ from: 30, durationInFrames: 30, sourceStart: 40, sourceEnd: 70 });
+    expect(leftVisual?.linkedGroupId).toBe(leftAudio?.linkedGroupId);
+    expect(rightVisual?.linkedGroupId).toBe(rightAudio?.linkedGroupId);
+  });
+
+  it('joins linked compound wrappers back together', () => {
+    useItemsStore.getState().setItems([
+      makeCompositionItem({ id: 'comp-1', compositionId: 'composition-1', durationInFrames: 30, sourceStart: 10, sourceEnd: 40, sourceDuration: 120, linkedGroupId: 'group-left' }),
+      makeCompositionItem({ id: 'comp-2', from: 30, compositionId: 'composition-1', durationInFrames: 30, sourceStart: 40, sourceEnd: 70, sourceDuration: 120, linkedGroupId: 'group-right' }),
+      makeAudioItem({ id: 'comp-audio-1', mediaId: undefined, src: '', label: 'Compound 1', compositionId: 'composition-1', durationInFrames: 30, sourceStart: 10, sourceEnd: 40, sourceDuration: 120, linkedGroupId: 'group-left' }),
+      makeAudioItem({ id: 'comp-audio-2', mediaId: undefined, src: '', label: 'Compound 1', compositionId: 'composition-1', from: 30, durationInFrames: 30, sourceStart: 40, sourceEnd: 70, sourceDuration: 120, linkedGroupId: 'group-right' }),
+    ]);
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'video-track', name: 'V1', order: 0, kind: 'video' }),
+      makeTrack({ id: 'audio-track', name: 'A1', order: 1, kind: 'audio' }),
+    ]);
+
+    joinItems(['comp-1', 'comp-2']);
+
+    const items = useItemsStore.getState().items;
+    expect(items).toHaveLength(2);
+    expect(items.find((item) => item.id === 'comp-1')).toMatchObject({ from: 0, durationInFrames: 60, sourceStart: 10, sourceEnd: 70 });
+    expect(items.find((item) => item.id === 'comp-audio-1')).toMatchObject({ from: 0, durationInFrames: 60, sourceStart: 10, sourceEnd: 70 });
+  });
+
   it('remaps joined-away transition endpoints and removes internal joined transitions', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TimelineItem } from '@/types/timeline';
-import { canLinkItems, expandSelectionWithLinkedItems, getLinkedItemIds, hasLinkedItems } from './linked-items';
+import {
+  canLinkItems,
+  expandSelectionWithLinkedItems,
+  getLinkedItemIds,
+  getUniqueLinkedItemAnchorIds,
+  hasLinkedItems,
+} from './linked-items';
 
 function makeItem(overrides: Partial<TimelineItem> = {}): TimelineItem {
   return {
@@ -45,6 +51,20 @@ describe('linked items', () => {
     ];
 
     expect(expandSelectionWithLinkedItems(items, ['video-1', 'video-2'])).toEqual(['video-1', 'audio-1', 'video-2']);
+  });
+
+  it('dedupes linked groups down to one split anchor', () => {
+    const items = [
+      makeItem({ id: 'comp-video-1', linkedGroupId: 'group-1', type: 'composition', compositionId: 'comp-1' }),
+      makeItem({ id: 'comp-audio-1', linkedGroupId: 'group-1', type: 'audio', compositionId: 'comp-1', src: '' }),
+      makeItem({ id: 'video-2', linkedGroupId: 'group-2', type: 'video' }),
+      makeItem({ id: 'audio-2', linkedGroupId: 'group-2', type: 'audio' }),
+    ];
+
+    expect(getUniqueLinkedItemAnchorIds(items, ['comp-video-1', 'comp-audio-1', 'video-2', 'audio-2'])).toEqual([
+      'comp-video-1',
+      'video-2',
+    ]);
   });
 
   it('validates linkable audio/video pairs', () => {

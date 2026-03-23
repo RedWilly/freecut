@@ -60,7 +60,7 @@ export function useToolShortcuts(callbacks: TimelineShortcutCallbacks) {
       // If hovering over a specific item, split only that item
       if (previewItemId) {
         const item = items.find((i) => i.id === previewItemId);
-        if (item && item.type !== 'composition' && splitFrame > item.from && splitFrame < item.from + item.durationInFrames) {
+        if (item && splitFrame > item.from && splitFrame < item.from + item.durationInFrames) {
           splitItem(item.id, splitFrame);
           if (callbacks.onSplit) {
             callbacks.onSplit();

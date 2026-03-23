@@ -56,6 +56,20 @@ export interface VideoAudioSegment extends AudioSegment {
   crossfadeFadeOut?: number;
 }
 
+export interface CompoundAudioSegment {
+  key: string;
+  itemId: string;
+  from: number;
+  durationInFrames: number;
+  trimBefore: number;
+  playbackRate: number;
+  sourceFps?: number;
+  volumeDb: number;
+  muted: boolean;
+  crossfadeFadeIn?: number;
+  crossfadeFadeOut?: number;
+}
+
 interface ClipAudioExtension {
   before: number;
   after: number;
@@ -437,4 +451,86 @@ export function buildTransitionVideoAudioSegments(
   }
 
   return merged;
+}
+
+type CompoundTransitionAudioItem = AudioItem & {
+  compositionId: string;
+  muted: boolean;
+  trackVolumeDb: number;
+  trackVisible: boolean;
+};
+
+export function buildCompoundAudioTransitionSegments(
+  items: CompoundTransitionAudioItem[],
+  transitions: Transition[],
+  fps: number,
+): CompoundAudioSegment[] {
+  const sortedItems = items.toSorted((a, b) => {
+    if (a.trackId !== b.trackId) return a.trackId.localeCompare(b.trackId);
+    if (a.from !== b.from) return a.from - b.from;
+    return a.id.localeCompare(b.id);
+  });
+  const resolvedTrimBeforeById = resolveContinuousClipTrimStarts(sortedItems, fps);
+  const resolvedWindows = resolveTransitionWindowsForItems(transitions, sortedItems);
+  const extensionByClipId = new Map<string, ClipAudioExtension>();
+
+  const ensureExtension = (clipId: string): ClipAudioExtension => {
+    const existing = extensionByClipId.get(clipId);
+    if (existing) return existing;
+    const created: ClipAudioExtension = { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
+    extensionByClipId.set(clipId, created);
+    return created;
+  };
+
+  for (const window of resolvedWindows) {
+    const left = window.leftClip;
+    const right = window.rightClip;
+    if (isContinuousAudioBoundary(left, right, fps)) continue;
+
+    const rightPreRoll = Math.max(0, right.from - window.startFrame);
+    const leftPostRoll = Math.max(0, window.endFrame - (left.from + left.durationInFrames));
+
+    if (rightPreRoll > 0) {
+      const rightExt = ensureExtension(right.id);
+      rightExt.before = Math.max(rightExt.before, rightPreRoll);
+    }
+
+    if (leftPostRoll > 0) {
+      const leftExt = ensureExtension(left.id);
+      leftExt.after = Math.max(leftExt.after, leftPostRoll);
+    }
+
+    if (window.durationInFrames > 0) {
+      const leftExt = ensureExtension(left.id);
+      leftExt.overlapFadeOut = Math.max(leftExt.overlapFadeOut, window.durationInFrames);
+      const rightExt = ensureExtension(right.id);
+      rightExt.overlapFadeIn = Math.max(rightExt.overlapFadeIn, window.durationInFrames);
+    }
+  }
+
+  return sortedItems.map((item) => {
+    const playbackRate = item.speed ?? 1;
+    const itemSourceFps = item.sourceFps ?? fps;
+    const baseTrimBefore = resolvedTrimBeforeById.get(item.id) ?? getTrimBefore(item);
+    const extension = extensionByClipId.get(item.id) ?? { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
+    const maxBeforeBySource = playbackRate > 0
+      ? sourceToTimelineFrames(baseTrimBefore, playbackRate, itemSourceFps, fps)
+      : 0;
+    const before = Math.max(0, Math.min(extension.before, maxBeforeBySource));
+    const after = Math.max(0, extension.after);
+
+    return {
+      key: `compound-audio-${item.id}`,
+      itemId: item.id,
+      from: item.from - before,
+      durationInFrames: item.durationInFrames + before + after,
+      trimBefore: Math.max(0, baseTrimBefore - timelineToSourceFrames(before, playbackRate, fps, itemSourceFps)),
+      playbackRate,
+      sourceFps: item.sourceFps,
+      volumeDb: (item.volume ?? 0) + (item.trackVolumeDb ?? 0),
+      muted: item.muted || !item.trackVisible,
+      crossfadeFadeIn: extension.overlapFadeIn > 0 ? extension.overlapFadeIn : (before > 0 ? before : undefined),
+      crossfadeFadeOut: extension.overlapFadeOut > 0 ? extension.overlapFadeOut : (after > 0 ? after : undefined),
+    } satisfies CompoundAudioSegment;
+  });
 }
