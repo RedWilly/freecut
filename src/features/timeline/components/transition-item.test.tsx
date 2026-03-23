@@ -95,7 +95,7 @@ describe('TransitionItem preview bridge motion', () => {
     expect(updatedLeftPx - initialLeftPx).toBe(-20);
   });
 
-  it('keeps the bridge inside the clip body rows below the title bar', () => {
+  it('keeps the bridge inside the full clip body below the title bar', () => {
     const left = makeVideoItem({ id: 'left', from: 100, durationInFrames: 60 });
     const right = makeVideoItem({ id: 'right', from: 140, durationInFrames: 80, mediaId: 'media-2' });
     useItemsStore.getState().setItems([left, right]);
@@ -105,6 +105,6 @@ describe('TransitionItem preview bridge motion', () => {
     const overlay = screen.getByTitle('Fade (0.7s)');
     expect(overlay.className).toContain('inset-y-0');
     expect(overlay.style.top).toBe('var(--editor-timeline-clip-label-row-height)');
-    expect(overlay.style.bottom).toBe('var(--editor-timeline-video-waveform-height)');
+    expect(overlay.style.bottom).toBe('0px');
   });
 });

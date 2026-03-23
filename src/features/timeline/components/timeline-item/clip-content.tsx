@@ -6,9 +6,7 @@ import { CompoundClipWaveform } from '../clip-waveform/compound-clip-waveform';
 import { useSettingsStore } from '@/features/timeline/deps/settings';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import { useCompositionsStore } from '../../stores/compositions-store';
-import { useItemsStore } from '../../stores/items-store';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
-import { hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
 import { summarizeCompositionClipContent } from '../../utils/composition-clip-summary';
 
 interface ClipContentProps {
@@ -25,9 +23,9 @@ interface ClipContentProps {
 
 /**
  * Renders the visual content of a timeline clip based on its type.
- * - Video: 3-row layout — label | filmstrip | waveform
+ * - Video: 2-row layout — label | filmstrip
  * - Audio: Label row + waveform
- * - Composition (with video): Same 3-row layout as video
+ * - Composition (with video): Label | filmstrip | waveform
  * - Text: Text content preview
  * - Adjustment: Effects summary
  * - Image/Shape: Simple label
@@ -45,9 +43,6 @@ export const ClipContent = memo(function ClipContent({
 }: ClipContentProps) {
   const showWaveforms = useSettingsStore((s) => s.showWaveforms);
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
-  const hideVideoWaveform = useItemsStore(
-    useCallback((s) => item.type === 'video' && hasLinkedAudioCompanion(s.items, item), [item])
-  );
 
   const renderCompoundClipLabel = useCallback((label: string) => (
     <div
@@ -154,7 +149,7 @@ export const ClipContent = memo(function ClipContent({
   const compoundClipSourceDuration = compositionSourceDurationFrames / compoundClipTimelineFps;
   const compoundClipSourceStart = compositionSourceStartFrames / compoundClipTimelineFps;
 
-  // Video clip 3-row layout: label | filmstrip | waveform
+  // Video clip 2-row layout: label | filmstrip
   if (item.type === 'video' && item.mediaId) {
     return (
       <div className="absolute inset-0 flex flex-col">
@@ -187,25 +182,6 @@ export const ClipContent = memo(function ClipContent({
             />
           )}
         </div>
-        {/* Row 3: Waveform - fixed height with gradient bg */}
-        {showWaveforms && !hideVideoWaveform && (
-          <div
-            className="relative overflow-hidden bg-waveform-gradient"
-            style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineVideoWaveformHeight }}
-          >
-            <ClipWaveform
-              mediaId={item.mediaId}
-              clipWidth={clipWidth}
-              sourceStart={sourceStart}
-              sourceDuration={sourceDuration}
-              trimStart={trimStart}
-              speed={speed}
-              fps={fps}
-              isVisible={isClipVisible}
-              pixelsPerSecond={pixelsPerSecond}
-            />
-          </div>
-        )}
       </div>
     );
   }
