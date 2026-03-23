@@ -29,9 +29,8 @@ const CLIP_HEIGHT = DEFAULT_TRACK_HEIGHT;
 // Shared clip layout
 export const CLIP_LABEL_ROW_HEIGHT = EDITOR_LAYOUT.timelineClipLabelRowHeight;
 
-// Video clip layout (3 rows: label | filmstrip | waveform)
-export const VIDEO_WAVEFORM_HEIGHT = EDITOR_LAYOUT.timelineVideoWaveformHeight;
-const VIDEO_FILMSTRIP_HEIGHT = CLIP_HEIGHT - CLIP_LABEL_ROW_HEIGHT - VIDEO_WAVEFORM_HEIGHT;
+// Video clip layout (2 rows: label | filmstrip)
+const VIDEO_FILMSTRIP_HEIGHT = CLIP_HEIGHT - CLIP_LABEL_ROW_HEIGHT;
 
 // =============================================================================
 // FILMSTRIP / THUMBNAILS

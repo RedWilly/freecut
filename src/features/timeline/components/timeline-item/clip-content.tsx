@@ -6,8 +6,10 @@ import { CompoundClipWaveform } from '../clip-waveform/compound-clip-waveform';
 import { useSettingsStore } from '@/features/timeline/deps/settings';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import { useCompositionsStore } from '../../stores/compositions-store';
+import { useItemsStore } from '../../stores/items-store';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { summarizeCompositionClipContent } from '../../utils/composition-clip-summary';
+import { hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
 
 interface ClipContentProps {
   item: TimelineItem;
@@ -43,6 +45,7 @@ export const ClipContent = memo(function ClipContent({
 }: ClipContentProps) {
   const showWaveforms = useSettingsStore((s) => s.showWaveforms);
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
+  const isCompositionAudioWrapper = item.type === 'audio' && !!item.compositionId;
 
   const renderCompoundClipLabel = useCallback((label: string) => (
     <div
@@ -60,9 +63,15 @@ export const ClipContent = memo(function ClipContent({
   ), []);
 
   // For composition items: find the topmost video in the sub-comp for filmstrip
-  const compositionId = item.type === 'composition' ? item.compositionId : undefined;
+  const compositionId = item.type === 'composition' || isCompositionAudioWrapper ? item.compositionId : undefined;
   const composition = useCompositionsStore(
     useCallback((s) => (compositionId ? s.compositionById[compositionId] ?? null : null), [compositionId])
+  );
+  const hasCompositionAudioCompanion = useItemsStore(
+    useCallback(
+      (s) => item.type === 'composition' && hasLinkedAudioCompanion(s.items, item),
+      [item],
+    ),
   );
   const compositionSummary = useMemo(() => {
     if (!composition) {
@@ -81,7 +90,7 @@ export const ClipContent = memo(function ClipContent({
       });
   }, [composition]);
   const compositionVisualMediaId = compositionSummary.visualMediaId;
-  const showCompositionWaveform = showWaveforms && compositionSummary.hasOwnedAudio;
+  const showCompositionWaveform = showWaveforms && compositionSummary.hasOwnedAudio && !hasCompositionAudioCompanion;
 
   // Use the relevant mediaId so source mapping remains stable for each clip type.
   const effectiveMediaId = item.mediaId ?? compositionVisualMediaId;
@@ -107,13 +116,13 @@ export const ClipContent = memo(function ClipContent({
   const sourceStartFrames = Math.max(0, item.sourceStart ?? 0);
   const compositionSourceDurationFrames = Math.max(
     1,
-    item.type === 'composition'
+    item.type === 'composition' || isCompositionAudioWrapper
       ? (item.sourceDuration ?? composition?.durationInFrames ?? item.durationInFrames)
       : sourceDurationFrames
   );
   const compositionSourceStartFrames = Math.max(
     0,
-    item.type === 'composition'
+    item.type === 'composition' || isCompositionAudioWrapper
       ? (item.sourceStart ?? item.trimStart ?? 0)
       : sourceStartFrames
   );
@@ -222,6 +231,26 @@ export const ClipContent = memo(function ClipContent({
     );
   }
 
+  if (isCompositionAudioWrapper && composition) {
+    return (
+      <div className="absolute inset-0 flex flex-col">
+        {renderCompoundClipLabel(item.label || 'Compound Clip')}
+        {showWaveforms && (
+          <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
+            <CompoundClipWaveform
+              composition={composition}
+              clipWidth={clipWidth}
+              sourceStart={compoundClipSourceStart}
+              sourceDuration={compoundClipSourceDuration}
+              isVisible={isClipVisible}
+              pixelsPerSecond={pixelsPerSecond}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Text item - show text content preview
   if (item.type === 'text') {
     return (
@@ -263,7 +292,7 @@ export const ClipContent = memo(function ClipContent({
           {showCompositionWaveform && composition && (
             <div
               className="relative overflow-hidden bg-waveform-gradient"
-              style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineVideoWaveformHeight }}
+              style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineWaveformRowHeight }}
             >
               <CompoundClipWaveform
                 composition={composition}
@@ -278,7 +307,7 @@ export const ClipContent = memo(function ClipContent({
         </div>
       );
     }
-    if (compositionSummary.hasOwnedAudio && composition) {
+    if (compositionSummary.hasOwnedAudio && composition && !hasCompositionAudioCompanion) {
       return (
         <div className="absolute inset-0 flex flex-col">
           {renderCompoundClipLabel(item.label || 'Compound Clip')}

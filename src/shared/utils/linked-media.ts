@@ -1,5 +1,5 @@
 import type { Transition } from '@/types/transition';
-import type { AudioItem, TimelineItem, VideoItem } from '@/types/timeline';
+import type { AudioItem, CompositionItem, TimelineItem, VideoItem } from '@/types/timeline';
 
 export interface ManagedLinkedAudioTransitionPair {
   leftAudio: AudioItem;
@@ -34,7 +34,41 @@ function isLinkedCompanion(anchor: TimelineItem, candidate: TimelineItem, target
   return isLegacyLinkedPair(anchor, candidate);
 }
 
+export function isCompositionAudioItem(item: TimelineItem): item is AudioItem & { compositionId: string } {
+  return item.type === 'audio' && typeof item.compositionId === 'string' && item.compositionId.length > 0;
+}
+
+export function getLinkedCompositionAudioCompanion(
+  items: TimelineItem[],
+  anchor: CompositionItem,
+): (AudioItem & { compositionId: string }) | null {
+  if (!anchor.linkedGroupId) return null;
+
+  return (items.find((candidate) => (
+    candidate.id !== anchor.id
+    && isCompositionAudioItem(candidate)
+    && candidate.linkedGroupId === anchor.linkedGroupId
+    && candidate.compositionId === anchor.compositionId
+  )) as (AudioItem & { compositionId: string }) | undefined) ?? null;
+}
+
+export function getLinkedCompositionVisualCompanion(
+  items: TimelineItem[],
+  anchor: AudioItem & { compositionId: string },
+): CompositionItem | null {
+  if (!anchor.linkedGroupId) return null;
+
+  return (items.find((candidate) => (
+    candidate.type === 'composition'
+    && candidate.linkedGroupId === anchor.linkedGroupId
+    && candidate.compositionId === anchor.compositionId
+  )) as CompositionItem | undefined) ?? null;
+}
+
 export function getLinkedAudioCompanion(items: TimelineItem[], anchor: TimelineItem): AudioItem | null {
+  if (anchor.type === 'composition') {
+    return getLinkedCompositionAudioCompanion(items, anchor);
+  }
   if (anchor.type !== 'video') return null;
   return (items.find((candidate) => isLinkedCompanion(anchor, candidate, 'audio')) as AudioItem | undefined) ?? null;
 }

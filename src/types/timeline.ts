@@ -10,6 +10,7 @@ type BaseTimelineItem = {
   durationInFrames: number; // Duration in frames (Composition convention)
   label: string;
   mediaId?: string;
+  compositionId?: string; // Reference to a sub-composition for compound wrappers
   originId?: string; // Tracks lineage - items from same split share this for stable React keys
   linkedGroupId?: string; // Links paired timeline items like synced video/audio companions
   // Trim properties for media items

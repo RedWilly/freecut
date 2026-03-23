@@ -2,7 +2,16 @@
  * Composition Actions — create, dissolve, and manage pre-compositions.
  */
 
-import type { TimelineItem, TimelineTrack, CompositionItem } from '@/types/timeline';
+import type { AudioItem, TimelineItem, TimelineTrack, CompositionItem } from '@/types/timeline';
+import {
+  createClassicTrack,
+  findNearestTrackByKind,
+  getAdjacentTrackOrder,
+  getTrackKind,
+  type TrackKind,
+} from '../../utils/classic-tracks';
+import { getCompositionOwnedAudioSources } from '../../utils/composition-clip-summary';
+import { expandSelectionWithLinkedItems } from '../../utils/linked-items';
 import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
@@ -12,7 +21,110 @@ import { useSelectionStore } from '@/shared/state/selection';
 import { DEFAULT_TRACK_HEIGHT } from '../../constants';
 import { useCompositionNavigationStore } from '../composition-navigation-store';
 import { useProjectStore } from '@/features/timeline/deps/projects';
+import {
+  getLinkedCompositionAudioCompanion,
+  getLinkedCompositionVisualCompanion,
+  isCompositionAudioItem,
+} from '@/shared/utils/linked-media';
 import { execute } from './shared';
+
+function getTrackKindForSelectedItems(track: TimelineTrack | undefined, trackItems: TimelineItem[]): TrackKind {
+  return getTrackKind(track ?? { id: '', name: '', height: DEFAULT_TRACK_HEIGHT, locked: false, visible: true, muted: false, solo: false, order: 0, items: [] })
+    ?? (trackItems.every((item) => item.type === 'audio') ? 'audio' : 'video');
+}
+
+function hasCompositionVisualItems(items: TimelineItem[]): boolean {
+  return items.some((item) => item.type !== 'audio');
+}
+
+function buildCompoundWrapperSourceFields(composition: SubComposition) {
+  return {
+    sourceStart: 0,
+    sourceEnd: composition.durationInFrames,
+    sourceDuration: composition.durationInFrames,
+    sourceFps: composition.fps,
+    speed: 1,
+  };
+}
+
+function mapRestoredTrackGroup(params: {
+  subTracks: TimelineTrack[];
+  subItems: TimelineItem[];
+  anchorTrackId: string | null;
+  kind: TrackKind;
+  compFrom: number;
+  existingTracks: TimelineTrack[];
+  currentItems: TimelineItem[];
+  trackIdMapping: Map<string, string>;
+  newTracks: TimelineTrack[];
+}): void {
+  const {
+    subTracks,
+    subItems,
+    anchorTrackId,
+    kind,
+    compFrom,
+    existingTracks,
+    currentItems,
+    trackIdMapping,
+    newTracks,
+  } = params;
+  if (subTracks.length === 0 || !anchorTrackId) return;
+
+  const sortedSubTracks = [...subTracks].sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+  const anchorTrack = [...existingTracks, ...newTracks].find((track) => track.id === anchorTrackId);
+  if (!anchorTrack) return;
+
+  const usedTrackIds = new Set<string>(trackIdMapping.values());
+  const lastIdx = sortedSubTracks.length - 1;
+  trackIdMapping.set(sortedSubTracks[lastIdx]!.id, anchorTrackId);
+  usedTrackIds.add(anchorTrackId);
+
+  const candidatesAbove = [...existingTracks, ...newTracks]
+    .filter((track) => track.id !== anchorTrackId && getTrackKind(track) === kind)
+    .filter((track) => (track.order ?? 0) < (anchorTrack.order ?? 0))
+    .sort((left, right) => (right.order ?? 0) - (left.order ?? 0));
+
+  for (let i = lastIdx - 1; i >= 0; i -= 1) {
+    const subTrack = sortedSubTracks[i]!;
+    const restoredRanges = subItems
+      .filter((item) => item.trackId === subTrack.id)
+      .map((item) => ({ from: item.from + compFrom, end: item.from + compFrom + item.durationInFrames }));
+
+    let foundTrackId: string | null = null;
+    for (const candidate of candidatesAbove) {
+      if (usedTrackIds.has(candidate.id)) continue;
+
+      const existingOnTrack = currentItems.filter((item) => item.trackId === candidate.id);
+      const overlaps = existingOnTrack.some((existing) => {
+        const existingEnd = existing.from + existing.durationInFrames;
+        return restoredRanges.some((range) => range.from < existingEnd && existing.from < range.end);
+      });
+
+      if (!overlaps) {
+        foundTrackId = candidate.id;
+        usedTrackIds.add(candidate.id);
+        break;
+      }
+    }
+
+    if (foundTrackId) {
+      trackIdMapping.set(subTrack.id, foundTrackId);
+      continue;
+    }
+
+    const distanceFromBottom = lastIdx - i;
+    const newTrackId = crypto.randomUUID();
+    trackIdMapping.set(subTrack.id, newTrackId);
+    usedTrackIds.add(newTrackId);
+    newTracks.push({
+      ...subTrack,
+      id: newTrackId,
+      kind,
+      order: (anchorTrack.order ?? 0) - distanceFromBottom * 0.01,
+    });
+  }
+}
 
 /**
  * Create a pre-composition from the currently selected items.
@@ -21,12 +133,11 @@ import { execute } from './shared';
  * 2. Creates a SubComposition with repositioned items (starting at frame 0).
  * 3. Creates tracks within the sub-composition.
  * 4. Removes original items from the main timeline.
- * 5. Inserts a CompositionItem at the bounding box position on the first
- *    available track (or the first selected item's track).
+ * 5. Inserts linked compound wrappers on the target video/audio lanes.
  *
  * Only allowed on the root timeline (1-level nesting limit).
  */
-export function createPreComp(name?: string, itemIds?: string[]): CompositionItem | null {
+export function createPreComp(name?: string, itemIds?: string[]): TimelineItem | null {
   return execute('CREATE_PRE_COMP', () => {
     // Block pre-comp creation inside a sub-composition (1-level nesting limit)
     if (useCompositionNavigationStore.getState().activeCompositionId !== null) return null;
@@ -34,7 +145,8 @@ export function createPreComp(name?: string, itemIds?: string[]): CompositionIte
     const { transitions } = useTransitionsStore.getState();
     const { keyframes } = useKeyframesStore.getState();
     const { fps } = useTimelineSettingsStore.getState();
-    const selectedIds = itemIds ?? useSelectionStore.getState().selectedItemIds;
+    const requestedIds = itemIds ?? useSelectionStore.getState().selectedItemIds;
+    const selectedIds = expandSelectionWithLinkedItems(items, requestedIds);
 
     if (selectedIds.length === 0) return null;
 
@@ -61,14 +173,18 @@ export function createPreComp(name?: string, itemIds?: string[]): CompositionIte
 
     const subCompTracks: TimelineTrack[] = sourceTrackIds.map((trackId, index) => {
       const sourceTrack = sourceTrackMap.get(trackId);
+      const trackItems = selectedItems.filter((item) => item.trackId === trackId);
       return {
         id: crypto.randomUUID(),
         name: sourceTrack?.name ?? `Track ${index + 1}`,
+        kind: getTrackKindForSelectedItems(sourceTrack, trackItems),
         height: sourceTrack?.height ?? DEFAULT_TRACK_HEIGHT,
         locked: false,
-        visible: true,
+        visible: sourceTrack?.visible ?? true,
         muted: sourceTrack?.muted ?? false,
-        solo: false,
+        solo: sourceTrack?.solo ?? false,
+        volume: sourceTrack?.volume ?? 0,
+        color: sourceTrack?.color,
         order: index,
         items: [],
       };
@@ -135,6 +251,65 @@ export function createPreComp(name?: string, itemIds?: string[]): CompositionIte
 
     useCompositionsStore.getState().addComposition(subComp);
 
+    const hasVisualWrapper = hasCompositionVisualItems(subCompItems);
+    const hasOwnedAudio = getCompositionOwnedAudioSources({
+      items: subCompItems,
+      tracks: subCompTracks,
+      fps,
+    }).length > 0;
+
+    const visualSourceTrackIds = sourceTrackIds.filter((trackId) => (
+      selectedItems.some((selectedItem) => selectedItem.trackId === trackId && selectedItem.type !== 'audio')
+    ));
+    const audioSourceTrackIds = sourceTrackIds.filter((trackId) => (
+      selectedItems.some((selectedItem) => selectedItem.trackId === trackId && selectedItem.type === 'audio')
+    ));
+    const visualTargetTrackId = hasVisualWrapper
+      ? visualSourceTrackIds[visualSourceTrackIds.length - 1] ?? null
+      : null;
+
+    let nextTracks = tracks;
+    let audioTargetTrackId = hasOwnedAudio
+      ? audioSourceTrackIds[audioSourceTrackIds.length - 1] ?? null
+      : null;
+
+    if (hasOwnedAudio && !audioTargetTrackId) {
+      const visualTargetTrack = visualTargetTrackId
+        ? nextTracks.find((track) => track.id === visualTargetTrackId) ?? null
+        : null;
+
+      const nearestAudioTrack = visualTargetTrack
+        ? findNearestTrackByKind({
+            tracks: nextTracks,
+            targetTrack: visualTargetTrack,
+            kind: 'audio',
+            direction: 'below',
+          })
+        : nextTracks
+            .filter((track) => !track.isGroup)
+            .filter((track) => getTrackKind(track) === 'audio')
+            .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+            .at(-1)
+          ?? null;
+
+      if (nearestAudioTrack) {
+        audioTargetTrackId = nearestAudioTrack.id;
+      } else {
+        const fallbackTrack = visualTargetTrack ?? nextTracks.at(-1) ?? null;
+        const order = fallbackTrack
+          ? getAdjacentTrackOrder(nextTracks, fallbackTrack, 'below')
+          : 0;
+        const createdAudioTrack = createClassicTrack({
+          tracks: nextTracks,
+          kind: 'audio',
+          order,
+          height: fallbackTrack?.height ?? DEFAULT_TRACK_HEIGHT,
+        });
+        nextTracks = [...nextTracks, createdAudioTrack];
+        audioTargetTrackId = createdAudioTrack.id;
+      }
+    }
+
     // --- 8. Remove original items and their transitions/keyframes ---
     useItemsStore.getState()._removeItems(selectedIds);
 
@@ -148,35 +323,62 @@ export function createPreComp(name?: string, itemIds?: string[]): CompositionIte
     // Remove keyframes for selected items
     useKeyframesStore.getState()._removeKeyframesForItems(selectedIds);
 
-    // --- 9. Insert CompositionItem on the highest-order (bottom-most) selected track ---
-    // Dissolve will map the last sub-comp track back here and expand upward
-    const targetTrackId = sourceTrackIds[sourceTrackIds.length - 1]!;
-    const compositionItem: CompositionItem = {
-      id: crypto.randomUUID(),
-      type: 'composition',
-      trackId: targetTrackId,
-      from: minFrom,
-      durationInFrames,
-      label: compName,
-      compositionId,
-      compositionWidth: width,
-      compositionHeight: height,
-      transform: {
-        x: 0,
-        y: 0,
-        rotation: 0,
-        opacity: 1,
-      },
-    };
+    if (nextTracks !== tracks) {
+      useItemsStore.getState().setTracks(nextTracks);
+    }
 
-    useItemsStore.getState()._addItem(compositionItem);
+    const wrapperSourceFields = buildCompoundWrapperSourceFields(subComp);
+    const linkedGroupId = hasVisualWrapper && hasOwnedAudio ? crypto.randomUUID() : undefined;
+    let compositionItem: CompositionItem | null = null;
+    let compositionAudioItem: AudioItem | null = null;
 
-    // Select the new composition item
-    useSelectionStore.getState().selectItems([compositionItem.id]);
+    if (hasVisualWrapper && visualTargetTrackId) {
+      compositionItem = {
+        id: crypto.randomUUID(),
+        type: 'composition',
+        trackId: visualTargetTrackId,
+        from: minFrom,
+        durationInFrames,
+        label: compName,
+        compositionId,
+        linkedGroupId,
+        compositionWidth: width,
+        compositionHeight: height,
+        transform: {
+          x: 0,
+          y: 0,
+          rotation: 0,
+          opacity: 1,
+        },
+        ...wrapperSourceFields,
+      };
+      useItemsStore.getState()._addItem(compositionItem);
+    }
+
+    if (hasOwnedAudio && audioTargetTrackId) {
+      compositionAudioItem = {
+        id: crypto.randomUUID(),
+        type: 'audio',
+        trackId: audioTargetTrackId,
+        from: minFrom,
+        durationInFrames,
+        label: compName,
+        compositionId,
+        linkedGroupId,
+        src: '',
+        ...wrapperSourceFields,
+      };
+      useItemsStore.getState()._addItem(compositionAudioItem);
+    }
+
+    const nextSelectionIds = [compositionItem?.id, compositionAudioItem?.id].filter((id): id is string => !!id);
+    if (nextSelectionIds.length > 0) {
+      useSelectionStore.getState().selectItems(nextSelectionIds);
+    }
 
     useTimelineSettingsStore.getState().markDirty();
 
-    return compositionItem;
+    return compositionItem ?? compositionAudioItem ?? null;
   }, { name });
 }
 
@@ -187,90 +389,120 @@ export function createPreComp(name?: string, itemIds?: string[]): CompositionIte
 export function dissolvePreComp(compositionItemId: string): boolean {
   return execute('DISSOLVE_PRE_COMP', () => {
     const { items } = useItemsStore.getState();
-    const compositionItem = items.find(
-      (i) => i.id === compositionItemId && i.type === 'composition'
-    );
-    if (!compositionItem || compositionItem.type !== 'composition') return false;
+    const wrapperItem = items.find((item) => (
+      item.id === compositionItemId
+      && (item.type === 'composition' || isCompositionAudioItem(item))
+    ));
+    if (!wrapperItem) return false;
 
-    const subComp = useCompositionsStore.getState().getComposition(
-      compositionItem.compositionId
-    );
+    const compositionId = wrapperItem.compositionId;
+    if (!compositionId) return false;
+    const isAudioWrapper = isCompositionAudioItem(wrapperItem);
+
+    const visualWrapper = wrapperItem.type === 'composition'
+      ? wrapperItem
+      : isAudioWrapper
+      ? getLinkedCompositionVisualCompanion(items, wrapperItem)
+      : null;
+    const audioWrapper = wrapperItem.type === 'composition'
+      ? getLinkedCompositionAudioCompanion(items, wrapperItem)
+      : isAudioWrapper
+      ? wrapperItem
+      : null;
+
+    const subComp = useCompositionsStore.getState().getComposition(compositionId);
     if (!subComp) return false;
 
-    const compFrom = compositionItem.from;
-    const targetTrackId = compositionItem.trackId;
     const { tracks } = useItemsStore.getState();
+    const wrapperIds = [visualWrapper?.id, audioWrapper?.id].filter((id): id is string => !!id);
+    const compFrom = visualWrapper?.from ?? audioWrapper?.from ?? 0;
 
-    // Find the composition item's track to get its order for inserting new tracks nearby
-    const compTrack = tracks.find((t) => t.id === targetTrackId);
-    const compTrackOrder = compTrack?.order ?? 0;
+    let nextTracks = tracks;
 
-    // Map sub-comp tracks to main timeline tracks.
-    // Bottom-most sub-comp track reuses the comp's track.
-    // Upper sub-comp tracks try to reuse existing tracks above the comp
-    // (checking for item overlap), only creating new tracks as a last resort.
-    const sortedSubTracks = [...subComp.tracks].sort((a, b) => a.order - b.order);
+    const resolveAnchorTrackId = (
+      wrapperTrackId: string | null,
+      fallbackTrackId: string | null,
+      kind: TrackKind,
+      direction: 'above' | 'below',
+    ): string | null => {
+      if (wrapperTrackId) return wrapperTrackId;
+      if (!fallbackTrackId) return null;
+
+      const fallbackTrack = nextTracks.find((track) => track.id === fallbackTrackId) ?? null;
+      if (!fallbackTrack) return null;
+
+      const nearestTrack = findNearestTrackByKind({
+        tracks: nextTracks,
+        targetTrack: fallbackTrack,
+        kind,
+        direction,
+      });
+      if (nearestTrack) return nearestTrack.id;
+
+      const createdTrack = createClassicTrack({
+        tracks: nextTracks,
+        kind,
+        order: getAdjacentTrackOrder(nextTracks, fallbackTrack, direction),
+        height: fallbackTrack.height ?? DEFAULT_TRACK_HEIGHT,
+      });
+      nextTracks = [...nextTracks, createdTrack];
+      return createdTrack.id;
+    };
+
+    const sortedSubTracks = [...subComp.tracks].sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+    const visualSubTracks = sortedSubTracks.filter((track) => {
+      const trackItems = subComp.items.filter((item) => item.trackId === track.id);
+      return getTrackKindForSelectedItems(track, trackItems) === 'video';
+    });
+    const audioSubTracks = sortedSubTracks.filter((track) => {
+      const trackItems = subComp.items.filter((item) => item.trackId === track.id);
+      return getTrackKindForSelectedItems(track, trackItems) === 'audio';
+    });
+
+    const visualAnchorTrackId = resolveAnchorTrackId(
+      visualWrapper?.trackId ?? null,
+      audioWrapper?.trackId ?? null,
+      'video',
+      'above',
+    );
+    const audioAnchorTrackId = resolveAnchorTrackId(
+      audioWrapper?.trackId ?? null,
+      visualWrapper?.trackId ?? null,
+      'audio',
+      'below',
+    );
+
     const trackIdMapping = new Map<string, string>();
-    const newTracks: typeof tracks = [];
-    const lastIdx = sortedSubTracks.length - 1;
+    const newTracks: TimelineTrack[] = [];
+    const currentItems = items.filter((item) => !wrapperIds.includes(item.id));
 
-    // Bottom-most sub-comp track → comp's track
-    trackIdMapping.set(sortedSubTracks[lastIdx]!.id, targetTrackId);
-
-    // Candidate tracks above the comp, sorted descending (closest to comp first)
-    const candidatesAbove = [...tracks]
-      .filter((t) => t.id !== targetTrackId && (t.order ?? 0) < compTrackOrder)
-      .sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
-
-    const usedTrackIds = new Set<string>([targetTrackId]);
-    // Current items excluding the comp item itself (for overlap checks)
-    const currentItems = items.filter((i) => i.id !== compositionItemId);
-
-    // Process from second-to-bottom upward so closest-to-comp gets matched first
-    for (let i = lastIdx - 1; i >= 0; i--) {
-      const subTrack = sortedSubTracks[i]!;
-
-      // Items that will be restored onto this track (with absolute positions)
-      const restoredRanges = subComp.items
-        .filter((it) => it.trackId === subTrack.id)
-        .map((it) => ({ from: it.from + compFrom, end: it.from + compFrom + it.durationInFrames }));
-
-      // Try to find an existing track above the comp with no overlap
-      let foundTrackId: string | null = null;
-      for (const candidate of candidatesAbove) {
-        if (usedTrackIds.has(candidate.id)) continue;
-
-        const existingOnTrack = currentItems.filter((it) => it.trackId === candidate.id);
-        const overlaps = existingOnTrack.some((existing) => {
-          const existEnd = existing.from + existing.durationInFrames;
-          return restoredRanges.some((r) => r.from < existEnd && existing.from < r.end);
-        });
-
-        if (!overlaps) {
-          foundTrackId = candidate.id;
-          usedTrackIds.add(candidate.id);
-          break;
-        }
-      }
-
-      if (foundTrackId) {
-        trackIdMapping.set(subTrack.id, foundTrackId);
-      } else {
-        // No suitable existing track — create a new one above the comp
-        const distFromBottom = lastIdx - i;
-        const newTrackId = crypto.randomUUID();
-        trackIdMapping.set(subTrack.id, newTrackId);
-        newTracks.push({
-          ...subTrack,
-          id: newTrackId,
-          order: compTrackOrder - distFromBottom * 0.01,
-        });
-      }
-    }
+    mapRestoredTrackGroup({
+      subTracks: visualSubTracks,
+      subItems: subComp.items,
+      anchorTrackId: visualAnchorTrackId,
+      kind: 'video',
+      compFrom,
+      existingTracks: nextTracks,
+      currentItems,
+      trackIdMapping,
+      newTracks,
+    });
+    mapRestoredTrackGroup({
+      subTracks: audioSubTracks,
+      subItems: subComp.items,
+      anchorTrackId: audioAnchorTrackId,
+      kind: 'audio',
+      compFrom,
+      existingTracks: nextTracks,
+      currentItems,
+      trackIdMapping,
+      newTracks,
+    });
 
     // Add new tracks to the store (only if we couldn't reuse existing ones)
     if (newTracks.length > 0) {
-      useItemsStore.getState().setTracks([...tracks, ...newTracks]);
+      nextTracks = [...nextTracks, ...newTracks];
+      useItemsStore.getState().setTracks(nextTracks);
     }
 
     // Reposition items back to absolute timeline positions with correct track mapping
@@ -282,7 +514,7 @@ export function dissolvePreComp(compositionItemId: string): boolean {
         ...item,
         id: newId,
         from: item.from + compFrom,
-        trackId: trackIdMapping.get(item.trackId) ?? targetTrackId,
+        trackId: trackIdMapping.get(item.trackId) ?? visualAnchorTrackId ?? audioAnchorTrackId ?? item.trackId,
       };
     });
 
@@ -311,8 +543,10 @@ export function dissolvePreComp(compositionItemId: string): boolean {
       useKeyframesStore.getState().setKeyframes([...currentKeyframes, ...restoredKeyframes]);
     }
 
-    // Remove the composition item
-    useItemsStore.getState()._removeItems([compositionItemId]);
+    // Remove the compound wrappers
+    if (wrapperIds.length > 0) {
+      useItemsStore.getState()._removeItems(wrapperIds);
+    }
 
     // Add restored items
     for (const item of restoredItems) {
@@ -321,12 +555,13 @@ export function dissolvePreComp(compositionItemId: string): boolean {
 
     // Check if composition is still referenced by other items
     const remainingRefs = useItemsStore.getState().items.filter(
-      (i) => i.type === 'composition' && i.compositionId === compositionItem.compositionId
+      (item) => item.compositionId === compositionId
+        && (item.type === 'composition' || isCompositionAudioItem(item))
     );
 
     // Only remove the sub-composition if no other items reference it
     if (remainingRefs.length === 0) {
-      useCompositionsStore.getState().removeComposition(compositionItem.compositionId);
+      useCompositionsStore.getState().removeComposition(compositionId);
     }
 
     // Select the restored items

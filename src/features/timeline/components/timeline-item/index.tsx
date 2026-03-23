@@ -1051,8 +1051,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     if (trackLocked) return;
     if (activeToolRef.current === 'razor') return;
 
-    // Composition items: enter the sub-composition
-    if (item.type === 'composition') {
+    // Compound clip wrappers: enter the sub-composition
+    if ((item.type === 'composition' || (item.type === 'audio' && item.compositionId)) && item.compositionId) {
       useCompositionNavigationStore.getState().enterComposition(item.compositionId, item.label);
       return;
     }
@@ -1476,7 +1476,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   );
 
   // Composition operations
-  const isCompositionItem = item.type === 'composition';
+  const isCompositionItem = item.type === 'composition' || (item.type === 'audio' && !!item.compositionId);
   const isInsideSubComp = useCompositionNavigationStore((s) => s.activeCompositionId !== null);
   const [audioFadeEdit, setAudioFadeEdit] = useState<{
     handle: AudioFadeHandle;
@@ -1961,14 +1961,14 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   }, []);
 
   const handleEnterComposition = useCallback(() => {
-    if (item.type !== 'composition') return;
+    if (!isCompositionItem || !item.compositionId) return;
     useCompositionNavigationStore.getState().enterComposition(item.compositionId, item.label);
-  }, [item]);
+  }, [isCompositionItem, item]);
 
   const handleDissolveComposition = useCallback(() => {
-    if (item.type !== 'composition') return;
+    if (!isCompositionItem) return;
     dissolvePreComp(item.id);
-  }, [item]);
+  }, [isCompositionItem, item]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (activeTool === 'trim-edit' && !trackLocked && smartBodyIntent) {

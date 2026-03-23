@@ -6,7 +6,7 @@
  */
 
 import type { CompositionInputProps } from '@/types/export';
-import type { VideoItem, AudioItem, CompositionItem } from '@/types/timeline';
+import type { VideoItem, AudioItem, CompositionItem, TimelineItem, TimelineTrack } from '@/types/timeline';
 import type { Keyframe as VolumeKeyframe } from '@/types/keyframe';
 import type { Transition } from '@/types/transition';
 import { createLogger } from '@/shared/logging/logger';
@@ -23,7 +23,12 @@ import {
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { getMediaAudioCodecById, resolveMediaUrl } from '@/features/export/deps/media-library';
 import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/media/ac3-decoder';
-import { getLinkedVideoIdsWithAudio, getManagedLinkedAudioTransitions } from '@/shared/utils/linked-media';
+import {
+  getLinkedCompositionAudioCompanion,
+  getLinkedVideoIdsWithAudio,
+  getManagedLinkedAudioTransitions,
+  isCompositionAudioItem,
+} from '@/shared/utils/linked-media';
 import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
 
 const log = createLogger('CanvasAudio');
@@ -368,6 +373,86 @@ interface AudioProcessingConfig {
   totalFrames: number;
 }
 
+function appendCompositionAudioSegments(params: {
+  segments: AudioSegment[];
+  track: CompositionInputProps['tracks'][number];
+  compositionItem: CompositionItem | (AudioItem & { compositionId: string });
+  subComp: {
+    items: TimelineItem[];
+    tracks: TimelineTrack[];
+    keyframes?: CompositionInputProps['keyframes'];
+    durationInFrames: number;
+  };
+  fps: number;
+}): void {
+  const { segments, track, compositionItem, subComp, fps } = params;
+  const linkedSubCompVideoIds = getLinkedVideoIdsWithAudio(subComp.items);
+  const compFrom = compositionItem.from;
+  const sourceOffset = compositionItem.sourceStart ?? compositionItem.trimStart ?? 0;
+  const trackMuted = track.muted ?? false;
+
+  for (const subItem of subComp.items) {
+    if (subItem.type !== 'video' && subItem.type !== 'audio') continue;
+    if (subItem.type === 'video' && linkedSubCompVideoIds.has(subItem.id)) continue;
+
+    const subTrack = subComp.tracks.find((candidate) => candidate.id === subItem.trackId);
+    const subTrackMuted = subTrack?.muted ?? false;
+    const src = (subItem.mediaId ? blobUrlManager.get(subItem.mediaId) : null)
+      ?? (subItem as VideoItem | AudioItem).src ?? '';
+    if (!src) continue;
+
+    const subItemKeyframes = subComp.keyframes?.find((keyframe) => keyframe.itemId === subItem.id);
+    const subVolumeKfs = getPropertyKeyframes(subItemKeyframes, 'volume');
+    const startFrame = compFrom + subItem.from - sourceOffset;
+    const compEnd = compFrom + compositionItem.durationInFrames;
+    const effectiveStart = Math.max(startFrame, compFrom);
+    const effectiveEnd = Math.min(startFrame + subItem.durationInFrames, compEnd);
+    const effectiveDuration = effectiveEnd - effectiveStart;
+    if (effectiveDuration <= 0) continue;
+
+    const subItemClipStart = effectiveStart - startFrame;
+    const baseSourceStart = subItem.sourceStart ?? subItem.trimStart ?? 0;
+    const speed = subItem.speed ?? 1;
+    const effectiveSourceStart = baseSourceStart + timelineToSourceFrames(
+      subItemClipStart,
+      speed,
+      fps,
+      subItem.sourceFps ?? fps,
+    );
+
+    const rawFadeInFrames = (subItem.audioFadeIn ?? 0) * fps;
+    const rawFadeOutFrames = (subItem.audioFadeOut ?? 0) * fps;
+    const clippedStartFrames = effectiveStart - startFrame;
+    const clippedEndFrames = (startFrame + subItem.durationInFrames) - effectiveEnd;
+    const adjustedFadeInFrames = Math.max(0, rawFadeInFrames - clippedStartFrames);
+    const adjustedFadeOutFrames = Math.max(0, rawFadeOutFrames - clippedEndFrames);
+
+    segments.push({
+      itemId: subItem.id,
+      trackId: track.id,
+      src,
+      startFrame: effectiveStart,
+      durationFrames: effectiveDuration,
+      sourceStartFrame: effectiveSourceStart,
+      sourceFps: subItem.sourceFps ?? fps,
+      volume: (subItem.volume ?? 0) + (track.volume ?? 0) + (subTrack?.volume ?? 0),
+      fadeInFrames: adjustedFadeInFrames,
+      fadeOutFrames: adjustedFadeOutFrames,
+      fadeInCurve: subItem.audioFadeInCurve ?? 0,
+      fadeOutCurve: subItem.audioFadeOutCurve ?? 0,
+      fadeInCurveX: subItem.audioFadeInCurveX ?? 0.52,
+      fadeOutCurveX: subItem.audioFadeOutCurveX ?? 0.52,
+      useEqualPowerFades: false,
+      speed,
+      muted: trackMuted || subTrackMuted,
+      type: subItem.type as 'video' | 'audio',
+      audioCodec: getMediaAudioCodecById(subItem.mediaId),
+      volumeKeyframes: subVolumeKfs.length > 0 ? subVolumeKfs : undefined,
+      itemFrom: startFrame,
+    });
+  }
+}
+
 /**
  * Extract audio segments from composition.
  *
@@ -421,6 +506,18 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
         });
       } else if (item.type === 'audio') {
         const audioItem = item as AudioItem;
+        if (isCompositionAudioItem(audioItem)) {
+          const subComp = useCompositionsStore.getState().getComposition(audioItem.compositionId);
+          if (!subComp) continue;
+          appendCompositionAudioSegments({
+            segments: audioOnlySegments,
+            track,
+            compositionItem: audioItem,
+            subComp,
+            fps,
+          });
+          continue;
+        }
         if (!audioItem.src) continue;
 
         // Use sourceStart as primary for consistency with video items
@@ -487,86 +584,16 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
     for (const item of track.items) {
       if (item.type !== 'composition') continue;
       const compItem = item as CompositionItem;
+      if (getLinkedCompositionAudioCompanion(timelineItems, compItem)) continue;
       const subComp = useCompositionsStore.getState().getComposition(compItem.compositionId);
       if (!subComp) continue;
-      const linkedSubCompVideoIds = getLinkedVideoIdsWithAudio(subComp.items);
-
-      const compFrom = compItem.from;
-      const sourceOffset = compItem.sourceStart ?? compItem.trimStart ?? 0;
-      const trackMuted = track.muted ?? false;
-
-      for (const subItem of subComp.items) {
-        if (subItem.type !== 'video' && subItem.type !== 'audio') continue;
-        if (subItem.type === 'video' && linkedSubCompVideoIds.has(subItem.id)) continue;
-
-        // Check sub-track muted state
-        const subTrack = subComp.tracks.find((t) => t.id === subItem.trackId);
-        const subTrackMuted = subTrack?.muted ?? false;
-
-        // Prefer fresh blob URL from manager (stored src may be stale/revoked)
-        const src = (subItem.mediaId ? blobUrlManager.get(subItem.mediaId) : null)
-          ?? (subItem as VideoItem | AudioItem).src ?? '';
-        if (!src) continue;
-
-        const subItemKeyframes = subComp.keyframes?.find((k) => k.itemId === subItem.id);
-        const subVolumeKfs = getPropertyKeyframes(subItemKeyframes, 'volume');
-
-        // Map sub-comp timing to main timeline:
-        // Sub-item from is relative to sub-comp start (0-based).
-        // startFrame on main timeline = compFrom + subItem.from - sourceOffset
-        const startFrame = compFrom + subItem.from - sourceOffset;
-
-        // Clamp to composition item bounds on the main timeline
-        const compEnd = compFrom + compItem.durationInFrames;
-        const effectiveStart = Math.max(startFrame, compFrom);
-        const effectiveEnd = Math.min(startFrame + subItem.durationInFrames, compEnd);
-        const effectiveDuration = effectiveEnd - effectiveStart;
-        if (effectiveDuration <= 0) continue;
-
-        // Compute source offset if the sub-item was clipped by the composition bounds
-        const subItemClipStart = effectiveStart - startFrame;
-        const baseSourceStart = subItem.sourceStart ?? subItem.trimStart ?? 0;
-        const speed = subItem.speed ?? 1;
-        const effectiveSourceStart = baseSourceStart + timelineToSourceFrames(
-          subItemClipStart,
-          speed,
-          fps,
-          subItem.sourceFps ?? fps,
-        );
-
-        // Adjust fade durations for clipped portions â€” if the sub-item was
-        // trimmed by composition bounds the fade should be shortened accordingly.
-        const rawFadeInFrames = (subItem.audioFadeIn ?? 0) * fps;
-        const rawFadeOutFrames = (subItem.audioFadeOut ?? 0) * fps;
-        const clippedStartFrames = effectiveStart - startFrame; // frames clipped from start
-        const clippedEndFrames = (startFrame + subItem.durationInFrames) - effectiveEnd; // frames clipped from end
-        const adjustedFadeInFrames = Math.max(0, rawFadeInFrames - clippedStartFrames);
-        const adjustedFadeOutFrames = Math.max(0, rawFadeOutFrames - clippedEndFrames);
-
-        segments.push({
-          itemId: subItem.id,
-          trackId: track.id,
-          src,
-          startFrame: effectiveStart,
-          durationFrames: effectiveDuration,
-          sourceStartFrame: effectiveSourceStart,
-          sourceFps: subItem.sourceFps ?? fps,
-          volume: (subItem.volume ?? 0) + (track.volume ?? 0) + (subTrack?.volume ?? 0),
-          fadeInFrames: adjustedFadeInFrames,
-          fadeOutFrames: adjustedFadeOutFrames,
-          fadeInCurve: subItem.audioFadeInCurve ?? 0,
-          fadeOutCurve: subItem.audioFadeOutCurve ?? 0,
-          fadeInCurveX: subItem.audioFadeInCurveX ?? 0.52,
-          fadeOutCurveX: subItem.audioFadeOutCurveX ?? 0.52,
-          useEqualPowerFades: false,
-          speed,
-          muted: trackMuted || subTrackMuted,
-          type: subItem.type as 'video' | 'audio',
-          audioCodec: getMediaAudioCodecById(subItem.mediaId),
-          volumeKeyframes: subVolumeKfs.length > 0 ? subVolumeKfs : undefined,
-          itemFrom: startFrame,
-        });
-      }
+      appendCompositionAudioSegments({
+        segments,
+        track,
+        compositionItem: compItem,
+        subComp,
+        fps,
+      });
     }
   }
 
@@ -1162,8 +1189,8 @@ async function resolveSubCompMediaUrls(composition: CompositionInputProps): Prom
   const urlResolutions: Promise<void>[] = [];
   for (const track of tracks) {
     for (const item of track.items) {
-      if (item.type !== 'composition') continue;
-      const compItem = item as CompositionItem;
+      if (item.type !== 'composition' && !isCompositionAudioItem(item)) continue;
+      const compItem = item as CompositionItem | (AudioItem & { compositionId: string });
       const subComp = useCompositionsStore.getState().getComposition(compItem.compositionId);
       if (!subComp) continue;
       for (const subItem of subComp.items) {

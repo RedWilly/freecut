@@ -29,7 +29,7 @@ export const EDITOR_DENSITY_PRESETS = {
     timelineSidebarWidth: 192,
     timelineTrackHeight: 80,
     timelineClipLabelRowHeight: 18,
-    timelineVideoWaveformHeight: 30,
+    timelineWaveformRowHeight: 30,
   },
   compact: {
     toolbarHeight: 48,
@@ -53,7 +53,7 @@ export const EDITOR_DENSITY_PRESETS = {
     timelineSidebarWidth: 176,
     timelineTrackHeight: 72,
     timelineClipLabelRowHeight: 16,
-    timelineVideoWaveformHeight: 24,
+    timelineWaveformRowHeight: 24,
   },
 } as const;
 
@@ -93,7 +93,7 @@ const EDITOR_LAYOUT_CSS_VAR_NAMES = {
   timelineSidebarWidth: '--editor-timeline-sidebar-width',
   timelineTrackHeight: '--editor-timeline-track-height',
   timelineClipLabelRowHeight: '--editor-timeline-clip-label-row-height',
-  timelineVideoWaveformHeight: '--editor-timeline-video-waveform-height',
+  timelineWaveformRowHeight: '--editor-timeline-waveform-row-height',
 } as const;
 
 export const EDITOR_LAYOUT_CSS_VALUES = {
@@ -111,7 +111,7 @@ export const EDITOR_LAYOUT_CSS_VALUES = {
   timelineSidebarWidth: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.timelineSidebarWidth})`,
   timelineTrackHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.timelineTrackHeight})`,
   timelineClipLabelRowHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.timelineClipLabelRowHeight})`,
-  timelineVideoWaveformHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.timelineVideoWaveformHeight})`,
+  timelineWaveformRowHeight: `var(${EDITOR_LAYOUT_CSS_VAR_NAMES.timelineWaveformRowHeight})`,
 } as const;
 
 export function getEditorLayoutCssVars(layout = EDITOR_LAYOUT): Record<string, string> {
@@ -130,7 +130,7 @@ export function getEditorLayoutCssVars(layout = EDITOR_LAYOUT): Record<string, s
     [EDITOR_LAYOUT_CSS_VAR_NAMES.timelineSidebarWidth]: `${layout.timelineSidebarWidth}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.timelineTrackHeight]: `${layout.timelineTrackHeight}px`,
     [EDITOR_LAYOUT_CSS_VAR_NAMES.timelineClipLabelRowHeight]: `${layout.timelineClipLabelRowHeight}px`,
-    [EDITOR_LAYOUT_CSS_VAR_NAMES.timelineVideoWaveformHeight]: `${layout.timelineVideoWaveformHeight}px`,
+    [EDITOR_LAYOUT_CSS_VAR_NAMES.timelineWaveformRowHeight]: `${layout.timelineWaveformRowHeight}px`,
   };
 }
 
