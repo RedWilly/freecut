@@ -13,6 +13,9 @@ import {
   sourceToTimelineFrames,
   timelineToSourceFrames,
 } from '../utils/source-calculations';
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
+import { getSynchronizedLinkedItems } from '../utils/linked-items';
+import { applyRateStretchPreview } from '../utils/item-edit-preview';
 
 type StretchHandle = 'start' | 'end';
 
@@ -238,6 +241,10 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       if (deltaFrames !== stretchStateRef.current.currentDelta || isConstrained !== stretchStateRef.current.isConstrained) {
         setStretchState(prev => ({ ...prev, currentDelta: deltaFrames, isConstrained, constraintLabel: isConstrained ? 'speed limit' : null }));
       }
+      const linkedPreviewUpdates = getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+        .filter((linkedItem) => linkedItem.id !== item.id)
+        .map((linkedItem) => applyRateStretchPreview(linkedItem, initialFrom, initialDuration, previewSpeed, fps));
+      useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
       // No snap target visualization for GIFs since clip doesn't move
       return;
     }
@@ -298,6 +305,24 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
         constraintLabel: isConstrained ? 'speed limit' : null,
       }));
     }
+
+    let previewDuration = Math.round(Math.max(limits.min, Math.min(limits.max, handle === 'start'
+      ? initialDuration - deltaFrames
+      : initialDuration + deltaFrames)));
+    let previewFrom = handle === 'start'
+      ? Math.round(initialFrom + (initialDuration - previewDuration))
+      : Math.round(initialFrom);
+    const resolvedPreview = resolveDurationAndSpeed(sourceDuration, previewDuration, sourceFps, fps);
+    previewDuration = resolvedPreview.duration;
+    const previewSpeed = resolvedPreview.speed;
+    if (handle === 'start') {
+      previewFrom = Math.round(initialFrom + (initialDuration - previewDuration));
+    }
+
+    const linkedPreviewUpdates = getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+      .filter((linkedItem) => linkedItem.id !== item.id)
+      .map((linkedItem) => applyRateStretchPreview(linkedItem, linkedItem.from + (previewFrom - initialFrom), previewDuration, previewSpeed, fps));
+    useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
 
     // Update snap target visualization (only when changed)
     const prevSnap = prevSnapTargetRef.current;
@@ -375,6 +400,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
 
       // Clear drag state (including snap indicator)
       setDragState(null);
+      useLinkedEditPreviewStore.getState().clear();
       prevSnapTargetRef.current = null;
 
       setStretchState({
@@ -404,6 +430,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       return () => {
         window.removeEventListener('mousemove', onMouseMove);
         window.removeEventListener('mouseup', onMouseUp);
+        useLinkedEditPreviewStore.getState().clear();
       };
     }
   }, [stretchState.isStretching]);

@@ -7,6 +7,7 @@ import { useTimelineZoom } from './use-timeline-zoom';
 import { useSnapCalculator } from './use-snap-calculator';
 import { useSlipEditPreviewStore } from '../stores/slip-edit-preview-store';
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store';
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
 import { slipItem, slideItem } from '../stores/actions/item-actions';
 import {
   getSourceProperties,
@@ -16,6 +17,17 @@ import {
 import { clampTrimAmount } from '../utils/trim-utils';
 import { findEditNeighborsWithTransitions } from '../utils/transition-linked-neighbors';
 import { computeClampedSlipDelta } from '../utils/slip-utils';
+import {
+  getMatchingSynchronizedLinkedCounterpart,
+  getSynchronizedLinkedItems,
+} from '../utils/linked-items';
+import {
+  applyMovePreview,
+  applySlipPreview,
+  applyTrimEndPreview,
+  applyTrimStartPreview,
+  type PreviewItemUpdate,
+} from '../utils/item-edit-preview';
 
 interface SlipSlideState {
   isActive: boolean;
@@ -175,6 +187,14 @@ export function useTimelineSlipSlide(
             constraintLabel: isConstrained ? 'no handle' : null,
           }));
         }
+
+        const linkedPreviewUpdates: PreviewItemUpdate[] = getSynchronizedLinkedItems(
+          useTimelineStore.getState().items,
+          currentItem.id,
+        )
+          .filter((linkedItem) => linkedItem.id !== currentItem.id)
+          .map((linkedItem) => applySlipPreview(linkedItem, clamped));
+        useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
       } else if (mode === 'slide') {
         const { leftNeighborId, rightNeighborId } = stateRef.current;
         const storeItem = getItemFromStore();
@@ -249,6 +269,31 @@ export function useTimelineSlipSlide(
               : null,
           }));
         }
+
+        const allItems = useTimelineStore.getState().items;
+        const synchronizedCounterpart = getSynchronizedLinkedItems(allItems, storeItem.id)
+          .find((candidate) => candidate.id !== storeItem.id) ?? null;
+        const linkedPreviewUpdates: PreviewItemUpdate[] = [];
+
+        if (synchronizedCounterpart) {
+          linkedPreviewUpdates.push(applyMovePreview(synchronizedCounterpart, clamped));
+
+          const leftCounterpart = leftNeighborId
+            ? getMatchingSynchronizedLinkedCounterpart(allItems, leftNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+            : null;
+          const rightCounterpart = rightNeighborId
+            ? getMatchingSynchronizedLinkedCounterpart(allItems, rightNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+            : null;
+
+          if (leftCounterpart) {
+            linkedPreviewUpdates.push(applyTrimEndPreview(leftCounterpart, clamped, fps));
+          }
+          if (rightCounterpart) {
+            linkedPreviewUpdates.push(applyTrimStartPreview(rightCounterpart, clamped, fps));
+          }
+        }
+
+        useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
       }
     },
     [pixelsToTime, fps, trackLocked, item.id, getItemFromStore, clampSlipDelta, clampSlideDelta, snapEnabled, getMagneticSnapTargets, snapThresholdFrames],
@@ -273,6 +318,7 @@ export function useTimelineSlipSlide(
       // Clear preview stores
       useSlipEditPreviewStore.getState().clearPreview();
       useSlideEditPreviewStore.getState().clearPreview();
+      useLinkedEditPreviewStore.getState().clear();
 
       // Clear drag state
       setDragState(null);
@@ -304,6 +350,7 @@ export function useTimelineSlipSlide(
         if (stateRef.current.isActive) {
           useSlipEditPreviewStore.getState().clearPreview();
           useSlideEditPreviewStore.getState().clearPreview();
+          useLinkedEditPreviewStore.getState().clear();
           setDragState(null);
           latestDeltaRef.current = 0;
         }

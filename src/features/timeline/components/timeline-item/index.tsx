@@ -6,6 +6,7 @@ import { useItemsStore } from '../../stores/items-store';
 import { useKeyframesStore } from '../../stores/keyframes-store';
 import { useTransitionsStore } from '../../stores/transitions-store';
 import { useTransitionResizePreviewStore } from '../../stores/transition-resize-preview-store';
+import { useLinkedEditPreviewStore } from '../../stores/linked-edit-preview-store';
 import { useRollingEditPreviewStore } from '../../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../../stores/ripple-edit-preview-store';
 import { useSlipEditPreviewStore } from '../../stores/slip-edit-preview-store';
@@ -500,15 +501,24 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   // Determine if this item is being dragged (anchor or follower)
   const isBeingDragged = isDragging || isPartOfDrag;
 
+  const linkedEditPreviewUpdate = useLinkedEditPreviewStore(
+    useCallback((s) => s.updatesById[item.id] ?? null, [item.id])
+  );
+  const previewBaseItem = useMemo<TimelineItemType>(() => (
+    linkedEditPreviewUpdate
+      ? ({ ...item, ...linkedEditPreviewUpdate } as TimelineItemType)
+      : item
+  ), [item, linkedEditPreviewUpdate]);
+
   // Get visual feedback for rate stretch
   const stretchFeedback = isStretching ? getVisualFeedback() : null;
 
   // Check if this is a media item (video/audio/gif) that supports rate stretch
-  const isGifImage = item.type === 'image' && item.label?.toLowerCase().endsWith('.gif');
-  const isMediaItem = item.type === 'video' || item.type === 'audio' || isGifImage;
+  const isGifImage = previewBaseItem.type === 'image' && previewBaseItem.label?.toLowerCase().endsWith('.gif');
+  const isMediaItem = previewBaseItem.type === 'video' || previewBaseItem.type === 'audio' || isGifImage;
 
   // Current speed for badge display
-  const currentSpeed = item.speed || 1;
+  const currentSpeed = previewBaseItem.speed || 1;
 
   // Get FPS for frame-to-time conversion
   const fps = useTimelineStore((s) => s.fps);
@@ -650,8 +660,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     if (!transitionDragPreview || !transitionDragPreviewRightClip) return null;
 
     const bridge = getTransitionBridgeBounds(
-      item.from,
-      item.durationInFrames,
+      previewBaseItem.from,
+      previewBaseItem.durationInFrames,
       transitionDragPreviewRightClip.from,
       transitionDragPreview.durationInFrames,
       transitionDragPreview.alignment,
@@ -670,8 +680,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     };
   }, [
     frameToPixels,
-    item.durationInFrames,
-    item.from,
+    previewBaseItem.durationInFrames,
+    previewBaseItem.from,
     transitionDragPreview,
     transitionDragPreviewRightClip,
   ]);
@@ -691,8 +701,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     (slideNeighborSide === 'left' ? slideNeighborDelta : 0)
     + (slideNeighborSide === 'right' ? -slideNeighborDelta : 0);
 
-  const left = Math.round(timeToPixels((item.from + slideFromOffset + rippleEditOffset) / fps));
-  const right = Math.round(timeToPixels((item.from + item.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset) / fps));
+  const left = Math.round(timeToPixels((previewBaseItem.from + slideFromOffset + rippleEditOffset) / fps));
+  const right = Math.round(timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset) / fps));
   const width = right - left;
 
   // Calculate trim visual feedback
@@ -700,15 +710,15 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const trimDeltaPixels = isTrimming ? timeToPixels(trimDelta / fps) : 0;
 
   // Get source boundaries for clamping
-  const currentSourceStart = item.sourceStart || 0;
-  const sourceDuration = item.sourceDuration || (item.durationInFrames * currentSpeed);
-  const currentSourceEnd = item.sourceEnd || sourceDuration;
+  const currentSourceStart = previewBaseItem.sourceStart || 0;
+  const sourceDuration = previewBaseItem.sourceDuration || (previewBaseItem.durationInFrames * currentSpeed);
+  const currentSourceEnd = previewBaseItem.sourceEnd || sourceDuration;
   // Source FPS for converting source frames â†’ timeline frames (sourceStart etc. are in source-native FPS)
-  const effectiveSourceFps = item.sourceFps ?? fps;
+  const effectiveSourceFps = previewBaseItem.sourceFps ?? fps;
 
   // Preview item for clip internals (filmstrip/waveform) during edit drags.
   const contentPreviewItem = useMemo<TimelineItemType>(() => {
-    let nextItem = item;
+    let nextItem = previewBaseItem;
     let previewStartTrimDelta = 0;
     let previewDurationDelta = 0;
 
@@ -763,7 +773,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       }
     }
 
-    if ((item.type === 'video' || item.type === 'audio') && slipEditDelta !== 0) {
+    if ((previewBaseItem.type === 'video' || previewBaseItem.type === 'audio') && slipEditDelta !== 0) {
       const nextSourceStart = Math.max(0, (nextItem.sourceStart ?? 0) + slipEditDelta);
       const nextSourceEnd = nextItem.sourceEnd !== undefined
         ? Math.max(nextSourceStart + 1, nextItem.sourceEnd + slipEditDelta)
@@ -777,7 +787,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     }
 
     // Start-trim equivalents shift sourceStart in source-frame units.
-    if ((item.type === 'video' || item.type === 'audio') && previewStartTrimDelta !== 0) {
+    if ((previewBaseItem.type === 'video' || previewBaseItem.type === 'audio') && previewStartTrimDelta !== 0) {
       const sourceFramesDelta = timelineToSourceFrames(
         previewStartTrimDelta,
         nextItem.speed ?? 1,
@@ -799,7 +809,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
     return nextItem;
   }, [
-    item,
+    previewBaseItem,
     isTrimming,
     trimHandle,
     trimDelta,
@@ -840,7 +850,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     // by even 1 px.  `rippleEdgeDelta` equals the downstream `rippleEditOffset`.
     if (rippleEdgeDelta !== 0) {
       const newRight = Math.round(
-        timeToPixels((item.from + item.durationInFrames + rippleEdgeDelta) / fps)
+        timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + rippleEdgeDelta) / fps)
       );
       trimVisualWidth = newRight - trimVisualLeft;
     } else if (isTrimming) {
@@ -848,9 +858,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         const maxExtendBySource = canExtendInfinitely
           ? Infinity
           : subCompDuration !== null
-            ? Math.max(0, subCompDuration - item.durationInFrames)
+            ? Math.max(0, subCompDuration - previewBaseItem.durationInFrames)
             : Math.floor((currentSourceStart / effectiveSourceFps * fps) / currentSpeed);
-        const maxExtendByTimeline = item.from;
+        const maxExtendByTimeline = previewBaseItem.from;
         const maxExtendTimelineFrames = Math.min(maxExtendBySource, maxExtendByTimeline);
         const maxExtendPixels = canExtendInfinitely ? Infinity : timeToPixels(maxExtendTimelineFrames / fps);
         const maxTrimPixels = width - minWidthPixels;
@@ -866,7 +876,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         const maxExtendSourceFrames = canExtendInfinitely
           ? Infinity
           : subCompDuration !== null
-            ? Math.max(0, subCompDuration - item.durationInFrames)
+            ? Math.max(0, subCompDuration - previewBaseItem.durationInFrames)
             : (sourceDuration - currentSourceEnd);
         const maxExtendTimelineFrames = subCompDuration !== null
           ? maxExtendSourceFrames
@@ -916,7 +926,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     };
   }, [
     left, width, isTrimming, trimHandle, isStretching, stretchFeedback,
-    canExtendInfinitely, currentSourceStart, currentSpeed, effectiveSourceFps, item.from, item.durationInFrames,
+    canExtendInfinitely, currentSourceStart, currentSpeed, effectiveSourceFps, previewBaseItem.from, previewBaseItem.durationInFrames,
     timeToPixels, fps, minWidthPixels, trimDeltaPixels, sourceDuration, currentSourceEnd,
     subCompDuration, rollingEditDelta, rollingEditHandle, rippleEdgeDelta
   ]);

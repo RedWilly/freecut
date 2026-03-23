@@ -10,8 +10,20 @@ import { clampTrimAmount, clampToAdjacentItems, type TrimHandle } from '../utils
 import { useTransitionsStore } from '../stores/transitions-store';
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
 import { rollingTrimItems, rippleTrimItem } from '../stores/actions/item-actions';
 import { findHandleNeighborWithTransitions } from '../utils/transition-linked-neighbors';
+import {
+  buildSynchronizedLinkedMoveUpdates,
+  getSynchronizedLinkedCounterpartPair,
+  getSynchronizedLinkedItems,
+} from '../utils/linked-items';
+import {
+  applyMovePreview,
+  applyTrimEndPreview,
+  applyTrimStartPreview,
+  type PreviewItemUpdate,
+} from '../utils/item-edit-preview';
 
 interface TrimState {
   isTrimming: boolean;
@@ -357,6 +369,82 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       // Update local state for visual feedback
       const isRolling = isRollingEdit && neighborId !== null;
+      const linkedPreviewUpdates: PreviewItemUpdate[] = [];
+
+      if (isRolling && neighborId) {
+        const counterpartPair = handle === 'end'
+          ? getSynchronizedLinkedCounterpartPair(allItems, currentItem.id, neighborId)
+          : getSynchronizedLinkedCounterpartPair(allItems, neighborId, currentItem.id);
+
+        if (counterpartPair) {
+          linkedPreviewUpdates.push(
+            applyTrimEndPreview(counterpartPair.leftCounterpart, deltaFrames, fps),
+            applyTrimStartPreview(counterpartPair.rightCounterpart, deltaFrames, fps),
+          );
+        }
+      } else if (isRippleEdit) {
+        const synchronizedItems = getSynchronizedLinkedItems(allItems, currentItem.id);
+        const linkedCompanions = synchronizedItems.filter((linkedItem) => linkedItem.id !== currentItem.id);
+
+        for (const linkedItem of linkedCompanions) {
+          if (handle === 'end') {
+            linkedPreviewUpdates.push(applyTrimEndPreview(linkedItem, deltaFrames, fps));
+          } else {
+            linkedPreviewUpdates.push({
+              ...applyTrimStartPreview(linkedItem, deltaFrames, fps),
+              from: linkedItem.from,
+            });
+          }
+        }
+
+        const rippleShift = handle === 'end' ? deltaFrames : -deltaFrames;
+        if (rippleShift !== 0 && synchronizedItems.length > 1) {
+          const synchronizedIds = new Set(synchronizedItems.map((linkedItem) => linkedItem.id));
+          const oldById = new Map(synchronizedItems.map((linkedItem) => [linkedItem.id, linkedItem]));
+          const baseDeltaByItemId = new Map<string, number>();
+
+          for (const synchronizedItem of synchronizedItems) {
+            const synchronizedOld = oldById.get(synchronizedItem.id);
+            if (!synchronizedOld) continue;
+
+            const synchronizedOldEnd = synchronizedOld.from + synchronizedOld.durationInFrames;
+            const transitionNeighborIds = new Set<string>();
+            for (const transition of transitions) {
+              if (transition.leftClipId === synchronizedItem.id) {
+                transitionNeighborIds.add(transition.rightClipId);
+              }
+            }
+
+            for (const candidate of allItems) {
+              if (synchronizedIds.has(candidate.id)) continue;
+              if (candidate.trackId !== synchronizedOld.trackId) continue;
+              if (candidate.from >= synchronizedOldEnd || transitionNeighborIds.has(candidate.id)) {
+                baseDeltaByItemId.set(candidate.id, rippleShift);
+              }
+            }
+          }
+
+          linkedPreviewUpdates.push(
+            ...buildSynchronizedLinkedMoveUpdates(allItems, baseDeltaByItemId).map((update) => applyMovePreview(
+              allItems.find((candidate) => candidate.id === update.id)!,
+              update.from - (allItems.find((candidate) => candidate.id === update.id)?.from ?? update.from),
+            )),
+          );
+        }
+      } else {
+        const synchronizedItems = getSynchronizedLinkedItems(allItems, currentItem.id);
+        for (const linkedItem of synchronizedItems) {
+          if (linkedItem.id === currentItem.id) continue;
+          linkedPreviewUpdates.push(
+            handle === 'end'
+              ? applyTrimEndPreview(linkedItem, deltaFrames, fps)
+              : applyTrimStartPreview(linkedItem, deltaFrames, fps),
+          );
+        }
+      }
+
+      useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
+
       if (deltaFrames !== trimStateRef.current.currentDelta ||
           isRolling !== trimStateRef.current.isRollingEdit ||
           isRippleEdit !== trimStateRef.current.isRippleEdit ||
@@ -430,6 +518,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       // Clear ripple edit preview
       useRippleEditPreviewStore.getState().clearPreview();
+      useLinkedEditPreviewStore.getState().clear();
 
       // Clear drag state (including snap indicator)
       setDragState(null);
@@ -483,6 +572,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
+        useLinkedEditPreviewStore.getState().clear();
       };
     }
   }, [trimState.isTrimming, handleMouseMove, handleMouseUp]);

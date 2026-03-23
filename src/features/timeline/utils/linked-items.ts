@@ -32,6 +32,93 @@ export function hasLinkedItems(items: TimelineItem[], itemId: string): boolean {
   return getLinkedItemIds(items, itemId).length > 1;
 }
 
+export function getSynchronizedLinkedItems(items: TimelineItem[], itemId: string): TimelineItem[] {
+  const linkedItems = getLinkedItems(items, itemId);
+  const anchor = linkedItems.find((item) => item.id === itemId);
+  if (!anchor) return [];
+
+  const synchronizedItems = linkedItems.filter((item) => (
+    item.id === anchor.id
+    || (
+      item.from === anchor.from
+      && item.durationInFrames === anchor.durationInFrames
+      && (item.sourceStart ?? null) === (anchor.sourceStart ?? null)
+      && (item.sourceEnd ?? null) === (anchor.sourceEnd ?? null)
+      && (item.speed ?? 1) === (anchor.speed ?? 1)
+    )
+  ));
+
+  return synchronizedItems.length > 0 ? synchronizedItems : [anchor];
+}
+
+export function getMatchingSynchronizedLinkedCounterpart(
+  items: TimelineItem[],
+  itemId: string,
+  trackId: string,
+  type: TimelineItem['type'],
+): TimelineItem | null {
+  return getSynchronizedLinkedItems(items, itemId).find((item) => (
+    item.id !== itemId && item.trackId === trackId && item.type === type
+  )) ?? null;
+}
+
+export function getSynchronizedLinkedCounterpartPair(
+  items: TimelineItem[],
+  leftId: string,
+  rightId: string,
+): { leftCounterpart: TimelineItem; rightCounterpart: TimelineItem } | null {
+  const leftCounterparts = getSynchronizedLinkedItems(items, leftId).filter((item) => item.id !== leftId);
+  const rightCounterparts = getSynchronizedLinkedItems(items, rightId).filter((item) => item.id !== rightId);
+
+  for (const leftCounterpart of leftCounterparts) {
+    const rightCounterpart = rightCounterparts.find((item) => (
+      item.trackId === leftCounterpart.trackId && item.type === leftCounterpart.type
+    ));
+    if (rightCounterpart) {
+      return { leftCounterpart, rightCounterpart };
+    }
+  }
+
+  return null;
+}
+
+export function buildSynchronizedLinkedMoveUpdates(
+  items: TimelineItem[],
+  baseDeltaByItemId: ReadonlyMap<string, number>,
+): Array<{ id: string; from: number }> {
+  const deltaByItemId = new Map(baseDeltaByItemId);
+  const visited = new Set<string>();
+
+  for (const item of items) {
+    if (visited.has(item.id)) continue;
+
+    const synchronizedItems = getSynchronizedLinkedItems(items, item.id);
+    for (const synchronizedItem of synchronizedItems) {
+      visited.add(synchronizedItem.id);
+    }
+
+    if (synchronizedItems.length <= 1) continue;
+
+    const groupDelta = synchronizedItems.reduce((selected, synchronizedItem) => {
+      const candidate = baseDeltaByItemId.get(synchronizedItem.id) ?? 0;
+      return Math.abs(candidate) > Math.abs(selected) ? candidate : selected;
+    }, 0);
+
+    if (groupDelta === 0) continue;
+
+    for (const synchronizedItem of synchronizedItems) {
+      deltaByItemId.set(synchronizedItem.id, groupDelta);
+    }
+  }
+
+  return items.flatMap((item) => {
+    const delta = deltaByItemId.get(item.id) ?? 0;
+    return delta !== 0
+      ? [{ id: item.id, from: item.from + delta }]
+      : [];
+  });
+}
+
 export function canLinkItems(items: TimelineItem[]): boolean {
   if (items.length !== 2) return false;
 

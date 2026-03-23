@@ -3,6 +3,7 @@ import type { Transition } from '@/types/transition';
 import { useShallow } from 'zustand/react/shallow';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useItemsStore } from '../stores/items-store';
+import { useSettingsStore } from '@/features/timeline/deps/settings';
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store';
@@ -24,6 +25,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/shared/ui/cn';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
 import { Trash2 } from 'lucide-react';
 import {
   applyPreviewGeometryToClip,
@@ -83,6 +86,8 @@ export const TransitionItem = memo(function TransitionItem({
   const rightClip = useItemsStore(
     useCallback((s) => s.itemById[transition.rightClipId], [transition.rightClipId])
   );
+  const allItems = useItemsStore((s) => s.items);
+  const showWaveforms = useSettingsStore((s) => s.showWaveforms);
 
   // Check if transition is selected
   const isSelected = useSelectionStore(
@@ -426,6 +431,18 @@ export const TransitionItem = memo(function TransitionItem({
   }
 
   const presentationLabel = transition.presentation?.charAt(0).toUpperCase() + transition.presentation?.slice(1) || 'Fade';
+  const hasVideoWaveformRow = useMemo(() => {
+    if (!showWaveforms) return false;
+    if (!leftClip || !rightClip) return false;
+
+    const clipHasWaveform = (clip: typeof leftClip) => {
+      if (!clip) return false;
+      if (clip.type !== 'video') return false;
+      return !hasLinkedAudioCompanion(allItems, clip);
+    };
+
+    return clipHasWaveform(leftClip) || clipHasWaveform(rightClip);
+  }, [allItems, leftClip, rightClip, showWaveforms]);
 
   // Determine cursor based on hover state
   const cursor = hoveredEdge ? 'ew-resize' : 'pointer';
@@ -445,6 +462,8 @@ export const TransitionItem = memo(function TransitionItem({
           style={{
             left: `${position.left}px`,
             width: `${position.width}px`,
+            top: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
+            bottom: hasVideoWaveformRow ? EDITOR_LAYOUT_CSS_VALUES.timelineVideoWaveformHeight : '0px',
             zIndex: isResizing ? 50 : 10,
             opacity: trackHidden ? 0.3 : undefined,
           }}
@@ -479,7 +498,7 @@ export const TransitionItem = memo(function TransitionItem({
           {/* Left resize handle */}
           <div
             className={cn(
-              'absolute left-0 top-0 h-3 w-2 bg-slate-100/85 cursor-ew-resize rounded-tl pointer-events-auto',
+              'absolute left-0 top-0 bottom-0 w-3 bg-slate-100/75 cursor-ew-resize rounded-l pointer-events-auto',
               hoveredEdge === 'left' || (isResizing && resizeHandle === 'left')
                 ? 'opacity-100'
                 : 'opacity-0'
@@ -494,7 +513,7 @@ export const TransitionItem = memo(function TransitionItem({
           {/* Right resize handle */}
           <div
             className={cn(
-              'absolute right-0 top-0 h-3 w-2 bg-slate-100/85 cursor-ew-resize rounded-tr pointer-events-auto',
+              'absolute right-0 top-0 bottom-0 w-3 bg-slate-100/75 cursor-ew-resize rounded-r pointer-events-auto',
               hoveredEdge === 'right' || (isResizing && resizeHandle === 'right')
                 ? 'opacity-100'
                 : 'opacity-0'
