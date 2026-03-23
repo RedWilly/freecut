@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveSmartBodyIntent,
   resolveSmartTrimIntent,
+  SMART_TRIM_EDGE_ZONE_PX,
+  SMART_TRIM_RETENTION_PX,
+  SMART_TRIM_ROLL_ZONE_PX,
   smartTrimIntentToHandle,
   smartTrimIntentToMode,
 } from './smart-trim-zones';
@@ -9,50 +12,68 @@ import {
 describe('smart-trim-zones', () => {
   it('returns roll intent on the inner cut band when a neighbor exists', () => {
     expect(resolveSmartTrimIntent({
-      x: 3,
+      x: SMART_TRIM_ROLL_ZONE_PX - 1,
       width: 120,
       hasLeftNeighbor: true,
       hasRightNeighbor: false,
     })).toBe('roll-start');
 
     expect(resolveSmartTrimIntent({
-      x: 117,
+      x: 120 - (SMART_TRIM_ROLL_ZONE_PX - 1),
       width: 120,
       hasLeftNeighbor: false,
       hasRightNeighbor: true,
     })).toBe('roll-end');
   });
 
-  it('falls back to ripple on outer edge bands', () => {
+  it('falls back to plain trim on outer edge bands', () => {
     expect(resolveSmartTrimIntent({
-      x: 9,
+      x: SMART_TRIM_ROLL_ZONE_PX + 2,
       width: 120,
       hasLeftNeighbor: true,
       hasRightNeighbor: false,
-    })).toBe('ripple-start');
+    })).toBe('trim-start');
 
     expect(resolveSmartTrimIntent({
-      x: 111,
+      x: 120 - (SMART_TRIM_ROLL_ZONE_PX + 2),
       width: 120,
       hasLeftNeighbor: false,
       hasRightNeighbor: true,
-    })).toBe('ripple-end');
+    })).toBe('trim-end');
   });
 
-  it('uses ripple when no adjacent neighbor exists for rolling', () => {
+  it('uses ripple intent on transition bridge edge bands', () => {
     expect(resolveSmartTrimIntent({
-      x: 2,
+      x: SMART_TRIM_ROLL_ZONE_PX + 2,
       width: 120,
-      hasLeftNeighbor: false,
+      hasLeftNeighbor: true,
       hasRightNeighbor: false,
+      hasStartBridge: true,
     })).toBe('ripple-start');
 
     expect(resolveSmartTrimIntent({
-      x: 118,
+      x: 120 - (SMART_TRIM_ROLL_ZONE_PX + 2),
+      width: 120,
+      hasLeftNeighbor: false,
+      hasRightNeighbor: true,
+      hasEndBridge: true,
+    })).toBe('ripple-end');
+  });
+
+  it('uses plain trim when no adjacent neighbor exists for rolling', () => {
+    expect(resolveSmartTrimIntent({
+      x: SMART_TRIM_ROLL_ZONE_PX - 1,
       width: 120,
       hasLeftNeighbor: false,
       hasRightNeighbor: false,
-    })).toBe('ripple-end');
+    })).toBe('trim-start');
+
+    expect(resolveSmartTrimIntent({
+      x: 120 - (SMART_TRIM_ROLL_ZONE_PX - 1),
+      width: 120,
+      hasLeftNeighbor: false,
+      hasRightNeighbor: false,
+    })).toBe('trim-end');
   });
 
   it('returns null away from smart edge zones', () => {
@@ -66,15 +87,24 @@ describe('smart-trim-zones', () => {
 
   it('keeps edge intent sticky until the pointer clearly leaves the zone', () => {
     expect(resolveSmartTrimIntent({
-      x: 11,
+      x: SMART_TRIM_EDGE_ZONE_PX - 1,
       width: 120,
       hasLeftNeighbor: true,
       hasRightNeighbor: false,
+      currentIntent: 'trim-start',
+    })).toBe('trim-start');
+
+    expect(resolveSmartTrimIntent({
+      x: SMART_TRIM_EDGE_ZONE_PX - 1,
+      width: 120,
+      hasLeftNeighbor: true,
+      hasRightNeighbor: false,
+      hasStartBridge: true,
       currentIntent: 'ripple-start',
     })).toBe('ripple-start');
 
     expect(resolveSmartTrimIntent({
-      x: 7,
+      x: SMART_TRIM_ROLL_ZONE_PX + SMART_TRIM_RETENTION_PX - 1,
       width: 120,
       hasLeftNeighbor: true,
       hasRightNeighbor: false,
@@ -82,11 +112,23 @@ describe('smart-trim-zones', () => {
     })).toBe('roll-start');
   });
 
+  it('switches from roll to trim sooner with tighter thresholds', () => {
+    expect(resolveSmartTrimIntent({
+      x: SMART_TRIM_ROLL_ZONE_PX + SMART_TRIM_RETENTION_PX + 1,
+      width: 120,
+      hasLeftNeighbor: true,
+      hasRightNeighbor: false,
+      currentIntent: 'roll-start',
+    })).toBe('trim-start');
+  });
+
   it('maps intent to handle and mode', () => {
     expect(smartTrimIntentToHandle('roll-start')).toBe('start');
+    expect(smartTrimIntentToHandle('trim-end')).toBe('end');
     expect(smartTrimIntentToHandle('ripple-end')).toBe('end');
     expect(smartTrimIntentToMode('roll-start')).toBe('rolling');
     expect(smartTrimIntentToMode('ripple-end')).toBe('ripple');
+    expect(smartTrimIntentToMode('trim-end')).toBeNull();
     expect(smartTrimIntentToMode(null)).toBeNull();
   });
 

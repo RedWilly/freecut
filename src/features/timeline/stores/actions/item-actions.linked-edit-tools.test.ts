@@ -16,6 +16,7 @@ import {
   slideItem,
   slipItem,
   splitItem,
+  trimItemBreakingTransition,
   trimItemStart,
 } from './item-actions';
 
@@ -169,6 +170,35 @@ describe('linked edit tools', () => {
     expect(itemById['audio-3']).toMatchObject({ from: 112 });
     expect(useTransitionsStore.getState().transitions).toEqual([
       expect.objectContaining({ leftClipId: 'video-1', rightClipId: 'video-2', durationInFrames: 12 }),
+    ]);
+  });
+
+  it('undoes a bridge-breaking trim in a single step', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({ id: 'video-1', linkedGroupId: 'group-1', sourceEnd: 80, sourceDuration: 140 }),
+      makeAudioItem({ id: 'audio-1', linkedGroupId: 'group-1', sourceEnd: 80, sourceDuration: 140 }),
+      makeVideoItem({ id: 'video-2', from: 60, linkedGroupId: 'group-2', mediaId: 'media-2', sourceStart: 12, sourceEnd: 72, sourceDuration: 140 }),
+      makeAudioItem({ id: 'audio-2', from: 60, linkedGroupId: 'group-2', mediaId: 'media-2', sourceStart: 12, sourceEnd: 72, sourceDuration: 140 }),
+    ]);
+    addTransition('video-1', 'video-2', 'crossfade', 12);
+
+    const transitionId = useTransitionsStore.getState().transitions[0]?.id;
+    expect(transitionId).toBeTruthy();
+
+    trimItemBreakingTransition('video-2', 'start', 10, [transitionId!]);
+
+    let itemById = useItemsStore.getState().itemById;
+    expect(itemById['video-2']).toMatchObject({ from: 70, durationInFrames: 50, sourceStart: 22, sourceEnd: 72 });
+    expect(itemById['audio-2']).toMatchObject({ from: 70, durationInFrames: 50, sourceStart: 22, sourceEnd: 72 });
+    expect(useTransitionsStore.getState().transitions).toHaveLength(0);
+
+    useTimelineCommandStore.getState().undo();
+
+    itemById = useItemsStore.getState().itemById;
+    expect(itemById['video-2']).toMatchObject({ from: 60, durationInFrames: 60, sourceStart: 12, sourceEnd: 72 });
+    expect(itemById['audio-2']).toMatchObject({ from: 60, durationInFrames: 60, sourceStart: 12, sourceEnd: 72 });
+    expect(useTransitionsStore.getState().transitions).toEqual([
+      expect.objectContaining({ id: transitionId, leftClipId: 'video-1', rightClipId: 'video-2', durationInFrames: 12 }),
     ]);
   });
 

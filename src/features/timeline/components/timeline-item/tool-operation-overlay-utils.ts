@@ -13,11 +13,14 @@ import { findHandleNeighborWithTransitions } from '../../utils/transition-linked
 const LARGE_OPERATION_DELTA = 1_000_000_000;
 const MAX_BOX_WIDTH_PX = 12000;
 
+export type OperationMode = 'trim' | 'ripple' | 'rolling' | 'stretch' | 'slide' | 'slip';
+
 export interface OperationBoundsVisual {
   boxLeftPx: number | null;
   boxWidthPx: number | null;
   edgePositionsPx: number[];
   constrained: boolean;
+  mode: OperationMode;
 }
 
 interface TrimBoundsOptions {
@@ -244,6 +247,7 @@ export function getTrimOperationBoundsVisual({
     ...bounds,
     edgePositionsPx: [handle === 'start' ? currentLeftPx : currentRightPx],
     constrained,
+    mode: isRollingEdit ? 'rolling' : isRippleEdit ? 'ripple' : 'trim',
   };
 }
 
@@ -263,6 +267,7 @@ export function getStretchOperationBoundsVisual({
       boxWidthPx: null,
       edgePositionsPx: [handle === 'start' ? currentLeftPx : currentRightPx],
       constrained,
+      mode: 'stretch',
     };
   }
 
@@ -280,6 +285,7 @@ export function getStretchOperationBoundsVisual({
     ...bounds,
     edgePositionsPx: [handle === 'start' ? currentLeftPx : currentRightPx],
     constrained,
+    mode: 'stretch',
   };
 }
 
@@ -307,6 +313,7 @@ export function getSlideOperationBoundsVisual({
     ...bounds,
     edgePositionsPx: [currentLeftPx, currentRightPx],
     constrained,
+    mode: 'slide',
   };
 }
 
@@ -324,6 +331,7 @@ export function getSlipOperationBoundsVisual({
       boxWidthPx: null,
       edgePositionsPx: [currentLeftPx, currentRightPx],
       constrained,
+      mode: 'slip',
     };
   }
 
@@ -334,6 +342,7 @@ export function getSlipOperationBoundsVisual({
       boxWidthPx: null,
       edgePositionsPx: [currentLeftPx, currentRightPx],
       constrained,
+      mode: 'slip',
     };
   }
 
@@ -366,5 +375,6 @@ export function getSlipOperationBoundsVisual({
     ...bounds,
     edgePositionsPx: [currentLeftPx, currentRightPx],
     constrained,
+    mode: 'slip',
   };
 }

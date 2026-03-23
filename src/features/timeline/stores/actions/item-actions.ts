@@ -539,60 +539,70 @@ export function duplicateItemsWithTrackChanges(
   }, { itemIds, count: positions.length, trackCount: tracks.length });
 }
 
-export function trimItemStart(id: string, trimAmount: number): void {
-  execute('TRIM_ITEM_START', () => {
-    const itemsStore = useItemsStore.getState();
-    const itemsBefore = itemsStore.items;
-    const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
-    const anchorBefore = synchronizedItems.find((item) => item.id === id);
-    if (!anchorBefore) return;
+function applySynchronizedTrim(id: string, handle: 'start' | 'end', trimAmount: number): void {
+  const itemsStore = useItemsStore.getState();
+  const itemsBefore = itemsStore.items;
+  const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
+  const anchorBefore = synchronizedItems.find((item) => item.id === id);
+  if (!anchorBefore) return;
 
+  if (handle === 'start') {
     itemsStore._trimItemStart(id, trimAmount);
+  } else {
+    itemsStore._trimItemEnd(id, trimAmount);
+  }
 
-    const anchorAfter = useItemsStore.getState().itemById[id];
-    const actualTrimAmount = anchorAfter ? anchorAfter.from - anchorBefore.from : 0;
+  const anchorAfter = useItemsStore.getState().itemById[id];
+  const actualTrimAmount = handle === 'start'
+    ? anchorAfter ? anchorAfter.from - anchorBefore.from : 0
+    : anchorAfter ? anchorAfter.durationInFrames - anchorBefore.durationInFrames : 0;
 
-    if (actualTrimAmount !== 0) {
-      for (const synchronizedItem of synchronizedItems) {
-        if (synchronizedItem.id === id) continue;
+  if (actualTrimAmount !== 0) {
+    for (const synchronizedItem of synchronizedItems) {
+      if (synchronizedItem.id === id) continue;
+
+      if (handle === 'start') {
         itemsStore._trimItemStart(synchronizedItem.id, actualTrimAmount, { skipAdjacentClamp: true });
+      } else {
+        itemsStore._trimItemEnd(synchronizedItem.id, actualTrimAmount, { skipAdjacentClamp: true });
       }
     }
+  }
 
-    // Repair transitions (auto-adjusts duration if clip got shorter)
-    applyTransitionRepairs(synchronizedItems.map((item) => item.id));
+  applyTransitionRepairs(synchronizedItems.map((item) => item.id));
+  useTimelineSettingsStore.getState().markDirty();
+}
 
-    useTimelineSettingsStore.getState().markDirty();
+export function trimItemStart(id: string, trimAmount: number): void {
+  execute('TRIM_ITEM_START', () => {
+    applySynchronizedTrim(id, 'start', trimAmount);
   }, { id, trimAmount });
 }
 
 export function trimItemEnd(id: string, trimAmount: number): void {
   execute('TRIM_ITEM_END', () => {
-    const itemsStore = useItemsStore.getState();
-    const itemsBefore = itemsStore.items;
-    const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
-    const anchorBefore = synchronizedItems.find((item) => item.id === id);
-    if (!anchorBefore) return;
+    applySynchronizedTrim(id, 'end', trimAmount);
+  }, { id, trimAmount });
+}
 
-    itemsStore._trimItemEnd(id, trimAmount);
-
-    const anchorAfter = useItemsStore.getState().itemById[id];
-    const actualTrimAmount = anchorAfter
-      ? anchorAfter.durationInFrames - anchorBefore.durationInFrames
-      : 0;
-
-    if (actualTrimAmount !== 0) {
-      for (const synchronizedItem of synchronizedItems) {
-        if (synchronizedItem.id === id) continue;
-        itemsStore._trimItemEnd(synchronizedItem.id, actualTrimAmount, { skipAdjacentClamp: true });
-      }
+export function trimItemBreakingTransition(
+  id: string,
+  handle: 'start' | 'end',
+  trimAmount: number,
+  transitionIdsToRemove: string[],
+): void {
+  execute(handle === 'start' ? 'TRIM_ITEM_START' : 'TRIM_ITEM_END', () => {
+    if (transitionIdsToRemove.length > 0) {
+      useTransitionsStore.getState()._removeTransitions(transitionIdsToRemove);
     }
 
-    // Repair transitions (auto-adjusts duration if clip got shorter)
-    applyTransitionRepairs(synchronizedItems.map((item) => item.id));
-
-    useTimelineSettingsStore.getState().markDirty();
-  }, { id, trimAmount });
+    applySynchronizedTrim(id, handle, trimAmount);
+  }, {
+    id,
+    handle,
+    trimAmount,
+    removedTransitionCount: transitionIdsToRemove.length,
+  });
 }
 
 /**

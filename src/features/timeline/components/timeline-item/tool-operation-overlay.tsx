@@ -11,11 +11,26 @@ export const ToolOperationOverlay = memo(function ToolOperationOverlay({
 }: ToolOperationOverlayProps) {
   if (!visual) return null;
 
+  const boxAccentClass = visual.mode === 'ripple'
+    ? 'border-amber-200/85 bg-amber-300/[0.06] shadow-[0_0_0_1px_rgba(251,191,36,0.26),0_10px_24px_rgba(15,23,42,0.18)]'
+    : visual.mode === 'rolling'
+    ? 'border-sky-200/85 bg-sky-300/[0.05] shadow-[0_0_0_1px_rgba(125,211,252,0.24),0_10px_24px_rgba(15,23,42,0.18)]'
+    : 'border-white/80 bg-white/[0.035] shadow-[0_0_0_1px_rgba(15,23,42,0.45),0_10px_24px_rgba(15,23,42,0.18)]';
+
+  const edgeModeClass = visual.mode === 'ripple'
+    ? 'bg-amber-300/20 shadow-[0_0_10px_rgba(251,191,36,0.26)]'
+    : visual.mode === 'rolling'
+    ? 'bg-sky-300/18 shadow-[0_0_10px_rgba(125,211,252,0.22)]'
+    : 'bg-transparent shadow-none';
+
   return (
     <>
       {visual.boxLeftPx !== null && visual.boxWidthPx !== null && (
         <div
-          className="absolute pointer-events-none z-30 rounded-[6px] border border-white/80 bg-white/[0.035] shadow-[0_0_0_1px_rgba(15,23,42,0.45),0_10px_24px_rgba(15,23,42,0.18)]"
+          className={cn(
+            'absolute pointer-events-none z-30 rounded-[6px] border',
+            boxAccentClass,
+          )}
           style={{
             left: `${visual.boxLeftPx}px`,
             width: `${visual.boxWidthPx}px`,
@@ -35,6 +50,12 @@ export const ToolOperationOverlay = memo(function ToolOperationOverlay({
             bottom: 2,
           }}
         >
+          <div
+            className={cn(
+              'absolute inset-y-0 left-1/2 w-[8px] -translate-x-1/2 rounded-full',
+              edgeModeClass,
+            )}
+          />
           <div
             className={cn(
               'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/95',

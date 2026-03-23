@@ -12,7 +12,11 @@ import { useTransitionsStore } from '../stores/transitions-store';
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
 import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
-import { rollingTrimItems, rippleTrimItem } from '../stores/actions/item-actions';
+import {
+  rollingTrimItems,
+  rippleTrimItem,
+  trimItemBreakingTransition,
+} from '../stores/actions/item-actions';
 import { findHandleNeighborWithTransitions } from '../utils/transition-linked-neighbors';
 import {
   buildSynchronizedLinkedMoveUpdates,
@@ -495,21 +499,19 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       // Only update store if there was actual change
       if (deltaFrames !== 0) {
+        const transitionIdsToRemove = state.destroyTransitionAtHandle && state.handle
+          ? useTransitionsStore.getState().transitions
+              .filter((transition) => (
+                state.handle === 'start'
+                  ? transition.rightClipId === item.id
+                  : transition.leftClipId === item.id
+              ))
+              .map((transition) => transition.id)
+          : [];
+
         if (state.destroyTransitionAtHandle && state.handle) {
-          const transitionIdsToRemove = useTransitionsStore.getState().transitions
-            .filter((transition) => (
-              state.handle === 'start'
-                ? transition.rightClipId === item.id
-                : transition.leftClipId === item.id
-            ))
-            .map((transition) => transition.id);
-
-          if (transitionIdsToRemove.length > 0) {
-            useTransitionsStore.getState()._removeTransitions(transitionIdsToRemove);
-          }
-        }
-
-        if (state.isRippleEdit) {
+          trimItemBreakingTransition(item.id, state.handle, deltaFrames, transitionIdsToRemove);
+        } else if (state.isRippleEdit) {
           // Ripple edit: trim + shift downstream items
           rippleTrimItem(item.id, state.handle!, deltaFrames);
         } else if (state.isRollingEdit && state.neighborId) {

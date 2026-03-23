@@ -1,11 +1,17 @@
-export type SmartTrimIntent = 'ripple-start' | 'ripple-end' | 'roll-start' | 'roll-end' | null;
+export type SmartTrimIntent = 'trim-start' | 'trim-end' | 'ripple-start' | 'ripple-end' | 'roll-start' | 'roll-end' | null;
 export type SmartBodyIntent = 'slip-body' | 'slide-body' | null;
+
+export const SMART_TRIM_EDGE_ZONE_PX = 12;
+export const SMART_TRIM_ROLL_ZONE_PX = 4;
+export const SMART_TRIM_RETENTION_PX = 2;
 
 interface ResolveSmartTrimIntentParams {
   x: number;
   width: number;
   hasLeftNeighbor: boolean;
   hasRightNeighbor: boolean;
+  hasStartBridge?: boolean;
+  hasEndBridge?: boolean;
   currentIntent?: SmartTrimIntent;
   edgeZonePx?: number;
   rollZonePx?: number;
@@ -17,37 +23,54 @@ export function resolveSmartTrimIntent({
   width,
   hasLeftNeighbor,
   hasRightNeighbor,
+  hasStartBridge = false,
+  hasEndBridge = false,
   currentIntent = null,
-  edgeZonePx = 12,
-  rollZonePx = 6,
-  retentionPx = 4,
+  edgeZonePx = SMART_TRIM_EDGE_ZONE_PX,
+  rollZonePx = SMART_TRIM_ROLL_ZONE_PX,
+  retentionPx = SMART_TRIM_RETENTION_PX,
 }: ResolveSmartTrimIntentParams): SmartTrimIntent {
   if (width <= 0) return null;
+
+  const resolveOuterIntent = (edge: 'start' | 'end'): SmartTrimIntent => {
+    if (edge === 'start') {
+      return hasStartBridge ? 'ripple-start' : 'trim-start';
+    }
+    return hasEndBridge ? 'ripple-end' : 'trim-end';
+  };
 
   const distanceToStart = Math.max(0, x);
   const distanceToEnd = Math.max(0, width - x);
 
-  if (currentIntent === 'roll-start' || currentIntent === 'ripple-start') {
+  if (currentIntent === 'roll-start' || currentIntent === 'trim-start' || currentIntent === 'ripple-start') {
     if (distanceToStart <= edgeZonePx + retentionPx && distanceToStart <= distanceToEnd + retentionPx) {
       if (hasLeftNeighbor && currentIntent === 'roll-start' && distanceToStart <= rollZonePx + retentionPx) {
         return 'roll-start';
       }
-      if (hasLeftNeighbor && currentIntent === 'ripple-start' && distanceToStart <= Math.max(2, rollZonePx - 2)) {
+      if (
+        hasLeftNeighbor
+        && (currentIntent === 'trim-start' || currentIntent === 'ripple-start')
+        && distanceToStart <= Math.max(2, rollZonePx - 2)
+      ) {
         return 'roll-start';
       }
-      return 'ripple-start';
+      return resolveOuterIntent('start');
     }
   }
 
-  if (currentIntent === 'roll-end' || currentIntent === 'ripple-end') {
+  if (currentIntent === 'roll-end' || currentIntent === 'trim-end' || currentIntent === 'ripple-end') {
     if (distanceToEnd <= edgeZonePx + retentionPx && distanceToEnd <= distanceToStart + retentionPx) {
       if (hasRightNeighbor && currentIntent === 'roll-end' && distanceToEnd <= rollZonePx + retentionPx) {
         return 'roll-end';
       }
-      if (hasRightNeighbor && currentIntent === 'ripple-end' && distanceToEnd <= Math.max(2, rollZonePx - 2)) {
+      if (
+        hasRightNeighbor
+        && (currentIntent === 'trim-end' || currentIntent === 'ripple-end')
+        && distanceToEnd <= Math.max(2, rollZonePx - 2)
+      ) {
         return 'roll-end';
       }
-      return 'ripple-end';
+      return resolveOuterIntent('end');
     }
   }
 
@@ -60,18 +83,18 @@ export function resolveSmartTrimIntent({
     if (hasLeftNeighbor && closestDistance <= rollZonePx) {
       return 'roll-start';
     }
-    return 'ripple-start';
+    return resolveOuterIntent('start');
   }
 
   if (hasRightNeighbor && closestDistance <= rollZonePx) {
     return 'roll-end';
   }
-  return 'ripple-end';
+  return resolveOuterIntent('end');
 }
 
 export function smartTrimIntentToHandle(intent: SmartTrimIntent): 'start' | 'end' | null {
-  if (intent === 'ripple-start' || intent === 'roll-start') return 'start';
-  if (intent === 'ripple-end' || intent === 'roll-end') return 'end';
+  if (intent === 'trim-start' || intent === 'ripple-start' || intent === 'roll-start') return 'start';
+  if (intent === 'trim-end' || intent === 'ripple-end' || intent === 'roll-end') return 'end';
   return null;
 }
 

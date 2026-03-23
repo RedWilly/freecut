@@ -64,6 +64,9 @@ import { getVisibleTrackIds } from '../../utils/group-utils';
 import {
   resolveSmartBodyIntent,
   resolveSmartTrimIntent,
+  SMART_TRIM_EDGE_ZONE_PX,
+  SMART_TRIM_RETENTION_PX,
+  SMART_TRIM_ROLL_ZONE_PX,
   smartTrimIntentToHandle,
   smartTrimIntentToMode,
   type SmartBodyIntent,
@@ -71,7 +74,6 @@ import {
 } from '../../utils/smart-trim-zones';
 import { useMarkersStore } from '../../stores/markers-store';
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store';
-import { useCompositionsStore } from '../../stores/compositions-store';
 import { insertFreezeFrame, linkItems, unlinkItems } from '../../stores/actions/item-actions';
 import {
   createPreComp,
@@ -95,6 +97,8 @@ const EMPTY_SEGMENT_OVERLAYS = [] as const;
 const ACTIVE_CURSOR_CLASSES = [
   'timeline-cursor-trim-left',
   'timeline-cursor-trim-right',
+  'timeline-cursor-ripple-left',
+  'timeline-cursor-ripple-right',
   'timeline-cursor-trim-center',
   'timeline-cursor-slip-smart',
   'timeline-cursor-slide-smart',
@@ -102,7 +106,7 @@ const ACTIVE_CURSOR_CLASSES = [
 ] as const;
 
 // Width in pixels for edge hover detection (trim/rate-stretch handles)
-const EDGE_HOVER_ZONE = 12;
+const EDGE_HOVER_ZONE = SMART_TRIM_EDGE_ZONE_PX;
 const AUDIO_FADE_EPSILON = 0.0001;
 const AUDIO_VOLUME_EPSILON = 0.05;
 const AUDIO_ENVELOPE_VIEWBOX_HEIGHT = 100;
@@ -218,18 +222,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   );
   const hasKeyframes = keyframedProperties.length > 0;
 
-  // Granular selector: sub-composition duration for trim clamping on composition items
-  const compositionId = item.type === 'composition' ? item.compositionId : undefined;
-  const subCompDuration = useCompositionsStore(
-    useCallback(
-      (s) => {
-        if (!compositionId) return null;
-        return s.compositionById[compositionId]?.durationInFrames ?? null;
-      },
-      [compositionId]
-    )
-  );
-
   // Use refs for actions to avoid selector re-renders - read from store in callbacks
   const activeTool = useSelectionStore((s) => s.activeTool);
 
@@ -278,10 +270,18 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const activeGlobalCursorClass = useMemo(() => {
     if (isTrimming) {
       if (trimHandle === 'start') {
-        return isRollingEdit ? 'timeline-cursor-trim-center' : 'timeline-cursor-trim-left';
+        return isRollingEdit
+          ? 'timeline-cursor-trim-center'
+          : isRippleEdit
+          ? 'timeline-cursor-ripple-left'
+          : 'timeline-cursor-trim-left';
       }
       if (trimHandle === 'end') {
-        return isRollingEdit ? 'timeline-cursor-trim-center' : 'timeline-cursor-trim-right';
+        return isRollingEdit
+          ? 'timeline-cursor-trim-center'
+          : isRippleEdit
+          ? 'timeline-cursor-ripple-right'
+          : 'timeline-cursor-trim-right';
       }
     }
 
@@ -296,7 +296,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     }
 
     return null;
-  }, [isRollingEdit, isSlipSlideActive, isStretching, isTrimming, slipSlideMode, trimHandle]);
+  }, [isRollingEdit, isRippleEdit, isSlipSlideActive, isStretching, isTrimming, slipSlideMode, trimHandle]);
 
   useEffect(() => {
     document.body.classList.remove(...ACTIVE_CURSOR_CLASSES);
@@ -686,14 +686,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const right = Math.round(timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset) / fps));
   const width = right - left;
 
-  // Calculate trim visual feedback
-  const minWidthPixels = timeToPixels(1 / fps);
-  const trimDeltaPixels = isTrimming ? timeToPixels(trimDelta / fps) : 0;
-
-  // Get source boundaries for clamping
-  const currentSourceStart = previewBaseItem.sourceStart || 0;
-  const sourceDuration = previewBaseItem.sourceDuration || (previewBaseItem.durationInFrames * currentSpeed);
-  const currentSourceEnd = previewBaseItem.sourceEnd || sourceDuration;
   // Source FPS for converting source frames â†’ timeline frames (sourceStart etc. are in source-native FPS)
   const effectiveSourceFps = previewBaseItem.sourceFps ?? fps;
 
@@ -817,9 +809,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     || slideEditOffset !== 0
     || slideNeighborDelta !== 0;
 
-  // Items that can extend infinitely
-  const canExtendInfinitely = item.type === 'image' || item.type === 'text' || item.type === 'shape' || item.type === 'adjustment';
-
   // Calculate visual positions during trim/stretch
   const { visualLeft, visualWidth } = useMemo(() => {
     let trimVisualLeft = left;
@@ -834,43 +823,14 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + rippleEdgeDelta) / fps)
       );
       trimVisualWidth = newRight - trimVisualLeft;
-    } else if (isTrimming) {
+    } else if (isTrimming && trimHandle) {
       if (trimHandle === 'start') {
-        const maxExtendBySource = canExtendInfinitely
-          ? Infinity
-          : subCompDuration !== null
-            ? Math.max(0, subCompDuration - previewBaseItem.durationInFrames)
-            : Math.floor((currentSourceStart / effectiveSourceFps * fps) / currentSpeed);
-        const maxExtendByTimeline = previewBaseItem.from;
-        const maxExtendTimelineFrames = Math.min(maxExtendBySource, maxExtendByTimeline);
-        const maxExtendPixels = canExtendInfinitely ? Infinity : timeToPixels(maxExtendTimelineFrames / fps);
-        const maxTrimPixels = width - minWidthPixels;
-
-        const clampedDelta = Math.max(
-          -maxExtendPixels,
-          Math.min(maxTrimPixels, trimDeltaPixels)
-        );
-
-        trimVisualLeft = Math.round(left + clampedDelta);
-        trimVisualWidth = Math.round(width - clampedDelta);
+        const nextLeft = Math.round(frameToPixels(previewBaseItem.from + trimDelta));
+        trimVisualLeft = nextLeft;
+        trimVisualWidth = right - nextLeft;
       } else {
-        const maxExtendSourceFrames = canExtendInfinitely
-          ? Infinity
-          : subCompDuration !== null
-            ? Math.max(0, subCompDuration - previewBaseItem.durationInFrames)
-            : (sourceDuration - currentSourceEnd);
-        const maxExtendTimelineFrames = subCompDuration !== null
-          ? maxExtendSourceFrames
-          : Math.floor((maxExtendSourceFrames / effectiveSourceFps * fps) / currentSpeed);
-        const maxExtendPixels = canExtendInfinitely ? Infinity : timeToPixels(maxExtendTimelineFrames / fps);
-        const maxTrimPixels = width - minWidthPixels;
-
-        const clampedDelta = Math.max(
-          -maxExtendPixels,
-          Math.min(maxTrimPixels, -trimDeltaPixels)
-        );
-
-        trimVisualWidth = Math.round(width - clampedDelta);
+        const nextRight = Math.round(frameToPixels(previewBaseItem.from + previewBaseItem.durationInFrames + trimDelta));
+        trimVisualWidth = nextRight - left;
       }
     }
 
@@ -907,9 +867,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     };
   }, [
     left, width, isTrimming, trimHandle, isStretching, stretchFeedback,
-    canExtendInfinitely, currentSourceStart, currentSpeed, effectiveSourceFps, previewBaseItem.from, previewBaseItem.durationInFrames,
-    timeToPixels, fps, minWidthPixels, trimDeltaPixels, sourceDuration, currentSourceEnd,
-    subCompDuration, rollingEditDelta, rollingEditHandle, rippleEdgeDelta
+    frameToPixels, previewBaseItem.from, previewBaseItem.durationInFrames,
+    timeToPixels, fps, trimDelta, right, rollingEditDelta, rollingEditHandle, rippleEdgeDelta
   ]);
 
   const toolOperationOverlay = useMemo(() => {
@@ -1146,13 +1105,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const transitions = useTransitionsStore.getState().transitions;
       const hasLeftNeighbor = !!findHandleNeighborWithTransitions(item, 'start', items, transitions);
       const hasRightNeighbor = !!findHandleNeighborWithTransitions(item, 'end', items, transitions);
+      const hasStartBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'start');
+      const hasEndBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'end');
       const nextIntent = resolveSmartTrimIntent({
         x,
         width: itemWidth,
         hasLeftNeighbor,
         hasRightNeighbor,
+        hasStartBridge,
+        hasEndBridge,
         currentIntent: smartTrimIntentRef.current,
-        edgeZonePx: EDGE_HOVER_ZONE,
+        edgeZonePx: SMART_TRIM_EDGE_ZONE_PX,
+        rollZonePx: SMART_TRIM_ROLL_ZONE_PX,
+        retentionPx: SMART_TRIM_RETENTION_PX,
       });
       const nextHoveredEdge = smartTrimIntentToHandle(nextIntent);
 
@@ -1208,8 +1173,12 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'roll-end'
     ? 'cursor-trim-center'
     : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'ripple-start'
-    ? 'cursor-trim-left'
+    ? 'cursor-ripple-left'
     : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'ripple-end'
+    ? 'cursor-ripple-right'
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'trim-start'
+    ? 'cursor-trim-left'
+    : (activeTool === 'trim-edit' || activeTool === 'select') && smartTrimIntent === 'trim-end'
     ? 'cursor-trim-right'
     : activeTool === 'trim-edit' && smartBodyIntent === 'slide-body'
     ? 'cursor-slide-smart'
@@ -1217,6 +1186,10 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     ? 'cursor-slip-smart'
     : activeTool === 'trim-edit' && smartBodyIntent !== null
     ? 'cursor-ew-resize'
+    : hoveredEdge === 'start' && activeTool === 'ripple-edit'
+    ? 'cursor-ripple-left'
+    : hoveredEdge === 'end' && activeTool === 'ripple-edit'
+    ? 'cursor-ripple-right'
     : hoveredEdge !== null && (activeTool === 'trim-edit' || activeTool === 'rate-stretch' || activeTool === 'rolling-edit' || activeTool === 'ripple-edit')
     ? 'cursor-ew-resize'
     : activeTool === 'rate-stretch'
@@ -2358,8 +2331,22 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             activeTool={activeTool}
             hoveredEdge={hoveredEdge}
             trimConstrained={trimConstrained}
-            startCursorClass={smartTrimIntent === 'roll-start' ? 'cursor-trim-center' : 'cursor-trim-left'}
-            endCursorClass={smartTrimIntent === 'roll-end' ? 'cursor-trim-center' : 'cursor-trim-right'}
+            startCursorClass={
+              activeTool === 'ripple-edit' || smartTrimIntent === 'ripple-start'
+                ? 'cursor-ripple-left'
+                : smartTrimIntent === 'roll-start'
+                ? 'cursor-trim-center'
+                : 'cursor-trim-left'
+            }
+            endCursorClass={
+              activeTool === 'ripple-edit' || smartTrimIntent === 'ripple-end'
+                ? 'cursor-ripple-right'
+                : smartTrimIntent === 'roll-end'
+                ? 'cursor-trim-center'
+                : 'cursor-trim-right'
+            }
+            startTone={activeTool === 'ripple-edit' || smartTrimIntent === 'ripple-start' || (isTrimming && trimHandle === 'start' && isRippleEdit) ? 'ripple' : 'default'}
+            endTone={activeTool === 'ripple-edit' || smartTrimIntent === 'ripple-end' || (isTrimming && trimHandle === 'end' && isRippleEdit) ? 'ripple' : 'default'}
             hasJoinableLeft={hasJoinableLeft}
             hasJoinableRight={hasJoinableRight}
             onTrimStart={handleSmartTrimStart}
