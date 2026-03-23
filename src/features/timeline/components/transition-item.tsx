@@ -44,8 +44,8 @@ interface TransitionItemProps {
  * Renders a cut-centered transition bridge overlay between adjacent clips.
  * The clips keep their full visual width under the bridge, similar to DaVinci.
  */
-// Width in pixels for edge hover detection (resize handles)
-const EDGE_HOVER_ZONE = 6;
+const BRIDGE_SELECT_SIDE_INSET = 6;
+const CUT_PASS_THROUGH_ZONE = 24;
 
 function readDraggedTransitionDescriptor(event: React.DragEvent): DraggedTransitionDescriptor | null {
   const cached = useTransitionDragStore.getState().draggedTransition;
@@ -308,16 +308,26 @@ export const TransitionItem = memo(function TransitionItem({
     const bridgeRight = Math.round(frameToPixels(bridge.rightFrame));
     const bridgeLeft = Math.round(frameToPixels(bridge.leftFrame));
     const naturalWidth = bridgeRight - bridgeLeft;
+    const leftEnd = effectiveLeftClip.from + effectiveLeftClip.durationInFrames;
+    const cutFrame = Math.abs(leftEnd - effectiveRightClip.from) <= 1
+      ? effectiveRightClip.from
+      : leftEnd;
+    const cutPx = Math.round(frameToPixels(cutFrame));
 
     // Minimum width for visibility
     const minWidth = 32;
     const effectiveWidth = Math.max(naturalWidth, minWidth);
-    // Center the minimum-width bridge on the overlap midpoint
+    // Center the minimum-width bridge on the overlap midpoint, but keep all
+    // geometry snapped to integer pixels so the center cut line does not jitter.
     const left = naturalWidth >= minWidth
       ? bridgeLeft
-      : bridgeLeft - (minWidth - naturalWidth) / 2;
+      : Math.round(((bridgeLeft + bridgeRight) / 2) - (effectiveWidth / 2));
 
-    return { left, width: effectiveWidth };
+    return {
+      left,
+      width: effectiveWidth,
+      cutOffset: cutPx - left,
+    };
   }, [effectiveLeftClip, effectiveRightClip, frameToPixels, previewDuration, transition.alignment]);
 
   // Duration in seconds for display (use previewDuration for visual feedback)
@@ -328,32 +338,6 @@ export const TransitionItem = memo(function TransitionItem({
   const dragPreviewMatches = useTransitionDragStore(
     useCallback((s) => s.preview?.existingTransitionId === transition.id, [transition.id])
   );
-
-  // Handle mouse move to detect edge hover
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (isResizing) return;
-
-      const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-
-      if (x < EDGE_HOVER_ZONE) {
-        setHoveredEdge('left');
-      } else if (x > rect.width - EDGE_HOVER_ZONE) {
-        setHoveredEdge('right');
-      } else {
-        setHoveredEdge(null);
-      }
-    },
-    [isResizing]
-  );
-
-  // Clear hover state when mouse leaves
-  const handleMouseLeave = useCallback(() => {
-    if (!isResizing) {
-      setHoveredEdge(null);
-    }
-  }, [isResizing]);
 
   // Handle click to select (only if not resizing)
   const handleClick = useCallback(
@@ -446,6 +430,12 @@ export const TransitionItem = memo(function TransitionItem({
 
   // Determine cursor based on hover state
   const cursor = hoveredEdge ? 'ew-resize' : 'pointer';
+  const leftSelectWidth = Math.max(0, position.cutOffset - (CUT_PASS_THROUGH_ZONE / 2) - BRIDGE_SELECT_SIDE_INSET);
+  const rightSelectLeft = Math.min(
+    position.width - BRIDGE_SELECT_SIDE_INSET,
+    position.cutOffset + (CUT_PASS_THROUGH_ZONE / 2),
+  );
+  const rightSelectWidth = Math.max(0, position.width - BRIDGE_SELECT_SIDE_INSET - rightSelectLeft);
 
   return (
     <ContextMenu>
@@ -466,6 +456,7 @@ export const TransitionItem = memo(function TransitionItem({
             bottom: hasVideoWaveformRow ? EDITOR_LAYOUT_CSS_VALUES.timelineVideoWaveformHeight : '0px',
             zIndex: isResizing ? 50 : 10,
             opacity: trackHidden ? 0.3 : undefined,
+            cursor: isResizing ? 'ew-resize' : undefined,
           }}
           title={`${presentationLabel} (${durationSec}s)`}
         >
@@ -480,50 +471,77 @@ export const TransitionItem = memo(function TransitionItem({
             <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(248,250,252,0.1),rgba(255,255,255,0.03)_48%,rgba(255,255,255,0.03)_52%,rgba(248,250,252,0.1))]" />
             <div className="absolute inset-x-0 top-0 h-px bg-slate-50/70" />
             <div className="absolute inset-x-0 bottom-0 h-px bg-slate-900/15" />
-            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-50/90" />
           </div>
 
-          <div
-            className="absolute inset-x-0 top-0 h-3 pointer-events-auto"
-            style={{ cursor }}
-            onMouseDown={handleMouseDown}
-            onClick={handleClick}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          />
+          {leftSelectWidth > 0 && (
+            <div
+              className="absolute inset-y-0 pointer-events-auto"
+              style={{
+                left: `${BRIDGE_SELECT_SIDE_INSET}px`,
+                width: `${leftSelectWidth}px`,
+                cursor: isResizing ? 'ew-resize' : cursor,
+              }}
+              onMouseDown={handleMouseDown}
+              onClick={handleClick}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            />
+          )}
+
+          {rightSelectWidth > 0 && (
+            <div
+              className="absolute inset-y-0 pointer-events-auto"
+              style={{
+                left: `${rightSelectLeft}px`,
+                width: `${rightSelectWidth}px`,
+                cursor: isResizing ? 'ew-resize' : cursor,
+              }}
+              onMouseDown={handleMouseDown}
+              onClick={handleClick}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            />
+          )}
 
           {/* Left resize handle */}
           <div
             className={cn(
-              'absolute left-0 top-0 bottom-0 w-3 bg-slate-100/75 cursor-ew-resize rounded-l pointer-events-auto',
+              'absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize rounded-l pointer-events-auto',
               hoveredEdge === 'left' || (isResizing && resizeHandle === 'left')
                 ? 'opacity-100'
                 : 'opacity-0'
             )}
             onMouseEnter={() => setHoveredEdge('left')}
-            onMouseLeave={() => setHoveredEdge(null)}
+            onMouseLeave={() => {
+              if (!isResizing) setHoveredEdge(null);
+            }}
             onMouseDown={(e) => handleResizeStart(e, 'left')}
             onMouseUp={stopEvent}
             onClick={stopEvent}
-          />
+          >
+            <div className="absolute inset-y-0 left-0 w-px rounded-l-sm bg-slate-100/65" />
+          </div>
 
           {/* Right resize handle */}
           <div
             className={cn(
-              'absolute right-0 top-0 bottom-0 w-3 bg-slate-100/75 cursor-ew-resize rounded-r pointer-events-auto',
+              'absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize rounded-r pointer-events-auto',
               hoveredEdge === 'right' || (isResizing && resizeHandle === 'right')
                 ? 'opacity-100'
                 : 'opacity-0'
             )}
             onMouseEnter={() => setHoveredEdge('right')}
-            onMouseLeave={() => setHoveredEdge(null)}
+            onMouseLeave={() => {
+              if (!isResizing) setHoveredEdge(null);
+            }}
             onMouseDown={(e) => handleResizeStart(e, 'right')}
             onMouseUp={stopEvent}
             onClick={stopEvent}
-          />
+          >
+            <div className="absolute inset-y-0 right-0 w-px rounded-r-sm bg-slate-100/65" />
+          </div>
         </div>
       </ContextMenuTrigger>
 
