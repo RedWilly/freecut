@@ -81,8 +81,8 @@ export function canAddTransition(
     return { canAdd: false, reason: 'Clips must meet at the cut' };
   }
 
-  // Check clip types - only video and image clips can have transitions
-  const validTypes = ['video', 'image'];
+  // Check clip types - visual clips can have transitions
+  const validTypes = ['video', 'image', 'composition'];
   if (!validTypes.includes(leftClip.type) || !validTypes.includes(rightClip.type)) {
     return { canAdd: false, reason: 'Transitions only work with video and image clips' };
   }

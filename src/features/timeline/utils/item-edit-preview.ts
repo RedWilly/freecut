@@ -58,7 +58,7 @@ export function applyMovePreview(item: TimelineItem, fromDelta: number): Preview
 }
 
 export function applySlipPreview(item: TimelineItem, slipDelta: number): PreviewItemUpdate {
-  if ((item.type !== 'video' && item.type !== 'audio') || item.sourceEnd === undefined) {
+  if ((item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') || item.sourceEnd === undefined) {
     return { id: item.id };
   }
 
@@ -84,14 +84,14 @@ export function applyRateStretchPreview(
   };
 
   const isGif = item.type === 'image' && item.label?.toLowerCase().endsWith('.gif');
-  if (item.type !== 'video' && item.type !== 'audio' && !isGif) {
+  if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition' && !isGif) {
     return update;
   }
 
   const hasExplicitSourceBounds =
-    (item.type === 'video' || item.type === 'audio') && item.sourceEnd !== undefined;
+    (item.type === 'video' || item.type === 'audio' || item.type === 'composition') && item.sourceEnd !== undefined;
 
-  if (!hasExplicitSourceBounds && (item.type === 'video' || item.type === 'audio')) {
+  if (!hasExplicitSourceBounds && (item.type === 'video' || item.type === 'audio' || item.type === 'composition')) {
     const sourceStart = item.sourceStart ?? 0;
     const sourceFps = item.sourceFps ?? timelineFps;
     const sourceFramesNeeded = timelineToSourceFrames(newDuration, newSpeed, timelineFps, sourceFps);

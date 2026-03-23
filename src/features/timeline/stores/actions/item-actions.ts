@@ -1215,7 +1215,7 @@ export function slipItem(id: string, slipDelta: number): void {
     const items = itemsStore.items;
     const item = items.find((i) => i.id === id);
     if (!item) return;
-    if (item.type !== 'video' && item.type !== 'audio') return;
+    if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') return;
     const synchronizedItems = getSynchronizedLinkedItems(items, id);
 
     const sourceStart = item.sourceStart ?? 0;
@@ -1315,7 +1315,7 @@ export function slideItem(
     itemsStore._moveItem(id, item.from + slideDelta);
     if (
       continuitySourceDelta !== 0
-      && (item.type === 'video' || item.type === 'audio')
+      && (item.type === 'video' || item.type === 'audio' || item.type === 'composition')
       && item.sourceEnd !== undefined
     ) {
       itemsStore._updateItem(id, {

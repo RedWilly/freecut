@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline';
+import type { AudioItem, CompositionItem, TimelineTrack, VideoItem } from '@/types/timeline';
 import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
@@ -73,6 +73,27 @@ function makeAudioItem(overrides: Partial<AudioItem> = {}): AudioItem {
   } as AudioItem;
 }
 
+function makeCompositionItem(overrides: Partial<CompositionItem> = {}): CompositionItem {
+  return {
+    id: 'comp-1',
+    type: 'composition',
+    trackId: 'video-track',
+    from: 0,
+    durationInFrames: 60,
+    label: 'Compound 1',
+    compositionId: 'composition-1',
+    compositionWidth: 1920,
+    compositionHeight: 1080,
+    linkedGroupId: 'group-1',
+    sourceStart: 0,
+    sourceEnd: 120,
+    sourceDuration: 120,
+    sourceFps: 30,
+    speed: 1,
+    ...overrides,
+  } as CompositionItem;
+}
+
 describe('linked edit tools', () => {
   beforeEach(() => {
     useTimelineCommandStore.getState().clearHistory();
@@ -99,6 +120,19 @@ describe('linked edit tools', () => {
     expect(itemById['audio-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 10, sourceEnd: 60 });
   });
 
+  it('trims synchronized compound wrappers together', () => {
+    useItemsStore.getState().setItems([
+      makeCompositionItem({ sourceStart: 10, sourceEnd: 70, sourceDuration: 120 }),
+      makeAudioItem({ id: 'comp-audio-1', mediaId: undefined, src: '', label: 'Compound 1', compositionId: 'composition-1', sourceStart: 10, sourceEnd: 70, sourceDuration: 120 }),
+    ]);
+
+    trimItemStart('comp-1', 10);
+
+    const itemById = useItemsStore.getState().itemById;
+    expect(itemById['comp-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 20, sourceEnd: 70 });
+    expect(itemById['comp-audio-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 20, sourceEnd: 70 });
+  });
+
   it('rate stretches synchronized linked companions together', () => {
     useItemsStore.getState().setItems([
       makeVideoItem(),
@@ -110,6 +144,19 @@ describe('linked edit tools', () => {
     const itemById = useItemsStore.getState().itemById;
     expect(itemById['video-1']).toMatchObject({ from: 0, durationInFrames: 120, speed: 0.5 });
     expect(itemById['audio-1']).toMatchObject({ from: 0, durationInFrames: 120, speed: 0.5 });
+  });
+
+  it('slips synchronized compound wrappers together', () => {
+    useItemsStore.getState().setItems([
+      makeCompositionItem({ sourceStart: 10, sourceEnd: 70, sourceDuration: 120 }),
+      makeAudioItem({ id: 'comp-audio-1', mediaId: undefined, src: '', label: 'Compound 1', compositionId: 'composition-1', sourceStart: 10, sourceEnd: 70, sourceDuration: 120 }),
+    ]);
+
+    slipItem('comp-1', 12);
+
+    const itemById = useItemsStore.getState().itemById;
+    expect(itemById['comp-1']).toMatchObject({ from: 0, durationInFrames: 60, sourceStart: 22, sourceEnd: 82 });
+    expect(itemById['comp-audio-1']).toMatchObject({ from: 0, durationInFrames: 60, sourceStart: 22, sourceEnd: 82 });
   });
 
   it('rolls linked companions with the transitioned clip pair', () => {

@@ -12,6 +12,10 @@ export interface ManagedLinkedAudioTransition {
   rightAudio: AudioItem;
 }
 
+function isVisualTimelineItem(item: TimelineItem): item is VideoItem | CompositionItem {
+  return item.type === 'video' || item.type === 'composition';
+}
+
 function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
   return (left.type === 'video' && right.type === 'audio')
     || (left.type === 'audio' && right.type === 'video');
@@ -73,12 +77,15 @@ export function getLinkedAudioCompanion(items: TimelineItem[], anchor: TimelineI
   return (items.find((candidate) => isLinkedCompanion(anchor, candidate, 'audio')) as AudioItem | undefined) ?? null;
 }
 
-export function getLinkedVideoCompanion(items: TimelineItem[], anchor: TimelineItem): VideoItem | null {
-  if (anchor.type !== 'audio') return null;
+export function getLinkedVideoCompanion(items: TimelineItem[], anchor: TimelineItem): VideoItem | CompositionItem | null {
+  if (!isCompositionAudioItem(anchor) && anchor.type !== 'audio') return null;
+  if (isCompositionAudioItem(anchor)) {
+    return getLinkedCompositionVisualCompanion(items, anchor);
+  }
   return (items.find((candidate) => isLinkedCompanion(anchor, candidate, 'video')) as VideoItem | undefined) ?? null;
 }
 
-export function isSynchronizedLinkedAudio(videoClip: VideoItem, audioClip: AudioItem): boolean {
+export function isSynchronizedLinkedAudio(videoClip: VideoItem | CompositionItem, audioClip: AudioItem): boolean {
   return audioClip.from === videoClip.from
     && audioClip.durationInFrames === videoClip.durationInFrames;
 }
@@ -88,7 +95,7 @@ export function getManagedLinkedAudioTransitionPair(
   leftClip: TimelineItem,
   rightClip: TimelineItem,
 ): ManagedLinkedAudioTransitionPair | null {
-  if (leftClip.type !== 'video' || rightClip.type !== 'video') {
+  if (!isVisualTimelineItem(leftClip) || !isVisualTimelineItem(rightClip)) {
     return null;
   }
 

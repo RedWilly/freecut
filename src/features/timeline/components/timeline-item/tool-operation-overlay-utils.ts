@@ -147,7 +147,7 @@ function clampTrimDeltaForBounds(
 
 function getStretchSourceSpan(item: TimelineItem, fps: number) {
   const isGifImage = item.type === 'image' && item.label?.toLowerCase().endsWith('.gif');
-  if (item.type !== 'video' && item.type !== 'audio' && !isGifImage) {
+  if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition' && !isGifImage) {
     return null;
   }
 
@@ -325,7 +325,7 @@ export function getSlipOperationBoundsVisual({
   currentLeftPx,
   currentRightPx,
 }: SlipBoundsOptions): OperationBoundsVisual {
-  if (item.type !== 'video' && item.type !== 'audio') {
+  if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') {
     return {
       boxLeftPx: null,
       boxWidthPx: null,

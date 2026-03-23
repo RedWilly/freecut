@@ -629,16 +629,16 @@ export const useItemsStore = create<ItemsState & ItemsActions>()(
     _rateStretchItem: (id, newFrom, newDuration, newSpeed) => set((state) => {
       const nextItems = state.items.map((item) => {
         if (item.id !== id) return item;
-        // Allow video, audio, and GIF images (detected by .gif extension)
+        // Allow video, audio, compositions, and GIF images (detected by .gif extension)
         const isGif = item.type === 'image' && item.label?.toLowerCase().endsWith('.gif');
-        if (item.type !== 'video' && item.type !== 'audio' && !isGif) return item;
+        if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition' && !isGif) return item;
 
         // For clips with explicit source bounds (split clips and trimmed segments),
         // preserve sourceStart/sourceEnd exactly and only retime via speed+duration.
         // Recomputing sourceEnd here causes destructive source-span drift over repeated
         // rate-stretch operations.
         const hasExplicitSourceBounds =
-          (item.type === 'video' || item.type === 'audio') &&
+          (item.type === 'video' || item.type === 'audio' || item.type === 'composition') &&
           item.sourceEnd !== undefined;
 
         const sourceStart = item.sourceStart ?? 0;

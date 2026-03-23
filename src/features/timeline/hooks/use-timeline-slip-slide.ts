@@ -47,7 +47,7 @@ interface SlipSlideState {
  * Slip: shifts source content within a fixed clip window.
  * Slide: moves clip on timeline, adjusting adjacent neighbors.
  *
- * Only operates on video/audio items.
+ * Only operates on source-bounded items (video/audio/compound wrappers).
  */
 export function useTimelineSlipSlide(
   item: TimelineItem,
@@ -364,7 +364,7 @@ export function useTimelineSlipSlide(
     (e: React.MouseEvent, mode: 'slip' | 'slide') => {
       if (e.button !== 0) return;
       if (trackLocked) return;
-      if (item.type !== 'video' && item.type !== 'audio') return;
+      if (!isMediaItem(item)) return;
 
       e.stopPropagation();
       e.preventDefault();

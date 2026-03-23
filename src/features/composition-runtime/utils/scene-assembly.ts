@@ -1,6 +1,7 @@
 import type {
   AdjustmentItem,
   AudioItem,
+  CompositionItem,
   ImageItem,
   ShapeItem,
   TextItem,
@@ -56,7 +57,7 @@ export type StableDomTrack = TimelineTrack & {
   items: Exclude<TimelineItem, VideoItem | AudioItem | AdjustmentItem>[];
 };
 
-export type TransitionClipItem = VideoItem | ImageItem;
+export type TransitionClipItem = VideoItem | ImageItem | CompositionItem;
 
 export type FrameRenderTask<TTransition> =
   | { type: 'item'; item: TimelineItem; trackOrder: number }
@@ -282,7 +283,7 @@ export function collectTransitionClipItems(
 ): TransitionClipItem[] {
   return tracks.flatMap((track) =>
     track.items.filter((item): item is TransitionClipItem => (
-      item.type === 'video' || item.type === 'image'
+      item.type === 'video' || item.type === 'image' || item.type === 'composition'
     ))
   );
 }
@@ -303,7 +304,7 @@ export function resolveTransitionWindowsForItems<TItem extends TimelineItem>(
   transitions: Transition[],
   items: TItem[],
 ): ResolvedTransitionWindow<TItem>[] {
-  return resolveTransitionWindows(transitions, buildItemIdMap(items));
+  return resolveTransitionWindows(transitions, buildItemIdMap(items)) as ResolvedTransitionWindow<TItem>[];
 }
 
 export function buildFrameRenderTasks<TTransition>({

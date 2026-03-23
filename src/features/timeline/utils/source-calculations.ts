@@ -36,7 +36,7 @@ interface SourceProperties {
 }
 
 export function getSourceProperties(item: TimelineItem): SourceProperties {
-  if (item.type !== 'video' && item.type !== 'audio') {
+  if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') {
     return {
       sourceStart: 0,
       sourceEnd: undefined,
@@ -200,14 +200,14 @@ export function getSafeTrimBefore(
  * Check if an item is a media item (has source properties).
  */
 export function isMediaItem(item: TimelineItem): item is TimelineItem & {
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'composition';
   sourceDuration?: number;
   sourceStart?: number;
   sourceEnd?: number;
   sourceFps?: number;
   speed?: number;
 } {
-  return item.type === 'video' || item.type === 'audio';
+  return item.type === 'video' || item.type === 'audio' || item.type === 'composition';
 }
 
 /**

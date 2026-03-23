@@ -1142,7 +1142,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         y,
         height: rect.height,
         labelRowHeight: parseFloat(EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight),
-        isMediaItem: item.type === 'video' || item.type === 'audio',
+        isMediaItem: item.type === 'video' || item.type === 'audio' || item.type === 'composition',
         currentIntent: smartBodyIntentRef.current,
       });
       if (smartBodyIntentRef.current !== nextBodyIntent) {
@@ -1197,7 +1197,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     : activeTool === 'rolling-edit' || activeTool === 'ripple-edit'
     ? 'cursor-ew-resize'
     : activeTool === 'slip' || activeTool === 'slide'
-    ? (item.type === 'video' || item.type === 'audio' ? 'cursor-ew-resize' : 'cursor-not-allowed')
+    ? (item.type === 'video' || item.type === 'audio' || item.type === 'composition' ? 'cursor-ew-resize' : 'cursor-not-allowed')
     : isBeingDragged
     ? 'cursor-grabbing'
     : 'cursor-default';
@@ -1972,7 +1972,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (activeTool === 'trim-edit' && !trackLocked && smartBodyIntent) {
-      if (item.type === 'video' || item.type === 'audio') {
+      if (item.type === 'video' || item.type === 'audio' || item.type === 'composition') {
         handleSlipSlideStart(e, smartBodyIntent === 'slide-body' ? 'slide' : 'slip');
       }
       return;
@@ -1980,10 +1980,10 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
     // Slip/Slide tool: initiate on clip body for media items
     if ((activeTool === 'slip' || activeTool === 'slide') && !trackLocked) {
-      if (item.type === 'video' || item.type === 'audio') {
+      if (item.type === 'video' || item.type === 'audio' || item.type === 'composition') {
         handleSlipSlideStart(e, activeTool);
       } else {
-        setPointerHint({ x: e.clientX, y: e.clientY, message: 'Use slip/slide on media clips only', tone: 'warning' });
+        setPointerHint({ x: e.clientX, y: e.clientY, message: 'Use slip/slide on source-based clips only', tone: 'warning' });
       }
       return;
     }
