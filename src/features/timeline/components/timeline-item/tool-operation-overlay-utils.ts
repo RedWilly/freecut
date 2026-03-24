@@ -12,7 +12,6 @@ import { findHandleNeighborWithTransitions } from '../../utils/transition-linked
 
 const LARGE_OPERATION_DELTA = 1_000_000_000;
 const MAX_BOX_WIDTH_PX = 12000;
-
 export type OperationMode = 'trim' | 'ripple' | 'rolling' | 'stretch' | 'slide' | 'slip';
 
 export interface OperationBoundsVisual {

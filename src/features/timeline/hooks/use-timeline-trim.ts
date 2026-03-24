@@ -494,8 +494,8 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
   // Mouse up handler - commits changes to store (single update)
   const handleMouseUp = useCallback(() => {
     if (trimStateRef.current.isTrimming) {
-      const deltaFrames = trimStateRef.current.currentDelta;
       const state = trimStateRef.current;
+      const deltaFrames = trimStateRef.current.currentDelta;
 
       // Only update store if there was actual change
       if (deltaFrames !== 0) {

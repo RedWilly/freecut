@@ -196,6 +196,7 @@ export function useTimelineSlipSlide(
           .filter((linkedItem) => linkedItem.id !== currentItem.id)
           .map((linkedItem) => applySlipPreview(linkedItem, clamped));
         useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
+
       } else if (mode === 'slide') {
         const { leftNeighborId, rightNeighborId } = stateRef.current;
         const storeItem = getItemFromStore();
@@ -295,6 +296,7 @@ export function useTimelineSlipSlide(
         }
 
         useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
+
       }
     },
     [pixelsToTime, fps, trackLocked, item.id, getItemFromStore, clampSlipDelta, clampSlideDelta, snapEnabled, getMagneticSnapTargets, snapThresholdFrames],
