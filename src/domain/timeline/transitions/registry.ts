@@ -19,7 +19,7 @@ import type {
 } from '@/types/transition';
 import type { TransitionStyleCalculation } from './engine';
 
-const logger = createLogger('TransitionRegistry');
+function getRegistryLogger() { return createLogger('TransitionRegistry'); }
 
 /**
  * Renderer interface for CSS/DOM-based transitions (preview + Composition).
@@ -86,7 +86,7 @@ export class TransitionRegistry {
    */
   register(id: string, definition: TransitionDefinition, renderer: TransitionRenderer): void {
     if (this.entries.has(id)) {
-      logger.warn(`Transition "${id}" is being overwritten`);
+      getRegistryLogger().warn(`Transition "${id}" is being overwritten`);
     }
     this.entries.set(id, { definition, renderer });
   }

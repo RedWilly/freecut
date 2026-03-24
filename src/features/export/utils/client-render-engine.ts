@@ -81,7 +81,7 @@ import { ScrubbingCache } from '@/features/export/deps/preview';
 // Re-export orchestration functions so existing import sites keep working
 export { renderComposition, renderAudioOnly, renderSingleFrame } from './canvas-render-orchestrator';
 
-const log = createLogger('ClientRenderEngine');
+function getLog() { return createLogger('ClientRenderEngine'); }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -333,7 +333,7 @@ export async function createCompositionRenderer(
       if (item.type === 'video') {
         const videoItem = item as VideoItem;
         if (videoItem.src) {
-          log.debug('Registering shared video extractor', {
+          getLog().debug('Registering shared video extractor', {
             itemId: item.id,
             src: videoItem.src.substring(0, 80),
           });
@@ -628,7 +628,7 @@ export async function createCompositionRenderer(
         ? []
         : collectPriorityVideoItemIds(priorityFrame, priorityWindowFrames);
 
-      log.debug('Preloading media', {
+      getLog().debug('Preloading media', {
         videoCount: videoExtractors.size,
         videoSourceCount: new Set(videoSourceByItemId.values()).size,
         imageCount: imageElements.size,
@@ -653,7 +653,7 @@ export async function createCompositionRenderer(
         await initializeMediabunnyForItems(remainingMainVideoIds);
       }
 
-      log.info('Video initialization complete', {
+      getLog().info('Video initialization complete', {
         mediabunny: useMediabunny.size,
         fallback: videoExtractors.size - useMediabunny.size,
         uniqueSources: new Set(videoSourceByItemId.values()).size,
@@ -683,7 +683,7 @@ export async function createCompositionRenderer(
         const videoLoadPromises = Array.from(uniqueVideoEntries.entries()).map(
           ([video, itemId]) => new Promise<void>((resolve) => {
             const timeout = setTimeout(() => {
-              log.warn('Video load timeout', { itemId });
+              getLog().warn('Video load timeout', { itemId });
               resolve();
             }, 10000);
 
@@ -697,7 +697,7 @@ export async function createCompositionRenderer(
               }, { once: true });
               video.addEventListener('error', () => {
                 clearTimeout(timeout);
-                log.error('Video load error', { itemId });
+                getLog().error('Video load error', { itemId });
                 resolve();
               }, { once: true });
               video.load();
@@ -710,7 +710,7 @@ export async function createCompositionRenderer(
 
       // Load GIF frames for animated GIFs (main thread only)
       if (hasDom && gifItems.length > 0) {
-        log.debug('Preloading GIF frames', { gifCount: gifItems.length });
+        getLog().debug('Preloading GIF frames', { gifCount: gifItems.length });
 
         const gifLoadPromises = gifItems.map(async (gifItem) => {
           try {
@@ -718,37 +718,37 @@ export async function createCompositionRenderer(
             const mediaId = gifItem.mediaId ?? gifItem.id;
             const cachedFrames = await gifFrameCache.getGifFrames(mediaId, gifItem.src);
             gifFramesMap.set(gifItem.id, cachedFrames);
-            log.debug('GIF frames loaded', {
+            getLog().debug('GIF frames loaded', {
               itemId: gifItem.id.substring(0, 8),
               frameCount: cachedFrames.frames.length,
               totalDuration: cachedFrames.totalDuration,
             });
           } catch (err) {
-            log.error('Failed to load GIF frames', { itemId: gifItem.id, error: err });
+            getLog().error('Failed to load GIF frames', { itemId: gifItem.id, error: err });
             // GIF will fallback to static image rendering
           }
         });
 
         await Promise.all(gifLoadPromises);
-        log.debug('All GIF frames loaded', { loadedCount: gifFramesMap.size });
+        getLog().debug('All GIF frames loaded', { loadedCount: gifFramesMap.size });
       }
 
       // Load animated WebP frames via cache service (main thread only)
       if (hasDom && webpItems.length > 0) {
-        log.debug('Preloading animated WebP frames', { webpCount: webpItems.length });
+        getLog().debug('Preloading animated WebP frames', { webpCount: webpItems.length });
 
         const webpLoadPromises = webpItems.map(async (webpItem) => {
           try {
             const mediaId = webpItem.mediaId ?? webpItem.id;
             const cachedFrames = await gifFrameCache.getWebpFrames(mediaId, webpItem.src);
             gifFramesMap.set(webpItem.id, cachedFrames);
-            log.debug('Animated WebP frames loaded', {
+            getLog().debug('Animated WebP frames loaded', {
               itemId: webpItem.id.substring(0, 8),
               frameCount: cachedFrames.frames.length,
               totalDuration: cachedFrames.totalDuration,
             });
           } catch (err) {
-            log.error('Failed to load WebP frames', { itemId: webpItem.id, error: err });
+            getLog().error('Failed to load WebP frames', { itemId: webpItem.id, error: err });
             // WebP will fallback to static image rendering
           }
         });
@@ -768,7 +768,7 @@ export async function createCompositionRenderer(
         for (const item of track.items ?? []) {
           if (item.type !== 'composition') continue;
           const compItem = item as CompositionItem;
-          log.info('Found composition item in export tracks', {
+          getLog().info('Found composition item in export tracks', {
             itemId: compItem.id.substring(0, 8),
             compositionId: compItem.compositionId.substring(0, 8),
             from: compItem.from,
@@ -776,14 +776,14 @@ export async function createCompositionRenderer(
           });
           const subComp = useCompositionsStore.getState().getComposition(compItem.compositionId);
           if (!subComp) {
-            log.warn('Sub-composition not found in store!', {
+            getLog().warn('Sub-composition not found in store!', {
               compositionId: compItem.compositionId,
               storeCompositionCount: useCompositionsStore.getState().compositions.length,
               storeCompositionIds: useCompositionsStore.getState().compositions.map(c => c.id.substring(0, 8)),
             });
             continue;
           }
-          log.info('Sub-composition loaded', {
+          getLog().info('Sub-composition loaded', {
             compositionId: subComp.id.substring(0, 8),
             name: subComp.name,
             items: subComp.items.length,
@@ -853,7 +853,7 @@ export async function createCompositionRenderer(
 
       // Resolve pending sub-comp URLs from OPFS in parallel
       if (pendingResolutions.length > 0) {
-        log.debug('Resolving sub-comp media URLs from OPFS', { count: pendingResolutions.length });
+        getLog().debug('Resolving sub-comp media URLs from OPFS', { count: pendingResolutions.length });
         const resolved = await Promise.all(
           pendingResolutions.map(async ({ subItem, mediaId }) => {
             const src = await resolveMediaUrl(mediaId);
@@ -866,7 +866,7 @@ export async function createCompositionRenderer(
       }
 
       if (subCompMediaItems.length > 0) {
-        log.debug('Preloading sub-composition media', { count: subCompMediaItems.length });
+        getLog().debug('Preloading sub-composition media', { count: subCompMediaItems.length });
 
         // Preload sub-comp video extractors
         const subVideoItemIds: string[] = [];
@@ -912,7 +912,7 @@ export async function createCompositionRenderer(
             const subVideoLoadPromises = Array.from(uniqueSubVideos.entries()).map(([video, itemId]) =>
               new Promise<void>((resolve) => {
                 const timeout = setTimeout(() => {
-                  log.warn('Sub-comp video load timeout', { itemId });
+                  getLog().warn('Sub-comp video load timeout', { itemId });
                   resolve();
                 }, 10000);
 
@@ -926,7 +926,7 @@ export async function createCompositionRenderer(
                   }, { once: true });
                   video.addEventListener('error', () => {
                     clearTimeout(timeout);
-                    log.error('Sub-comp video load error', { itemId });
+                    getLog().error('Sub-comp video load error', { itemId });
                     resolve();
                   }, { once: true });
                   video.load();
@@ -968,7 +968,7 @@ export async function createCompositionRenderer(
                   resolve();
                 };
                 img.onerror = () => {
-                  log.error('Failed to load sub-comp image', { itemId: subItem.id });
+                  getLog().error('Failed to load sub-comp image', { itemId: subItem.id });
                   resolve();
                 };
               }));
@@ -980,7 +980,7 @@ export async function createCompositionRenderer(
                 }
                 const response = await fetch(src);
                 if (!response.ok) {
-                  log.error('Failed to fetch sub-comp image', { itemId: subItem.id });
+                  getLog().error('Failed to fetch sub-comp image', { itemId: subItem.id });
                   return;
                 }
                 const blob = await response.blob();
@@ -1003,12 +1003,12 @@ export async function createCompositionRenderer(
               const mediaId = gifItem.mediaId ?? gifItem.id;
               const cachedFrames = await gifFrameCache.getGifFrames(mediaId, gifItem.src);
               gifFramesMap.set(gifItem.id, cachedFrames);
-              log.debug('Sub-comp GIF frames loaded', {
+              getLog().debug('Sub-comp GIF frames loaded', {
                 itemId: gifItem.id.substring(0, 8),
                 frameCount: cachedFrames.frames.length,
               });
             } catch (err) {
-              log.error('Failed to load sub-comp GIF frames', { itemId: gifItem.id, error: err });
+              getLog().error('Failed to load sub-comp GIF frames', { itemId: gifItem.id, error: err });
             }
           });
           await Promise.all(subGifPromises);
@@ -1021,18 +1021,18 @@ export async function createCompositionRenderer(
               const mediaId = webpItem.mediaId ?? webpItem.id;
               const cachedFrames = await gifFrameCache.getWebpFrames(mediaId, webpItem.src);
               gifFramesMap.set(webpItem.id, cachedFrames);
-              log.debug('Sub-comp animated WebP frames loaded', {
+              getLog().debug('Sub-comp animated WebP frames loaded', {
                 itemId: webpItem.id.substring(0, 8),
                 frameCount: cachedFrames.frames.length,
               });
             } catch (err) {
-              log.error('Failed to load sub-comp WebP frames', { itemId: webpItem.id, error: err });
+              getLog().error('Failed to load sub-comp WebP frames', { itemId: webpItem.id, error: err });
             }
           });
           await Promise.all(subWebpPromises);
         }
 
-        log.debug('Sub-composition media loaded', {
+        getLog().debug('Sub-composition media loaded', {
           videos: subCompMediaItems.filter(s => s.subItem.type === 'video').length,
           images: subCompMediaItems.filter(s => s.subItem.type === 'image').length,
           gifs: subGifItems.length,
@@ -1040,7 +1040,7 @@ export async function createCompositionRenderer(
         });
       }
 
-      log.debug('All media loaded');
+      getLog().debug('All media loaded');
     },
 
     async renderFrame(frame: number) {
@@ -1081,13 +1081,13 @@ export async function createCompositionRenderer(
 
       // Debug: Log transition state at key frames (only in development)
       if (import.meta.env.DEV && activeTransitions.length > 0 && (frame === activeTransitions[0]?.transitionStart || frame % 30 === 0)) {
-        log.info(`TRANSITION STATE: frame=${frame} activeTransitions=${activeTransitions.length} skippedClipIds=${Array.from(transitionClipIds).map(id => id.substring(0,8)).join(',')}`);
+        getLog().info(`TRANSITION STATE: frame=${frame} activeTransitions=${activeTransitions.length} skippedClipIds=${Array.from(transitionClipIds).map(id => id.substring(0,8)).join(',')}`);
       }
 
 
       // Log periodically (only in development)
       if (import.meta.env.DEV && frame % 30 === 0) {
-        log.debug('Rendering frame', {
+        getLog().debug('Rendering frame', {
           frame,
           tracksCount: sortedTracks.length,
           activeMasks: activeMasks.length,
@@ -1204,7 +1204,7 @@ export async function createCompositionRenderer(
           if (hasGpu && !itemRenderContext.gpuPipeline) {
             itemRenderContext.gpuPipeline = await ensureGpuPipeline();
             if (!itemRenderContext.gpuPipeline) {
-              log.warn('GPU pipeline init failed — GPU effects will be skipped');
+              getLog().warn('GPU pipeline init failed — GPU effects will be skipped');
             }
           }
           const { canvas: effectCanvas, ctx: effectCtx } = canvasPool.acquire();
@@ -1344,7 +1344,7 @@ export async function createCompositionRenderer(
           .flatMap((track) => track.items ?? [])
           .find((item) => shouldRenderItem(item) && isFullyOccluding(item, occlusionCutoffOrder));
         if (occludingTask) {
-          log.debug(`Occlusion culling: item ${occludingTask.id.substring(0, 8)} on track order ${occlusionCutoffOrder} fully occludes canvas`);
+          getLog().debug(`Occlusion culling: item ${occludingTask.id.substring(0, 8)} on track order ${occlusionCutoffOrder} fully occludes canvas`);
         }
       }
 
@@ -1506,7 +1506,7 @@ export async function createCompositionRenderer(
 
       // Log occlusion culling stats periodically (only in development)
       if (import.meta.env.DEV && skippedTracks > 0 && frame % 30 === 0) {
-        log.debug(`Occlusion culling: skipped ${skippedTracks} tracks at frame ${frame}`);
+        getLog().debug(`Occlusion culling: skipped ${skippedTracks} tracks at frame ${frame}`);
       }
 
       ctx.drawImage(finalCompositeSource, 0, 0);
@@ -1596,7 +1596,7 @@ export async function createCompositionRenderer(
           if (error instanceof DOMException && error.name === 'AbortError') continue;
           const failures = (mediabunnyFailureCountByItem.get(item.id) ?? 0) + 1;
           mediabunnyFailureCountByItem.set(item.id, failures);
-          log.warn('Prewarm decode failed', { itemId: item.id, frame, failures, error });
+          getLog().warn('Prewarm decode failed', { itemId: item.id, frame, failures, error });
           if (failures >= PREWARM_FAILURE_DISABLE_THRESHOLD) {
             mediabunnyDisabledItems.add(item.id);
             useMediabunny.delete(item.id);
@@ -1745,7 +1745,7 @@ export async function createCompositionRenderer(
 
       // Log pool stats in development
       if (import.meta.env.DEV) {
-        log.debug('Canvas pool disposed', canvasPool.getStats());
+        getLog().debug('Canvas pool disposed', canvasPool.getStats());
       }
     },
   };

@@ -11,7 +11,7 @@ import { useTimelineSettingsStore } from './timeline-settings-store';
 import { useTransitionsStore } from './transitions-store';
 import { clampAudioFadeCurve, clampAudioFadeCurveX } from '@/shared/utils/audio-fade-curve';
 
-const log = createLogger('ItemsStore');
+function getLog() { return createLogger('ItemsStore'); }
 
 function roundFrame(value: number, fallback = 0): number {
   if (!Number.isFinite(value)) return fallback;
@@ -570,8 +570,8 @@ export const useItemsStore = create<ItemsState & ItemsActions>()(
         (rightItem as typeof item).sourceStart = boundaries.right.sourceStart;
         (rightItem as typeof item).sourceEnd = boundaries.right.sourceEnd;
 
-        log.debug(`_splitItem: Original sourceStart:${sourceStart} speed:${speed} leftDuration:${leftDuration} rightDuration:${rightDuration}`);
-        log.debug(`_splitItem: boundaries.right.sourceStart:${boundaries.right.sourceStart} rightItem.sourceStart:${(rightItem as typeof item).sourceStart}`);
+        getLog().debug(`_splitItem: Original sourceStart:${sourceStart} speed:${speed} leftDuration:${leftDuration} rightDuration:${rightDuration}`);
+        getLog().debug(`_splitItem: boundaries.right.sourceStart:${boundaries.right.sourceStart} rightItem.sourceStart:${(rightItem as typeof item).sourceStart}`);
       }
 
       set((state) => {

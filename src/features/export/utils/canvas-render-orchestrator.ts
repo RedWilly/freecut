@@ -20,7 +20,7 @@ import { createLogger } from '@/shared/logging/logger';
 // Subsystems
 import { createCompositionRenderer } from './client-render-engine';
 
-const log = createLogger('CanvasRenderOrchestrator');
+function getLog() { return createLogger('CanvasRenderOrchestrator'); }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -284,7 +284,7 @@ async function tryPacketRemuxComposition(options: RenderEngineOptions): Promise<
         message: 'Complete!',
       });
 
-      log.info('Packet remux export completed', {
+      getLog().info('Packet remux export completed', {
         durationSeconds,
         fileSize: blob.size,
         container: settings.container,
@@ -308,7 +308,7 @@ async function tryPacketRemuxComposition(options: RenderEngineOptions): Promise<
       throw new DOMException('Render cancelled', 'AbortError');
     }
 
-    log.warn('Packet remux path failed; falling back to frame render', { error });
+    getLog().warn('Packet remux path failed; falling back to frame render', { error });
     return null;
   } finally {
     signal?.removeEventListener('abort', cancelConversion);
@@ -328,7 +328,7 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
   const { fps, durationInFrames = 0 } = composition;
   const canvasAudio = await loadCanvasAudio();
 
-  log.info('Starting enhanced client render', {
+  getLog().info('Starting enhanced client render', {
     fps,
     durationInFrames,
     durationSeconds: durationInFrames / fps,
@@ -382,13 +382,13 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
   if (await canvasAudio.hasAudioContent(composition)) {
     try {
       audioData = await canvasAudio.processAudio(composition, signal);
-      log.info('Audio processed', {
+      getLog().info('Audio processed', {
         hasAudio: !!audioData,
         sampleRate: audioData?.sampleRate,
         channels: audioData?.channels,
       });
     } catch (error) {
-      log.error('Audio processing failed, continuing without audio', { error });
+      getLog().error('Audio processing failed, continuing without audio', { error });
     }
   }
 
@@ -422,7 +422,7 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
   // Check if we need to scale (export resolution differs from composition)
   const needsScaling = exportWidth !== compositionWidth || exportHeight !== compositionHeight;
 
-  log.info('Resolution settings', {
+  getLog().info('Resolution settings', {
     composition: { width: compositionWidth, height: compositionHeight },
     export: { width: exportWidth, height: exportHeight },
     needsScaling,
@@ -491,14 +491,14 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
 
       // Add audio track to output (audio data fed after start())
       output.addAudioTrack(audioSource);
-      log.info('Audio track added to output', {
+      getLog().info('Audio track added to output', {
         duration: audioBuffer.duration,
         channels: audioBuffer.numberOfChannels,
         sampleRate: audioBuffer.sampleRate,
         codec: audioCodec,
       });
     } catch (error) {
-      log.error('Failed to setup audio track', { error });
+      getLog().error('Failed to setup audio track', { error });
       audioSource = null;
       audioBuffer = null;
     }
@@ -512,12 +512,12 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
   if (audioSource && audioBuffer) {
     try {
       await audioSource.add(audioBuffer);
-      log.info('Audio buffer fed to encoder', {
+      getLog().info('Audio buffer fed to encoder', {
         duration: audioBuffer.duration,
         samples: audioBuffer.length,
       });
     } catch (error) {
-      log.error('Failed to feed audio to encoder', { error });
+      getLog().error('Failed to feed audio to encoder', { error });
     }
   }
 
@@ -622,9 +622,9 @@ export async function renderComposition(options: RenderEngineOptions): Promise<C
     if (audioSource) {
       try {
         audioSource.close();
-        log.info('Audio source closed');
+        getLog().info('Audio source closed');
       } catch (error) {
-        log.error('Failed to close audio source', { error });
+        getLog().error('Failed to close audio source', { error });
       }
     }
 
@@ -696,7 +696,7 @@ export async function renderSingleFrame(options: SingleFrameOptions): Promise<Bl
   const compositionWidth = composition.width || 1920;
   const compositionHeight = composition.height || 1080;
 
-  log.debug('Rendering single frame', { frame, width, height, compositionWidth, compositionHeight });
+  getLog().debug('Rendering single frame', { frame, width, height, compositionWidth, compositionHeight });
 
   // Create canvas at full composition size
   const renderCanvas = new OffscreenCanvas(compositionWidth, compositionHeight);
@@ -745,7 +745,7 @@ export async function renderSingleFrame(options: SingleFrameOptions): Promise<Bl
     try {
       renderer.dispose();
     } catch (error) {
-      log.warn('Failed to dispose single-frame renderer', { error });
+      getLog().warn('Failed to dispose single-frame renderer', { error });
     }
   }
 }
@@ -763,7 +763,7 @@ export async function renderAudioOnly(options: AudioRenderOptions): Promise<Clie
   const { fps, durationInFrames = 0 } = composition;
   const canvasAudio = await loadCanvasAudio();
 
-  log.info('Starting audio-only render', {
+  getLog().info('Starting audio-only render', {
     fps,
     durationInFrames,
     durationSeconds: durationInFrames / fps,
@@ -800,9 +800,9 @@ export async function renderAudioOnly(options: AudioRenderOptions): Promise<Clie
     try {
       const { registerMp3Encoder } = await import('@mediabunny/mp3-encoder');
       registerMp3Encoder();
-      log.info('MP3 encoder registered');
+      getLog().info('MP3 encoder registered');
     } catch (err) {
-      log.warn('Failed to load MP3 encoder extension', err);
+      getLog().warn('Failed to load MP3 encoder extension', err);
     }
   }
 
@@ -873,7 +873,7 @@ export async function renderAudioOnly(options: AudioRenderOptions): Promise<Clie
         `Try exporting as WAV (lossless) instead.`
       );
     }
-    log.info(`Using ${audioCodec.toUpperCase()} codec`);
+    getLog().info(`Using ${audioCodec.toUpperCase()} codec`);
   }
 
   // Create audio buffer from processed samples
@@ -888,7 +888,7 @@ export async function renderAudioOnly(options: AudioRenderOptions): Promise<Clie
   // Add audio track to output
   output.addAudioTrack(audioSource);
 
-  log.info('Audio track configured', {
+  getLog().info('Audio track configured', {
     duration: audioBuffer.duration,
     channels: audioBuffer.numberOfChannels,
     sampleRate: audioBuffer.sampleRate,
