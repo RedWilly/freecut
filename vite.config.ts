@@ -42,11 +42,9 @@ export default defineConfig({
             return 'core-logger';
           }
 
+
           // Application feature chunks
           if (id.includes('/src/features/timeline/') || id.includes('/src/features/media-library/')) {
-            // Split UI from editing domain/runtime modules to reduce initial chunk pressure.
-            // Keep stores/services/utils/deps/contracts together to preserve execution order
-            // for tightly-coupled timeline/media-library integration points.
             if (id.includes('/components/')) {
               return 'feature-editing-ui';
             }
@@ -55,8 +53,12 @@ export default defineConfig({
           if (id.includes('/src/features/effects/')) {
             return 'feature-effects';
           }
+          // Composition-runtime shares deeply coupled deps with editing-core
+          // (timeline stores, keyframes, export utils). Merging them into one
+          // chunk eliminates the circular chunk dependency that causes TDZ
+          // errors ("Cannot access before initialization") in production builds.
           if (id.includes('/src/features/composition-runtime/')) {
-            return 'feature-composition-runtime';
+            return 'feature-editing-core';
           }
 
           // React must be in its own chunk, loaded first to ensure proper initialization
