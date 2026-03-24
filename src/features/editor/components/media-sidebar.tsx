@@ -21,9 +21,20 @@ import { useTimelineStore } from '@/features/editor/deps/timeline-store';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { useSelectionStore } from '@/shared/state/selection';
 import { useProjectStore } from '@/features/editor/deps/projects';
-import { MediaLibrary } from '@/features/editor/deps/media-library';
+import {
+  clearMediaDragData,
+  MediaLibrary,
+  setMediaDragData,
+} from '@/features/editor/deps/media-library';
 import { TransitionsPanel } from './transitions-panel';
-import { findNearestAvailableSpace } from '@/features/editor/deps/timeline-utils';
+import {
+  createDefaultAdjustmentItem,
+  createDefaultShapeItem,
+  createDefaultTextItem,
+  findCompatibleTrackForItemType,
+  findNearestAvailableSpace,
+  getDefaultGeneratedLayerDurationInFrames,
+} from '@/features/editor/deps/timeline-utils';
 import type { TextItem, ShapeItem, ShapeType, AdjustmentItem } from '@/types/timeline';
 import { useMaskEditorStore } from '@/features/editor/deps/preview';
 import type { VisualEffect, GpuEffect } from '@/types/effects';
@@ -55,6 +66,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const isResizingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
+  const suppressGeneratedItemClickRef = useRef(false);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -102,23 +114,19 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { activeTrackId, selectItems } = useSelectionStore.getState();
     const currentProject = useProjectStore.getState().currentProject;
 
-    // Use active track if available and not locked, otherwise find first available
-    let targetTrack = activeTrackId
-      ? tracks.find((t) => t.id === activeTrackId && t.visible !== false && !t.locked)
-      : null;
-
-    // Fallback to first available visible/unlocked track
-    if (!targetTrack) {
-      targetTrack = tracks.find((t) => t.visible !== false && !t.locked);
-    }
+    const targetTrack = findCompatibleTrackForItemType({
+      tracks,
+      items,
+      itemType: 'text',
+      preferredTrackId: activeTrackId,
+    });
 
     if (!targetTrack) {
       logger.warn('No available track for text item');
       return;
     }
 
-    // Default duration: 60 seconds
-    const durationInFrames = fps * 60;
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
 
     // Find the best position: start at playhead, find nearest available space
     const proposedPosition = usePlaybackStore.getState().currentFrame;
@@ -133,34 +141,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const canvasWidth = currentProject?.metadata.width ?? 1920;
     const canvasHeight = currentProject?.metadata.height ?? 1080;
 
-    // Create a new text item
-    const textItem: TextItem = {
-      id: crypto.randomUUID(),
-      type: 'text',
+    const textItem: TextItem = createDefaultTextItem({
       trackId: targetTrack.id,
       from: finalPosition,
       durationInFrames,
-      label: 'Text',
-      text: 'Your Text Here',
-      fontSize: 60,
-      fontFamily: 'Inter',
-      fontWeight: 'normal',
-      fontStyle: 'normal',
-      underline: false,
-      color: '#ffffff',
-      textAlign: 'center',
-      lineHeight: 1.2,
-      letterSpacing: 0,
-      // Center the text on canvas
-      transform: {
-        x: 0,
-        y: 0,
-        width: canvasWidth * 0.8,
-        height: canvasHeight * 0.3,
-        rotation: 0,
-        opacity: 1,
-      },
-    };
+      canvasWidth,
+      canvasHeight,
+    });
 
     addItem(textItem);
     // Select the new item
@@ -174,23 +161,19 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { activeTrackId, selectItems } = useSelectionStore.getState();
     const currentProject = useProjectStore.getState().currentProject;
 
-    // Use active track if available and not locked, otherwise find first available
-    let targetTrack = activeTrackId
-      ? tracks.find((t) => t.id === activeTrackId && t.visible !== false && !t.locked)
-      : null;
-
-    // Fallback to first available visible/unlocked track
-    if (!targetTrack) {
-      targetTrack = tracks.find((t) => t.visible !== false && !t.locked);
-    }
+    const targetTrack = findCompatibleTrackForItemType({
+      tracks,
+      items,
+      itemType: 'shape',
+      preferredTrackId: activeTrackId,
+    });
 
     if (!targetTrack) {
       logger.warn('No available track for shape item');
       return;
     }
 
-    // Default duration: 60 seconds
-    const durationInFrames = fps * 60;
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
 
     // Find the best position: start at playhead, find nearest available space
     const proposedPosition = usePlaybackStore.getState().currentFrame;
@@ -201,40 +184,17 @@ export const MediaSidebar = memo(function MediaSidebar() {
       items
     ) ?? proposedPosition;
 
-    // Get canvas dimensions for initial transform
     const canvasWidth = currentProject?.metadata.width ?? 1920;
     const canvasHeight = currentProject?.metadata.height ?? 1080;
 
-    // Shape size: 25% of canvas, centered
-    const shapeSize = Math.min(canvasWidth, canvasHeight) * 0.25;
-
-    // Create a new shape item with defaults based on shape type
-    const shapeItem: ShapeItem = {
-      id: crypto.randomUUID(),
-      type: 'shape',
+    const shapeItem: ShapeItem = createDefaultShapeItem({
       trackId: targetTrack.id,
       from: finalPosition,
       durationInFrames,
-      label: shapeType.charAt(0).toUpperCase() + shapeType.slice(1),
+      canvasWidth,
+      canvasHeight,
       shapeType,
-      fillColor: '#3b82f6', // Blue
-      strokeColor: undefined,
-      strokeWidth: 0,
-      cornerRadius: shapeType === 'rectangle' ? 0 : undefined,
-      direction: shapeType === 'triangle' ? 'up' : undefined,
-      points: shapeType === 'star' ? 5 : shapeType === 'polygon' ? 6 : undefined,
-      innerRadius: shapeType === 'star' ? 0.5 : undefined,
-      // Center the shape on canvas with locked aspect ratio
-      transform: {
-        x: 0,
-        y: 0,
-        width: shapeSize,
-        height: shapeSize,
-        rotation: 0,
-        opacity: 1,
-        aspectRatioLocked: true,
-      },
-    };
+    });
 
     addItem(shapeItem);
     // Select the new item
@@ -248,23 +208,19 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { tracks, items, fps, addItem } = useTimelineStore.getState();
     const { activeTrackId, selectItems } = useSelectionStore.getState();
 
-    // Use active track if available and not locked, otherwise find first available
-    let targetTrack = activeTrackId
-      ? tracks.find((t) => t.id === activeTrackId && t.visible !== false && !t.locked)
-      : null;
-
-    // Fallback to first available visible/unlocked track
-    if (!targetTrack) {
-      targetTrack = tracks.find((t) => t.visible !== false && !t.locked);
-    }
+    const targetTrack = findCompatibleTrackForItemType({
+      tracks,
+      items,
+      itemType: 'adjustment',
+      preferredTrackId: activeTrackId,
+    });
 
     if (!targetTrack) {
       logger.warn('No available track for adjustment layer');
       return;
     }
 
-    // Default duration: 60 seconds
-    const durationInFrames = fps * 60;
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
 
     // Find the best position: start at playhead, find nearest available space
     const proposedPosition = usePlaybackStore.getState().currentFrame;
@@ -275,24 +231,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
       items
     ) ?? proposedPosition;
 
-    // Convert VisualEffect[] to ItemEffect[] with IDs
-    const itemEffects = effects?.map((effect) => ({
-      id: crypto.randomUUID(),
-      effect,
-      enabled: true,
-    })) ?? [];
-
-    // Create a new adjustment layer
-    const adjustmentItem: AdjustmentItem = {
-      id: crypto.randomUUID(),
-      type: 'adjustment',
+    const adjustmentItem: AdjustmentItem = createDefaultAdjustmentItem({
       trackId: targetTrack.id,
       from: finalPosition,
       durationInFrames,
-      label: label ?? 'Adjustment Layer',
-      effects: itemEffects,
-      effectOpacity: 1,
-    };
+      effects,
+      label,
+    });
 
     addItem(adjustmentItem);
     // Select the new item
@@ -353,6 +298,38 @@ export const MediaSidebar = memo(function MediaSidebar() {
     { id: 'effects' as const, icon: Layers, label: 'Effects' },
     { id: 'transitions' as const, icon: Blend, label: 'Transitions' },
   ];
+
+  const shouldSuppressGeneratedItemClick = useCallback(() => {
+    if (!suppressGeneratedItemClickRef.current) {
+      return false;
+    }
+
+    suppressGeneratedItemClickRef.current = false;
+    return true;
+  }, []);
+
+  const handleTemplateDragStart = useCallback((payload: {
+    itemType: 'text' | 'shape';
+    label: string;
+    shapeType?: ShapeType;
+  }) => (event: React.DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.effectAllowed = 'copy';
+    const dragData = {
+      type: 'timeline-template' as const,
+      ...payload,
+    };
+
+    suppressGeneratedItemClickRef.current = true;
+    event.dataTransfer.setData('application/json', JSON.stringify(dragData));
+    setMediaDragData(dragData);
+  }, []);
+
+  const handleTemplateDragEnd = useCallback(() => {
+    clearMediaDragData();
+    window.setTimeout(() => {
+      suppressGeneratedItemClickRef.current = false;
+    }, 0);
+  }, []);
 
   return (
     <div className="flex h-full flex-shrink-0">
@@ -439,7 +416,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
           <div className={`flex-1 overflow-y-auto p-3 ${activeTab === 'text' ? 'block' : 'hidden'}`}>
             <div className="space-y-3">
               <button
-                onClick={handleAddText}
+                draggable={true}
+                onDragStart={handleTemplateDragStart({ itemType: 'text', label: 'Text' })}
+                onDragEnd={handleTemplateDragEnd}
+                onClick={() => {
+                  if (shouldSuppressGeneratedItemClick()) return;
+                  handleAddText();
+                }}
                 className="w-full flex items-center gap-3 p-3 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
               >
                 <div className="w-9 h-9 rounded-md bg-timeline-text/20 border border-timeline-text/50 flex items-center justify-center group-hover:bg-timeline-text/30 flex-shrink-0">
@@ -456,7 +439,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
           <div className={`flex-1 overflow-y-auto p-3 ${activeTab === 'shapes' ? 'block' : 'hidden'}`}>
             <div className="grid grid-cols-3 gap-1.5">
                   <button
-                    onClick={() => handleAddShape('rectangle')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Rectangle', shapeType: 'rectangle' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('rectangle');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -468,7 +457,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('circle')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Circle', shapeType: 'circle' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('circle');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -480,7 +475,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('triangle')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Triangle', shapeType: 'triangle' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('triangle');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -492,7 +493,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('ellipse')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Ellipse', shapeType: 'ellipse' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('ellipse');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -504,7 +511,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('star')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Star', shapeType: 'star' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('star');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -516,7 +529,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('polygon')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Polygon', shapeType: 'polygon' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('polygon');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
@@ -528,7 +547,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   </button>
 
                   <button
-                    onClick={() => handleAddShape('heart')}
+                    draggable={true}
+                    onDragStart={handleTemplateDragStart({ itemType: 'shape', label: 'Heart', shapeType: 'heart' })}
+                    onDragEnd={handleTemplateDragEnd}
+                    onClick={() => {
+                      if (shouldSuppressGeneratedItemClick()) return;
+                      handleAddShape('heart');
+                    }}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">

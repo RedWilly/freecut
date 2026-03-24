@@ -20,6 +20,11 @@ import { findNearestAvailableSpace } from '../utils/collision-utils';
 import { mapWithConcurrency } from '@/shared/async/async-utils';
 import { useCompositionNavigationStore } from '../stores/composition-navigation-store';
 import {
+  createTimelineTemplateItem,
+  getDefaultGeneratedLayerDurationInFrames,
+  isTimelineTemplateDragData,
+} from '../utils/generated-layer-items';
+import {
   buildDroppedMediaTimelineItems,
   getDroppedMediaDurationInFrames,
   type DroppableMediaType,
@@ -68,6 +73,12 @@ function getGhostHighlightClasses(ghostPreviews: GhostPreviewItem[]): string {
   }
   if (ghostPreviews.some((ghost) => ghost.type === 'video')) {
     return 'border-timeline-video/60 bg-timeline-video/10';
+  }
+  if (ghostPreviews.some((ghost) => ghost.type === 'text')) {
+    return 'border-timeline-text/60 bg-timeline-text/10';
+  }
+  if (ghostPreviews.some((ghost) => ghost.type === 'shape')) {
+    return 'border-timeline-shape/60 bg-timeline-shape/10';
   }
   if (ghostPreviews.some((ghost) => ghost.type === 'image')) {
     return 'border-timeline-image/60 bg-timeline-image/10';
@@ -299,6 +310,77 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       : [];
   }, [buildGhostPreviewsForEntries, zone]);
 
+  const buildGhostPreviewForTemplate = useCallback((template: unknown, dropFrame: number): GhostPreviewItem[] => {
+    if (!isTimelineTemplateDragData(template) || zone !== 'video') {
+      return [];
+    }
+
+    const currentTracks = useTimelineStore.getState().tracks;
+    const createdTrack = ensureVideoZoneTrack(currentTracks);
+    if (!createdTrack) {
+      return [];
+    }
+
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
+    const finalPosition = findNearestAvailableSpace(
+      Math.max(0, dropFrame),
+      durationInFrames,
+      createdTrack.trackId,
+      useTimelineStore.getState().items,
+    );
+    if (finalPosition === null) {
+      return [];
+    }
+
+    return [{
+      left: frameToPixels(finalPosition),
+      width: frameToPixels(durationInFrames),
+      label: template.label,
+      type: template.itemType,
+      targetZone: 'video',
+    }];
+  }, [ensureVideoZoneTrack, fps, frameToPixels, zone]);
+
+  const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): {
+    item: TimelineItemType;
+    tracks: ReturnType<typeof useTimelineStore.getState>['tracks'];
+  } | null => {
+    if (!isTimelineTemplateDragData(template) || zone !== 'video') {
+      return null;
+    }
+
+    const currentTracks = useTimelineStore.getState().tracks;
+    const createdTrack = ensureVideoZoneTrack(currentTracks);
+    if (!createdTrack) {
+      return null;
+    }
+
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
+    const finalPosition = findNearestAvailableSpace(
+      Math.max(0, dropFrame),
+      durationInFrames,
+      createdTrack.trackId,
+      useTimelineStore.getState().items,
+    );
+    if (finalPosition === null) {
+      return null;
+    }
+
+    return {
+      item: createTimelineTemplateItem({
+        template,
+        placement: {
+          trackId: createdTrack.trackId,
+          from: finalPosition,
+          durationInFrames,
+          canvasWidth,
+          canvasHeight,
+        },
+      }),
+      tracks: createdTrack.tracks,
+    };
+  }, [canvasHeight, canvasWidth, ensureVideoZoneTrack, fps, zone]);
+
   const clearExternalPreviewSession = useCallback(() => {
     externalPreviewItemsRef.current = null;
     externalPreviewSignatureRef.current = null;
@@ -417,6 +499,17 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       return;
     }
 
+    if (data.type === 'timeline-template') {
+      if (zone !== 'video') {
+        e.dataTransfer.dropEffect = 'none';
+        clearZoneGhostPreviews();
+        return;
+      }
+
+      setZoneGhostPreviews(buildGhostPreviewForTemplate(data, dropFrame));
+      return;
+    }
+
     if (data.type === 'media-items' && data.items) {
       const rawItems = Array.isArray(data.items) ? data.items : [];
       const validItems = rawItems.filter(isValidDragMediaItem);
@@ -461,6 +554,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     clearZoneGhostPreviews();
   }, [
     buildGenericExternalGhostPreviews,
+    buildGhostPreviewForTemplate,
     buildGhostPreviewsForEntries,
     clearZoneGhostPreviews,
     fps,
@@ -547,6 +641,21 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
           };
 
           addItem(compositionItem);
+          return;
+        }
+
+        if (isTimelineTemplateDragData(data)) {
+          const templateDrop = buildTimelineTemplateItem(data, dropFrame);
+          if (!templateDrop) {
+            toast.error('Unable to add dropped timeline item');
+            return;
+          }
+
+          if (templateDrop.tracks !== useTimelineStore.getState().tracks) {
+            useTimelineStore.getState().setTracks(templateDrop.tracks);
+          }
+
+          addItem(templateDrop.item);
           return;
         }
 
@@ -687,6 +796,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   }, [
     addItem,
     addItems,
+    buildTimelineTemplateItem,
     clearZoneGhostPreviews,
     clearExternalPreviewSession,
     ensureVideoZoneTrack,
@@ -730,6 +840,10 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
               ? 'border-timeline-video bg-timeline-video/20'
               : ghost.type === 'audio'
               ? 'border-timeline-audio bg-timeline-audio/20'
+              : ghost.type === 'text'
+              ? 'border-timeline-text bg-timeline-text/20'
+              : ghost.type === 'shape'
+              ? 'border-timeline-shape bg-timeline-shape/20'
               : 'border-timeline-image bg-timeline-image/20'
           }`}
           style={{

@@ -31,7 +31,14 @@ export interface CompositionDragData {
   height: number;
 }
 
-export type DragData = MediaDragData | CompositionDragData;
+export interface TimelineTemplateDragData {
+  type: 'timeline-template';
+  itemType: 'text' | 'shape';
+  label: string;
+  shapeType?: 'rectangle' | 'circle' | 'triangle' | 'ellipse' | 'star' | 'polygon' | 'heart' | 'path';
+}
+
+export type DragData = MediaDragData | CompositionDragData | TimelineTemplateDragData;
 
 let cachedDragData: DragData | null = null;
 

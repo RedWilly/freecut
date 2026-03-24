@@ -1284,6 +1284,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       activeTrackId,
       proposedFrame: currentFrame,
       durationInFrames,
+      itemType: 'shape',
     });
 
     if (!placement) {

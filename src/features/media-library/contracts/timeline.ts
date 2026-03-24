@@ -17,6 +17,7 @@ export {
   setMediaDragData,
   clearMediaDragData,
   type CompositionDragData,
+  type TimelineTemplateDragData,
 } from '../utils/drag-data-cache';
 export {
   extractValidMediaFileEntriesFromDataTransfer,

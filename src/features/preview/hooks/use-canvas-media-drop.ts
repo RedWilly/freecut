@@ -95,6 +95,15 @@ function evaluateCanvasDrop(dataTransfer: DataTransfer): CanvasDropState | null 
       };
     }
 
+    if (dragData.type === 'timeline-template') {
+      return {
+        allowed: false,
+        source: 'library',
+        title: 'Drop On Timeline',
+        description: 'Text and shape presets still place best on the timeline.',
+      };
+    }
+
     if (dragData.type === 'media-items') {
       const itemCount = Array.isArray(dragData.items) ? dragData.items.length : 0;
       if (itemCount !== 1) {
@@ -189,6 +198,7 @@ export function useCanvasMediaDrop({
       activeTrackId: selectionState.activeTrackId,
       proposedFrame: playbackState.currentFrame,
       durationInFrames,
+      itemType: mediaType === 'image' ? 'image' : 'video',
     });
 
     if (!placement) {

@@ -16,6 +16,13 @@ export { findNearestAvailableSpace } from '../utils/collision-utils';
 export { areFramesAligned, getMaxTransitionDurationForHandles } from '../utils/transition-utils';
 export { resolveTransitionTargetFromSelection } from '../utils/transition-targets';
 export {
+  createDefaultAdjustmentItem,
+  createDefaultShapeItem,
+  createDefaultTextItem,
+  getDefaultGeneratedLayerDurationInFrames,
+} from '../utils/generated-layer-items';
+export { findCompatibleTrackForItemType } from '../utils/track-item-compatibility';
+export {
   timelineToSourceFrames,
   sourceToTimelineFrames,
 } from '../utils/source-calculations';

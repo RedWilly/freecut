@@ -57,7 +57,10 @@ import { mediaLibraryService } from '@/features/timeline/deps/media-library-serv
 import { validateMediaReferences } from '@/features/timeline/utils/media-validation';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import { migrateProject, CURRENT_SCHEMA_VERSION } from '@/domain/projects/migrations';
-import { repairLegacyAvTrackLayout } from '@/features/timeline/utils/legacy-av-track-repair';
+import {
+  needsLegacyAvTrackLayoutRepair,
+  repairLegacyAvTrackLayout,
+} from '@/features/timeline/utils/legacy-av-track-repair';
 import { getCompositionOwnedAudioSources } from '@/features/timeline/utils/composition-clip-summary';
 import type { Project } from '@/types/project';
 import {
@@ -428,13 +431,14 @@ async function repairLegacyProjectAvLayouts(project: Project): Promise<{ project
   }
 
   const videoMediaIds = collectVideoMediaIds(project);
-  if (videoMediaIds.length === 0) {
-    return { project, repaired: false };
-  }
-
-  const videoHasAudioByMediaId = await buildVideoHasAudioMap(videoMediaIds);
+  const videoHasAudioByMediaId = videoMediaIds.length > 0
+    ? await buildVideoHasAudioMap(videoMediaIds)
+    : {};
   const rootItems = (project.timeline.items ?? []) as TimelineItem[];
-  const rootRepair = rootItems.some((item) => item.type === 'video')
+  const rootRepair = needsLegacyAvTrackLayoutRepair({
+    tracks: (project.timeline.tracks ?? []) as TimelineTrack[],
+    items: rootItems,
+  })
     ? repairLegacyAvTrackLayout({
         tracks: (project.timeline.tracks ?? []) as TimelineTrack[],
         items: rootItems,
@@ -449,13 +453,25 @@ async function repairLegacyProjectAvLayouts(project: Project): Promise<{ project
         changed: false,
       };
   const repairedCompositions = (project.timeline.compositions ?? []).map((composition) => {
-    const repair = repairLegacyAvTrackLayout({
-      tracks: composition.tracks as TimelineTrack[],
-      items: composition.items as TimelineItem[],
-      keyframes: (composition.keyframes ?? []) as ItemKeyframes[],
-      fps: composition.fps,
-      videoHasAudioByMediaId,
-    });
+    const compositionTracks = composition.tracks as TimelineTrack[];
+    const compositionItems = composition.items as TimelineItem[];
+    const repair = needsLegacyAvTrackLayoutRepair({
+      tracks: compositionTracks,
+      items: compositionItems,
+    })
+      ? repairLegacyAvTrackLayout({
+          tracks: compositionTracks,
+          items: compositionItems,
+          keyframes: (composition.keyframes ?? []) as ItemKeyframes[],
+          fps: composition.fps,
+          videoHasAudioByMediaId,
+        })
+      : {
+          tracks: compositionTracks,
+          items: compositionItems,
+          keyframes: (composition.keyframes ?? []) as ItemKeyframes[],
+          changed: false,
+        };
 
     return {
       repair,

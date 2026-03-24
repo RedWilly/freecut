@@ -5,7 +5,7 @@ export interface TrackDropGhostPreview {
   left: number;
   width: number;
   label: string;
-  type: 'composition' | DroppableMediaType | 'external-file';
+  type: 'composition' | DroppableMediaType | 'external-file' | 'text' | 'shape';
   targetTrackId: string;
 }
 

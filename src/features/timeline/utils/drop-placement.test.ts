@@ -50,6 +50,7 @@ describe('findBestCanvasDropPlacement', () => {
       activeTrackId: 'track-2',
       proposedFrame: 120,
       durationInFrames: 60,
+      itemType: 'video',
     });
 
     expect(placement).toEqual({
@@ -71,6 +72,7 @@ describe('findBestCanvasDropPlacement', () => {
       activeTrackId: 'track-2',
       proposedFrame: 120,
       durationInFrames: 40,
+      itemType: 'video',
     });
 
     expect(placement).toEqual({
@@ -93,12 +95,33 @@ describe('findBestCanvasDropPlacement', () => {
       activeTrackId: 'track-2',
       proposedFrame: 120,
       durationInFrames: 30,
+      itemType: 'video',
     });
 
     expect(placement).toEqual({
       trackId: 'track-2',
       from: 70,
       preservedTime: false,
+    });
+  });
+
+  it('keeps visual placements off audio tracks', () => {
+    const placement = findBestCanvasDropPlacement({
+      tracks: [
+        makeTrack('track-v1', 0, { kind: 'video' }),
+        makeTrack('track-a1', 1, { kind: 'audio' }),
+      ],
+      items: [],
+      activeTrackId: 'track-a1',
+      proposedFrame: 48,
+      durationInFrames: 30,
+      itemType: 'shape',
+    });
+
+    expect(placement).toEqual({
+      trackId: 'track-v1',
+      from: 48,
+      preservedTime: true,
     });
   });
 });

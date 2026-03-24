@@ -67,6 +67,37 @@ function inferTrackKinds(sortedTracks: TimelineTrack[], itemsByTrackId: Map<stri
   return kindsByTrackId;
 }
 
+export function needsLegacyAvTrackLayoutRepair(params: {
+  tracks: TimelineTrack[];
+  items: TimelineItem[];
+}): boolean {
+  const { tracks, items } = params;
+  if (tracks.length === 0 || items.length === 0) {
+    return false;
+  }
+
+  if (items.some((item) => item.type === 'video')) {
+    return true;
+  }
+
+  const trackById = new Map(tracks.map((track) => [track.id, track]));
+  return items.some((item) => {
+    const track = trackById.get(item.trackId);
+    if (!track) {
+      return true;
+    }
+
+    const trackKind = getTrackKind(track);
+    if (trackKind === null) {
+      return true;
+    }
+
+    return item.type === 'audio'
+      ? trackKind !== 'audio'
+      : trackKind !== 'video';
+  });
+}
+
 function buildTrackClone(params: {
   sourceTrack: TimelineTrack | null;
   kind: TrackKind;

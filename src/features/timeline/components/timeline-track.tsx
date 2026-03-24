@@ -26,6 +26,12 @@ import { findNearestAvailableSpace } from '../utils/collision-utils';
 import { mapWithConcurrency } from '@/shared/async/async-utils';
 import { useCompositionNavigationStore } from '../stores/composition-navigation-store';
 import {
+  createTimelineTemplateItem,
+  getDefaultGeneratedLayerDurationInFrames,
+  isTimelineTemplateDragData,
+} from '../utils/generated-layer-items';
+import { findCompatibleTrackForItemType } from '../utils/track-item-compatibility';
+import {
   buildDroppedMediaTimelineItems,
   getDroppedMediaDurationInFrames,
   type DroppableMediaType,
@@ -78,6 +84,12 @@ function getGhostHighlightClasses(ghostPreviews: GhostPreviewItem[]): string {
   }
   if (ghostPreviews.some((ghost) => ghost.type === 'video')) {
     return 'border-timeline-video/60 bg-timeline-video/10';
+  }
+  if (ghostPreviews.some((ghost) => ghost.type === 'text')) {
+    return 'border-timeline-text/60 bg-timeline-text/10';
+  }
+  if (ghostPreviews.some((ghost) => ghost.type === 'shape')) {
+    return 'border-timeline-shape/60 bg-timeline-shape/10';
   }
   if (ghostPreviews.some((ghost) => ghost.type === 'image')) {
     return 'border-timeline-image/60 bg-timeline-image/10';
@@ -318,6 +330,84 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     }];
   }, [fps, frameToPixels, track.id]);
 
+  const buildGhostPreviewForTemplate = useCallback((
+    template: unknown,
+    dropFrame: number,
+  ): GhostPreviewItem[] => {
+    if (!isTimelineTemplateDragData(template)) {
+      return [];
+    }
+
+    const store = useTimelineStore.getState();
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
+    const targetTrack = findCompatibleTrackForItemType({
+      tracks: store.tracks,
+      items: store.items,
+      itemType: template.itemType,
+      preferredTrackId: track.id,
+    });
+    if (!targetTrack) {
+      return [];
+    }
+
+    const finalPosition = findNearestAvailableSpace(
+      Math.max(0, dropFrame),
+      durationInFrames,
+      targetTrack.id,
+      store.items,
+    );
+    if (finalPosition === null) {
+      return [];
+    }
+
+    return [{
+      left: frameToPixels(finalPosition),
+      width: frameToPixels(durationInFrames),
+      label: template.label,
+      type: template.itemType,
+      targetTrackId: targetTrack.id,
+    }];
+  }, [fps, frameToPixels, track.id]);
+
+  const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): TimelineItemType | null => {
+    if (!isTimelineTemplateDragData(template)) {
+      return null;
+    }
+
+    const store = useTimelineStore.getState();
+    const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps);
+    const targetTrack = findCompatibleTrackForItemType({
+      tracks: store.tracks,
+      items: store.items,
+      itemType: template.itemType,
+      preferredTrackId: track.id,
+    });
+    if (!targetTrack) {
+      return null;
+    }
+
+    const finalPosition = findNearestAvailableSpace(
+      Math.max(0, dropFrame),
+      durationInFrames,
+      targetTrack.id,
+      store.items,
+    );
+    if (finalPosition === null) {
+      return null;
+    }
+
+    return createTimelineTemplateItem({
+      template,
+      placement: {
+        trackId: targetTrack.id,
+        from: finalPosition,
+        durationInFrames,
+        canvasWidth,
+        canvasHeight,
+      },
+    });
+  }, [canvasHeight, canvasWidth, fps, track.id]);
+
   const clearExternalPreviewSession = useCallback(() => {
     externalPreviewItemsRef.current = null;
     externalPreviewSignatureRef.current = null;
@@ -504,12 +594,24 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         return;
       }
 
+      const store = useTimelineStore.getState();
+      const targetTrack = findCompatibleTrackForItemType({
+        tracks: store.tracks,
+        items: store.items,
+        itemType: 'composition',
+        preferredTrackId: track.id,
+      });
+      if (!targetTrack) {
+        clearTrackGhostPreviews();
+        return;
+      }
+
       const proposedPosition = Math.max(0, dropFrame);
-      const storeItems = useTimelineStore.getState().items;
+      const storeItems = store.items;
       const finalPosition = findNearestAvailableSpace(
         proposedPosition,
         data.durationInFrames,
-        track.id,
+        targetTrack.id,
         storeItems
       );
 
@@ -519,11 +621,16 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           width: frameToPixels(data.durationInFrames),
           label: data.name,
           type: 'composition',
-          targetTrackId: track.id,
+          targetTrackId: targetTrack.id,
         });
       }
 
       setTrackGhostPreviews(previews);
+      return;
+    }
+
+    if (data.type === 'timeline-template') {
+      setTrackGhostPreviews(buildGhostPreviewForTemplate(data, dropFrame));
       return;
     }
 
@@ -607,12 +714,24 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           }
 
           const { compositionId, name, durationInFrames, width, height } = data as CompositionDragData;
+          const store = useTimelineStore.getState();
+          const targetTrack = findCompatibleTrackForItemType({
+            tracks: store.tracks,
+            items: store.items,
+            itemType: 'composition',
+            preferredTrackId: track.id,
+          });
+          if (!targetTrack) {
+            logger.warn('Cannot drop composition: no compatible video track found');
+            return;
+          }
+
           const proposedPosition = Math.max(0, dropFrame);
-          const storeItems = useTimelineStore.getState().items;
+          const storeItems = store.items;
           const finalPosition = findNearestAvailableSpace(
             proposedPosition,
             durationInFrames,
-            track.id,
+            targetTrack.id,
             storeItems
           );
 
@@ -624,7 +743,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           const compositionItem: CompositionItem = {
             id: crypto.randomUUID(),
             type: 'composition',
-            trackId: track.id,
+            trackId: targetTrack.id,
             from: finalPosition,
             durationInFrames,
             label: name,
@@ -640,6 +759,17 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           };
 
           addItem(compositionItem);
+          return;
+        }
+
+        if (isTimelineTemplateDragData(data)) {
+          const templateItem = buildTimelineTemplateItem(data, dropFrame);
+          if (!templateItem) {
+            toast.error('Unable to add dropped timeline item');
+            return;
+          }
+
+          addItem(templateItem);
           return;
         }
 
@@ -821,8 +951,12 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
                   ? 'border-timeline-video bg-timeline-video/20'
                   : ghost.type === 'audio'
                   ? 'border-timeline-audio bg-timeline-audio/20'
+                  : ghost.type === 'text'
+                  ? 'border-timeline-text bg-timeline-text/20'
+                  : ghost.type === 'shape'
+                  ? 'border-timeline-shape bg-timeline-shape/20'
                   : 'border-timeline-image bg-timeline-image/20'
-              }`}
+               }`}
               style={{
                 left: `${ghost.left}px`,
                 width: `${ghost.width}px`,

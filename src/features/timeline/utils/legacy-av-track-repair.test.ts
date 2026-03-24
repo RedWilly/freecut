@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ItemKeyframes } from '@/types/keyframe';
-import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline';
-import { repairLegacyAvTrackLayout } from './legacy-av-track-repair';
+import type { AdjustmentItem, AudioItem, TimelineTrack, VideoItem } from '@/types/timeline';
+import {
+  needsLegacyAvTrackLayoutRepair,
+  repairLegacyAvTrackLayout,
+} from './legacy-av-track-repair';
 
 function makeTrack(overrides: Partial<TimelineTrack> & Pick<TimelineTrack, 'id' | 'name' | 'order'>): TimelineTrack {
   return {
@@ -145,5 +148,43 @@ describe('repairLegacyAvTrackLayout', () => {
     expect(generatedAudio).toBeDefined();
     expect(generatedAudio?.trackId).toBe(a2Track?.id);
     expect(result.keyframes.some((entry) => entry.itemId === generatedAudio?.id)).toBe(true);
+  });
+
+  it('repairs non-video timelines so visual layers stay on video tracks', () => {
+    const tracks = [
+      makeTrack({ id: 'track-audio', name: 'Track 1', order: 0 }),
+      makeTrack({ id: 'track-fx', name: 'A1', kind: 'audio', order: 1 }),
+    ];
+    const items = [
+      makeAudioItem({ id: 'audio-1', trackId: 'track-audio', mediaId: 'music-1', label: 'Music Bed' }),
+      {
+        id: 'adj-1',
+        type: 'adjustment',
+        trackId: 'track-fx',
+        from: 0,
+        durationInFrames: 60,
+        label: 'Adjustment Layer',
+      } satisfies AdjustmentItem,
+    ];
+
+    expect(needsLegacyAvTrackLayoutRepair({ tracks, items })).toBe(true);
+
+    const result = repairLegacyAvTrackLayout({
+      tracks,
+      items,
+      keyframes: [],
+      fps: 30,
+      videoHasAudioByMediaId: {},
+    });
+
+    expect(result.tracks.map((track) => `${track.name}:${track.kind}`)).toEqual([
+      'V1:video',
+      'A1:audio',
+    ]);
+
+    const videoTrackId = result.tracks.find((track) => track.kind === 'video')?.id;
+    const audioTrackId = result.tracks.find((track) => track.kind === 'audio')?.id;
+    expect(result.items.find((item) => item.id === 'adj-1')).toMatchObject({ trackId: videoTrackId });
+    expect(result.items.find((item) => item.id === 'audio-1')).toMatchObject({ trackId: audioTrackId });
   });
 });

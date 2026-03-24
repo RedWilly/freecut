@@ -9,6 +9,7 @@ import { useSnapCalculator } from './use-snap-calculator';
 import { findNearestAvailableSpace } from '../utils/collision-utils';
 import { getTrackKind } from '../utils/classic-tracks';
 import { expandSelectionWithLinkedItems, getLinkedItemIds } from '../utils/linked-items';
+import { findCompatibleTrackForItemType } from '../utils/track-item-compatibility';
 import {
   resolveCreateNewDragTrackTargets,
   resolveLinkedDragTrackTargets,
@@ -386,6 +387,22 @@ export function useTimelineDrag(
     };
   }, [getTrackIdFromMouseY]);
 
+  const getCompatibleTrackIdFromMouseY = useCallback((
+    mouseY: number,
+    startTrackId: string,
+    itemType: TimelineItem['type'],
+  ): string => {
+    const hoveredTrackId = getTrackIdFromMouseY(mouseY, startTrackId);
+    const compatibleTrack = findCompatibleTrackForItemType({
+      tracks: tracksRef.current,
+      items: getItems(),
+      itemType,
+      preferredTrackId: hoveredTrackId,
+    });
+
+    return compatibleTrack?.id ?? startTrackId;
+  }, [getItems, getTrackIdFromMouseY]);
+
   /**
    * Calculate magnetic snap for item position (start and end edges)
    * Only snaps to other item edges, not grid lines
@@ -607,7 +624,7 @@ export function useTimelineDrag(
           ?? 64,
       });
       const previewAnchorTrackId = previewTrackTargets?.trackAssignments.get(dragStateRef.current.itemId)
-        ?? getTrackIdFromMouseY(e.clientY, dragStateRef.current.startTrackId);
+        ?? getCompatibleTrackIdFromMouseY(e.clientY, dragStateRef.current.startTrackId, item.type);
       dragStateRef.current.currentMouseX = e.clientX;
       dragStateRef.current.currentMouseY = e.clientY;
 
@@ -818,7 +835,7 @@ export function useTimelineDrag(
 
       // Calculate new track for anchor item
       const newTrackId = resolvedTrackTargets?.trackAssignments.get(dragState.itemId)
-        ?? getTrackIdFromMouseY(dragState.currentMouseY, dragState.startTrackId);
+        ?? getCompatibleTrackIdFromMouseY(dragState.currentMouseY, dragState.startTrackId, item.type);
 
       // Multi-item drag or single?
       if (dragState.draggedItems.length > 1) {
@@ -1065,7 +1082,7 @@ export function useTimelineDrag(
         document.body.style.userSelect = '';
       };
     }
-  }, [isDragging, item.id, item.durationInFrames, getTrackIdFromMouseY, getTrackDropTarget, calculateMagneticSnap, elementRef, getItems, setDragState]);
+  }, [isDragging, item.id, item.durationInFrames, item.type, getCompatibleTrackIdFromMouseY, getTrackDropTarget, calculateMagneticSnap, elementRef, getItems, setDragState]);
 
   return {
     isDragging,
