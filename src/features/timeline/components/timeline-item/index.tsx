@@ -5,7 +5,6 @@ import { useTimelineStore } from '../../stores/timeline-store';
 import { useItemsStore } from '../../stores/items-store';
 import { useKeyframesStore } from '../../stores/keyframes-store';
 import { useTransitionsStore } from '../../stores/transitions-store';
-import { useTransitionResizePreviewStore } from '../../stores/transition-resize-preview-store';
 import { useEffectDropPreviewStore } from '../../stores/effect-drop-preview-store';
 import { useTrackDropPreviewStore } from '../../stores/track-drop-preview-store';
 import { useLinkedEditPreviewStore } from '../../stores/linked-edit-preview-store';
@@ -31,7 +30,6 @@ import { useTimelineTrim } from '../../hooks/use-timeline-trim';
 import { useRateStretch } from '../../hooks/use-rate-stretch';
 import { useTimelineSlipSlide } from '../../hooks/use-timeline-slip-slide';
 import { useClipVisibility } from '../../hooks/use-clip-visibility';
-import { calculateTransitionPortions } from '@/domain/timeline/transitions/transition-planner';
 import { DRAG_OPACITY } from '../../constants';
 import { canJoinItems, canJoinMultipleItems } from '@/features/timeline/utils/clip-utils';
 import { resolveTransitionTargetForEdge } from '@/features/timeline/utils/transition-targets';
@@ -548,25 +546,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const addEffects = useTimelineStore((s) => s.addEffects);
   const updateTimelineItem = useTimelineStore((s) => s.updateItem);
 
-  // Smart per-concern selectors for transition resize preview.
-  // Return primitives so unaffected clips always get 0 (stable, no re-render).
-
-  // Only changes for the LEFT clip of the resizing transition
-  const previewOverlapRight = useTransitionResizePreviewStore(
-    useCallback((s) => {
-      if (s.leftClipId !== item.id) return 0;
-      return calculateTransitionPortions(s.previewDuration, s.alignment).leftPortion;
-    }, [item.id])
-  );
-
-  // Only changes for the RIGHT clip
-  const previewOverlapLeft = useTransitionResizePreviewStore(
-    useCallback((s) => {
-      if (s.rightClipId !== item.id) return 0;
-      return calculateTransitionPortions(s.previewDuration, s.alignment).rightPortion;
-    }, [item.id])
-  );
-
   const draggedTransition = useTransitionDragStore((s) => s.draggedTransition);
   const transitionDragPreview = useTransitionDragStore(
     useCallback((s) => {
@@ -676,9 +655,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       return s.itemById[slideRightNeighborIdForSlidItem] ?? null;
     }, [slideRightNeighborIdForSlidItem])
   );
-
-  const previewBridgeRightPortion = previewOverlapRight;
-  const previewBridgeLeftPortion = previewOverlapLeft;
 
   const transitionDropGhost = useMemo(() => {
     if (!transitionDragPreview || !transitionDragPreviewRightClip) return null;
@@ -2649,28 +2625,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
           <div className="absolute inset-x-0 top-0 h-px bg-white/60" />
           <div className="absolute inset-x-0 bottom-0 h-px bg-slate-900/20" />
         </div>
-      )}
-
-      {/* Transition resize ghost overlays â€” show overlap zones during resize */}
-      {previewBridgeRightPortion > 0 && (
-        <div
-          className="absolute inset-y-0 rounded-r pointer-events-none"
-          style={{
-            left: visualLeft + visualWidth,
-            width: Math.round(timeToPixels(previewBridgeRightPortion / fps)),
-            background: 'linear-gradient(90deg, rgba(148,163,184,0.16), rgba(148,163,184,0.04))',
-          }}
-        />
-      )}
-      {previewBridgeLeftPortion > 0 && (
-        <div
-          className="absolute inset-y-0 rounded-l pointer-events-none"
-          style={{
-            left: visualLeft - Math.round(timeToPixels(previewBridgeLeftPortion / fps)),
-            width: Math.round(timeToPixels(previewBridgeLeftPortion / fps)),
-            background: 'linear-gradient(270deg, rgba(148,163,184,0.16), rgba(148,163,184,0.04))',
-          }}
-        />
       )}
 
       {/* Alt-drag ghosts */}

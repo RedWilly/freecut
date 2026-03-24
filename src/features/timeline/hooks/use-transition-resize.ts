@@ -5,7 +5,6 @@ import { TRANSITION_CONFIGS } from '@/types/transition';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useItemsStore } from '../stores/items-store';
 import { useTimelineZoom } from './use-timeline-zoom';
-import { useTransitionResizePreviewStore } from '../stores/transition-resize-preview-store';
 import type { TimelineState, TimelineActions } from '../types';
 import { getMaxTransitionDurationForHandles } from '../utils/transition-utils';
 
@@ -97,8 +96,6 @@ export function useTransitionResize(transition: Transition) {
         ...prev,
         currentDelta: clampedDelta,
       }));
-
-      useTransitionResizePreviewStore.getState().setPreviewDuration(newDuration);
     },
     [pixelsToTime, fps, maxDuration]
   );
@@ -118,9 +115,6 @@ export function useTransitionResize(transition: Transition) {
     if (currentDelta !== 0) {
       updateTransition(transition.id, { durationInFrames: newDuration });
     }
-
-    useTransitionResizePreviewStore.getState().clearPreview();
-
     setResizeState({
       isResizing: false,
       handle: null,
@@ -140,28 +134,12 @@ export function useTransitionResize(transition: Transition) {
       e.stopPropagation();
       usePlaybackStore.getState().setPreviewFrame(null);
 
-      // Look up the right clip's committed position for ripple preview
-      const rightClip = useItemsStore.getState().items.find(
-        (i) => i.id === transition.rightClipId
-      );
-
       setResizeState({
         isResizing: true,
         handle,
         startX: e.clientX,
         initialDuration: transition.durationInFrames,
         currentDelta: 0,
-      });
-
-      useTransitionResizePreviewStore.getState().setPreview({
-        transitionId: transition.id,
-        previewDuration: transition.durationInFrames,
-        alignment: transition.alignment ?? 0.5,
-        leftClipId: transition.leftClipId,
-        rightClipId: transition.rightClipId,
-        trackId: rightClip?.trackId ?? '',
-        rightClipFrom: rightClip?.from ?? 0,
-        committedDuration: transition.durationInFrames,
       });
 
       document.body.style.cursor = 'ew-resize';

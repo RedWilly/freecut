@@ -11,6 +11,8 @@ export const ToolOperationOverlay = memo(function ToolOperationOverlay({
 }: ToolOperationOverlayProps) {
   if (!visual) return null;
 
+  const showBoundsBox = visual.mode !== 'ripple';
+
   const boxAccentClass = visual.mode === 'ripple'
     ? 'border-amber-200/85 bg-amber-300/[0.06] shadow-[0_0_0_1px_rgba(251,191,36,0.26),0_10px_24px_rgba(15,23,42,0.18)]'
     : visual.mode === 'rolling'
@@ -25,7 +27,7 @@ export const ToolOperationOverlay = memo(function ToolOperationOverlay({
 
   return (
     <>
-      {visual.boxLeftPx !== null && visual.boxWidthPx !== null && (
+      {showBoundsBox && visual.boxLeftPx !== null && visual.boxWidthPx !== null && (
         <div
           className={cn(
             'absolute pointer-events-none z-30 rounded-[6px] border',

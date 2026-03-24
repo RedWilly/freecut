@@ -11,6 +11,7 @@ import { clampTrimAmount, clampToAdjacentItems, type TrimHandle } from '../utils
 import { useTransitionsStore } from '../stores/transitions-store';
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
+import { useTransitionBreakPreviewStore } from '../stores/transition-break-preview-store';
 import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
 import {
   rollingTrimItems,
@@ -376,6 +377,27 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         }
       }
 
+      if (trimStateRef.current.destroyTransitionAtHandle && handle) {
+        const transitionBreakStore = useTransitionBreakPreviewStore.getState();
+        if (
+          transitionBreakStore.itemId !== item.id
+          || transitionBreakStore.handle !== handle
+        ) {
+          transitionBreakStore.setPreview({
+            itemId: item.id,
+            handle,
+            delta: deltaFrames,
+          });
+        } else if (transitionBreakStore.delta !== deltaFrames) {
+          transitionBreakStore.setDelta(deltaFrames);
+        }
+      } else {
+        const transitionBreakStore = useTransitionBreakPreviewStore.getState();
+        if (transitionBreakStore.itemId) {
+          transitionBreakStore.clearPreview();
+        }
+      }
+
       // Update local state for visual feedback
       const isRolling = isRollingEdit && neighborId !== null;
       const linkedPreviewUpdates: PreviewItemUpdate[] = [];
@@ -434,10 +456,15 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
           }
 
           linkedPreviewUpdates.push(
-            ...buildSynchronizedLinkedMoveUpdates(allItems, baseDeltaByItemId).map((update) => applyMovePreview(
-              allItems.find((candidate) => candidate.id === update.id)!,
-              update.from - (allItems.find((candidate) => candidate.id === update.id)?.from ?? update.from),
-            )),
+            ...buildSynchronizedLinkedMoveUpdates(allItems, baseDeltaByItemId)
+              // Same-track downstream clips already get their live ripple shift from
+              // `useRippleEditPreviewStore`; duplicating that here moves them twice,
+              // which creates the temporary gap/ghost before mouseup snaps back.
+              .filter((update) => allItems.find((candidate) => candidate.id === update.id)?.trackId !== currentItem.trackId)
+              .map((update) => applyMovePreview(
+                allItems.find((candidate) => candidate.id === update.id)!,
+                update.from - (allItems.find((candidate) => candidate.id === update.id)?.from ?? update.from),
+              )),
           );
         }
       } else {
@@ -539,6 +566,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       // Clear ripple edit preview
       useRippleEditPreviewStore.getState().clearPreview();
+      useTransitionBreakPreviewStore.getState().clearPreview();
       useLinkedEditPreviewStore.getState().clear();
 
       // Clear drag state (including snap indicator)
@@ -594,6 +622,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
+        useTransitionBreakPreviewStore.getState().clearPreview();
         useLinkedEditPreviewStore.getState().clear();
       };
     }
@@ -662,6 +691,16 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         constraintLabel: null,
         destroyTransitionAtHandle,
       });
+
+      if (destroyTransitionAtHandle) {
+        useTransitionBreakPreviewStore.getState().setPreview({
+          itemId: item.id,
+          handle,
+          delta: 0,
+        });
+      } else {
+        useTransitionBreakPreviewStore.getState().clearPreview();
+      }
     },
     [item.from, item.durationInFrames, trackLocked, getItemFromStore]
   );

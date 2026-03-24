@@ -6,6 +6,7 @@ import { useItemsStore } from '../stores/items-store';
 import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store';
+import { useTransitionBreakPreviewStore } from '../stores/transition-break-preview-store';
 import { useSelectionStore } from '@/shared/state/selection';
 import {
   TRANSITION_DRAG_MIME,
@@ -198,6 +199,13 @@ export const TransitionItem = memo(function TransitionItem({
         [transition.leftClipId, transition.rightClipId],
       ),
     ),
+  );
+
+  const isHiddenForBreakPreview = useTransitionBreakPreviewStore(
+    useCallback((s) => (
+      (s.itemId === transition.leftClipId && s.handle === 'end')
+      || (s.itemId === transition.rightClipId && s.handle === 'start')
+    ), [transition.leftClipId, transition.rightClipId])
   );
 
   // Track hovered edge for showing resize handles
@@ -411,7 +419,7 @@ export const TransitionItem = memo(function TransitionItem({
     useTransitionDragStore.getState().clearDrag();
   }, [transition.id, updateTransition]);
 
-  if (!position || !effectiveLeftClip || !effectiveRightClip) {
+  if (!position || !effectiveLeftClip || !effectiveRightClip || isHiddenForBreakPreview) {
     return null;
   }
 
@@ -451,17 +459,19 @@ export const TransitionItem = memo(function TransitionItem({
         >
           <div
             className={cn(
-              'pointer-events-none relative h-full w-full rounded-sm border',
+              'pointer-events-none relative h-full w-full rounded-sm border bg-transparent',
               isSelected
-                ? 'border-orange-400/90 bg-orange-300/10'
-                : 'border-slate-100/80 bg-slate-100/10',
-              'shadow-[0_0_0_1px_rgba(15,23,42,0.04)]',
-              isSelected
-                ? 'hover:bg-orange-300/14 hover:border-orange-300'
-                : 'hover:bg-slate-100/14 hover:border-slate-50/90'
+                ? 'border-orange-400/90 shadow-[0_0_0_1px_rgba(251,146,60,0.18)]'
+                : 'border-slate-100/80 shadow-[0_0_0_1px_rgba(248,250,252,0.1)]'
             )}
           >
-            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(248,250,252,0.1),rgba(255,255,255,0.03)_48%,rgba(255,255,255,0.03)_52%,rgba(248,250,252,0.1))]" />
+            <div
+              className={cn(
+                'absolute top-0 bottom-0 w-px',
+                isSelected ? 'bg-orange-200/95' : 'bg-slate-50/85'
+              )}
+              style={{ left: `${position.cutOffset}px` }}
+            />
             <div className="absolute inset-x-0 top-0 h-px bg-slate-50/70" />
             <div className="absolute inset-x-0 bottom-0 h-px bg-slate-900/15" />
           </div>
