@@ -131,6 +131,12 @@ export function planTrackMediaDropPlacements<T>(params: {
     const itemsToCheck: CollisionRect[] = [...params.existingItems, ...reservedRanges];
     const isVideoWithAudio = entry.mediaType === 'video' && !!entry.hasLinkedAudio;
     const isVisualMedia = entry.mediaType === 'video' || entry.mediaType === 'image';
+    const targetTrackKind = getTrackKind(targetTrack);
+    const requiredPrimaryKind: TrackKind = isVisualMedia ? 'video' : 'audio';
+
+    if (targetTrackKind && targetTrackKind !== requiredPrimaryKind) {
+      continue;
+    }
 
     const primaryTrackState = ensureTrackForKind(
       workingTracks,

@@ -463,7 +463,13 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
 
     if (hasExternalFiles) {
       if (externalPreviewItemsRef.current && externalPreviewItemsRef.current.length > 0) {
-        setZoneGhostPreviews(buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame));
+        const previews = buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame);
+        if (previews.length === 0) {
+          e.dataTransfer.dropEffect = 'none';
+          setIsDragOver(false);
+          setIsExternalDragOver(false);
+        }
+        setZoneGhostPreviews(previews);
       } else {
         const fileItemCount = Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length;
         setZoneGhostPreviews(buildGenericExternalGhostPreviews(dropFrame, Math.max(1, fileItemCount)));
@@ -498,6 +504,10 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         type: 'composition' as const,
         targetZone: 'video' as const,
       }));
+      if (previews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
       setZoneGhostPreviews(previews);
       return;
     }
@@ -509,7 +519,12 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         return;
       }
 
-      setZoneGhostPreviews(buildGhostPreviewForTemplate(data, dropFrame));
+      const previews = buildGhostPreviewForTemplate(data, dropFrame);
+      if (previews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      setZoneGhostPreviews(previews);
       return;
     }
 
@@ -523,7 +538,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       }
 
       const mediaById = new Map(getMedia.map((media) => [media.id, media]));
-      setZoneGhostPreviews(buildGhostPreviewsForEntries(
+      const previews = buildGhostPreviewsForEntries(
         validItems.map((item) => ({
           label: item.fileName,
           mediaType: item.mediaType,
@@ -531,7 +546,12 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
           hasLinkedAudio: item.mediaType === 'video' && !!mediaById.get(item.mediaId)?.audioCodec,
         })),
         dropFrame,
-      ));
+      );
+      if (previews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      setZoneGhostPreviews(previews);
       return;
     }
 
@@ -543,14 +563,19 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       }
 
       const itemDuration = getDroppedMediaDurationInFrames(media, data.mediaType, fps);
-      setZoneGhostPreviews(buildGhostPreviewsForEntries([
+      const previews = buildGhostPreviewsForEntries([
         {
           label: data.fileName,
           mediaType: data.mediaType,
           duration: itemDuration / fps,
           hasLinkedAudio: data.mediaType === 'video' && !!media.audioCodec,
         },
-      ], dropFrame));
+      ], dropFrame);
+      if (previews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      setZoneGhostPreviews(previews);
       return;
     }
 

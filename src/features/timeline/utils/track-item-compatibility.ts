@@ -46,6 +46,7 @@ export function findCompatibleTrackForItemType(params: {
   preferredTrackId?: string | null;
   includeLocked?: boolean;
   includeHidden?: boolean;
+  allowPreferredTrackFallback?: boolean;
 }): TimelineTrack | null {
   const {
     tracks,
@@ -54,6 +55,7 @@ export function findCompatibleTrackForItemType(params: {
     preferredTrackId,
     includeLocked = false,
     includeHidden = false,
+    allowPreferredTrackFallback = true,
   } = params;
 
   const eligibleTracks = tracks.filter((track) => {
@@ -82,6 +84,10 @@ export function findCompatibleTrackForItemType(params: {
   const preferredCompatibleTrack = compatibleTracks.find((track) => track.id === preferredTrack.id);
   if (preferredCompatibleTrack) {
     return preferredCompatibleTrack;
+  }
+
+  if (!allowPreferredTrackFallback) {
+    return null;
   }
 
   return [...compatibleTracks].sort((left, right) => {

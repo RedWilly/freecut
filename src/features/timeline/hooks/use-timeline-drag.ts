@@ -391,16 +391,17 @@ export function useTimelineDrag(
     mouseY: number,
     startTrackId: string,
     itemType: TimelineItem['type'],
-  ): string => {
+  ): string | null => {
     const hoveredTrackId = getTrackIdFromMouseY(mouseY, startTrackId);
     const compatibleTrack = findCompatibleTrackForItemType({
       tracks: tracksRef.current,
       items: getItems(),
       itemType,
       preferredTrackId: hoveredTrackId,
+      allowPreferredTrackFallback: false,
     });
 
-    return compatibleTrack?.id ?? startTrackId;
+    return compatibleTrack?.id ?? null;
   }, [getItems, getTrackIdFromMouseY]);
 
   /**
@@ -584,8 +585,6 @@ export function useTimelineDrag(
       const altKeyChanged = isAltDragRef.current !== e.altKey;
       isAltDragRef.current = e.altKey;
 
-      setGlobalDragCursor(e.altKey ? 'copy' : 'grabbing');
-
       // Calculate clamped delta to prevent visual preview from going below frame 0
       const deltaFrames = pixelsToFrameRef.current(deltaX);
       const draggedItems = dragStateRef.current.draggedItems;
@@ -611,9 +610,6 @@ export function useTimelineDrag(
 
       const currentItems = getItems();
       const dropTarget = getTrackDropTarget(e.clientY, dragStateRef.current.startTrackId);
-      const linkedDropTarget = dropTarget.zone
-        ? { trackId: dropTarget.trackId, zone: dropTarget.zone, createNew: dropTarget.createNew }
-        : null;
       const previewTrackTargets = resolveDraggedTrackTargets({
         items: currentItems,
         draggedItems: dragStateRef.current.draggedItems,
@@ -623,10 +619,24 @@ export function useTimelineDrag(
           ?? tracksRef.current.find((track) => track.id === dragStateRef.current!.startTrackId)?.height
           ?? 64,
       });
+      const hoveredCompatibleTrackId = getCompatibleTrackIdFromMouseY(
+        e.clientY,
+        dragStateRef.current.startTrackId,
+        item.type,
+      );
+      const hasInvalidExplicitDropTarget = dropTarget.zone !== null
+        && !previewTrackTargets
+        && hoveredCompatibleTrackId === null;
+      const linkedDropTarget = dropTarget.zone && !hasInvalidExplicitDropTarget
+        ? { trackId: dropTarget.trackId, zone: dropTarget.zone, createNew: dropTarget.createNew }
+        : null;
       const previewAnchorTrackId = previewTrackTargets?.trackAssignments.get(dragStateRef.current.itemId)
-        ?? getCompatibleTrackIdFromMouseY(e.clientY, dragStateRef.current.startTrackId, item.type);
+        ?? hoveredCompatibleTrackId
+        ?? dragStateRef.current.startTrackId;
       dragStateRef.current.currentMouseX = e.clientX;
       dragStateRef.current.currentMouseY = e.clientY;
+
+      setGlobalDragCursor(hasInvalidExplicitDropTarget ? 'not-allowed' : e.altKey ? 'copy' : 'grabbing');
 
       // For multi-item drag, calculate group bounding box for snap visualization
       // Note: deltaFrames and draggedItems already calculated above for clamping
@@ -838,7 +848,9 @@ export function useTimelineDrag(
         ?? getCompatibleTrackIdFromMouseY(dragState.currentMouseY, dragState.startTrackId, item.type);
 
       // Multi-item drag or single?
-      if (dragState.draggedItems.length > 1) {
+      if (newTrackId === null) {
+        logger.warn('Cannot move items to an incompatible track');
+      } else if (dragState.draggedItems.length > 1) {
         // Multi-item drag: calculate group bounding box for snapping
         // Snap should only happen at the edges of the entire selection, not individual items
         let groupStartFrame = Infinity;

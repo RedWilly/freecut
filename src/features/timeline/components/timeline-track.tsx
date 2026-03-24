@@ -348,6 +348,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       items: store.items,
       itemType: template.itemType,
       preferredTrackId: track.id,
+      allowPreferredTrackFallback: false,
     });
     if (!targetTrack) {
       return [];
@@ -384,6 +385,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       items: store.items,
       itemType: template.itemType,
       preferredTrackId: track.id,
+      allowPreferredTrackFallback: false,
     });
     if (!targetTrack) {
       return null;
@@ -573,7 +575,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     if (hasExternalFiles) {
       if (externalPreviewItemsRef.current && externalPreviewItemsRef.current.length > 0) {
-        setTrackGhostPreviews(buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame));
+        const previews = buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame);
+        if (previews.length === 0) {
+          e.dataTransfer.dropEffect = 'none';
+          setIsDragOver(false);
+          setIsExternalDragOver(false);
+        }
+        setTrackGhostPreviews(previews);
       } else {
         const fileItemCount = Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length;
         setTrackGhostPreviews(buildGenericExternalGhostPreviews(dropFrame, Math.max(1, fileItemCount)));
@@ -603,8 +611,11 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         items: store.items,
         itemType: 'composition',
         preferredTrackId: track.id,
+        allowPreferredTrackFallback: false,
       });
       if (!targetTrack) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
         clearTrackGhostPreviews();
         return;
       }
@@ -626,6 +637,9 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           type: 'composition',
           targetTrackId: targetTrack.id,
         });
+      } else {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
       }
 
       setTrackGhostPreviews(previews);
@@ -633,7 +647,12 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     }
 
     if (data.type === 'timeline-template') {
-      setTrackGhostPreviews(buildGhostPreviewForTemplate(data, dropFrame));
+      const previews = buildGhostPreviewForTemplate(data, dropFrame);
+      if (previews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      setTrackGhostPreviews(previews);
       return;
     }
 
@@ -647,7 +666,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       }
 
       const mediaById = new Map(getMedia.map((media) => [media.id, media]));
-      previews.push(...buildGhostPreviewsForEntries(
+      const nextPreviews = buildGhostPreviewsForEntries(
         validItems.map((item) => ({
           label: item.fileName,
           mediaType: item.mediaType,
@@ -655,7 +674,12 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           hasLinkedAudio: item.mediaType === 'video' && !!mediaById.get(item.mediaId)?.audioCodec,
         })),
         dropFrame
-      ));
+      );
+      if (nextPreviews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      previews.push(...nextPreviews);
       setTrackGhostPreviews(previews);
       return;
     }
@@ -668,14 +692,19 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       }
 
       const itemDuration = getDroppedMediaDurationInFrames(media, data.mediaType, fps);
-      previews.push(...buildGhostPreviewsForEntries([
+      const nextPreviews = buildGhostPreviewsForEntries([
         {
           label: data.fileName,
           mediaType: data.mediaType,
           duration: itemDuration / fps,
           hasLinkedAudio: data.mediaType === 'video' && !!media.audioCodec,
         },
-      ], dropFrame));
+      ], dropFrame);
+      if (nextPreviews.length === 0) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
+      }
+      previews.push(...nextPreviews);
     }
 
     setTrackGhostPreviews(previews);
@@ -723,6 +752,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
             items: store.items,
             itemType: 'composition',
             preferredTrackId: track.id,
+            allowPreferredTrackFallback: false,
           });
           if (!targetTrack) {
             logger.warn('Cannot drop composition: no compatible video track found');
