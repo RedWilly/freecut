@@ -44,6 +44,7 @@ import {
 import { ClipContent } from './clip-content';
 import { ClipIndicators } from './clip-indicators';
 import { shouldSuppressLinkedSyncBadge } from './linked-sync-badge';
+import { shouldSuppressTimelineItemClickAfterDrag } from './post-drag-click-guard';
 import { TrimHandles } from './trim-handles';
 import { StretchHandles } from './stretch-handles';
 import { AudioFadeHandles } from './audio-fade-handles';
@@ -1066,7 +1067,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     e.stopPropagation();
 
     if (trackLocked) return;
-    if (dragWasActiveRef.current) return;
+    if (shouldSuppressTimelineItemClickAfterDrag(activeToolRef.current, dragWasActiveRef.current)) return;
 
     // Razor tool: split item at click position
     if (activeToolRef.current === 'razor') {
