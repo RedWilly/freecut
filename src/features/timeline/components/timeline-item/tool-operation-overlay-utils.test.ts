@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VideoItem } from '@/types/timeline';
-import { getSlipOperationBoundsVisual } from './tool-operation-overlay-utils';
+import { getSlipOperationBoundsVisual, getTrimOperationBoundsVisual } from './tool-operation-overlay-utils';
 
 function createVideoItem(): VideoItem {
   return {
@@ -37,5 +37,45 @@ describe('tool operation overlay utils', () => {
     expect(visual.boxLeftPx).toBe(70);
     expect(visual.boxWidthPx).toBe(120);
     expect(visual.limitEdgePositionsPx).toEqual([70, 190]);
+  });
+
+  it('uses the rolling intersection span around the cut instead of the active clip span', () => {
+    const left = {
+      ...createVideoItem(),
+      id: 'left',
+      from: 100,
+      durationInFrames: 60,
+      sourceStart: 20,
+      sourceEnd: 80,
+      sourceDuration: 90,
+    };
+    const right = {
+      ...createVideoItem(),
+      id: 'right',
+      from: 160,
+      durationInFrames: 60,
+      sourceStart: 0,
+      sourceEnd: 60,
+      sourceDuration: 60,
+    };
+
+    const visual = getTrimOperationBoundsVisual({
+      item: left,
+      items: [left, right],
+      transitions: [],
+      fps: 30,
+      frameToPixels: (frames) => frames,
+      handle: 'end',
+      isRollingEdit: true,
+      isRippleEdit: false,
+      constrained: false,
+      currentLeftPx: 100,
+      currentRightPx: 160,
+    });
+
+    expect(visual.mode).toBe('rolling');
+    expect(visual.boxLeftPx).toBe(160);
+    expect(visual.boxWidthPx).toBe(10);
+    expect(visual.limitEdgePositionsPx).toEqual([160, 170]);
   });
 });
