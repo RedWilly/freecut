@@ -313,6 +313,8 @@ export const TransitionItem = memo(function TransitionItem({
     const bridgeLeft = Math.round(frameToPixels(bridge.leftFrame));
     const naturalWidth = bridgeRight - bridgeLeft;
     const leftEnd = effectiveLeftClip.from + effectiveLeftClip.durationInFrames;
+    const leftClipStart = Math.round(frameToPixels(effectiveLeftClip.from));
+    const rightClipEnd = Math.round(frameToPixels(effectiveRightClip.from + effectiveRightClip.durationInFrames));
     const cutFrame = Math.abs(leftEnd - effectiveRightClip.from) <= 1
       ? effectiveRightClip.from
       : leftEnd;
@@ -320,12 +322,14 @@ export const TransitionItem = memo(function TransitionItem({
 
     // Minimum width for visibility
     const minWidth = 32;
-    const effectiveWidth = Math.max(naturalWidth, minWidth);
+    const maxVisualWidth = Math.max(naturalWidth, rightClipEnd - leftClipStart);
+    const effectiveWidth = Math.min(Math.max(naturalWidth, minWidth), maxVisualWidth);
     // Center the minimum-width bridge on the overlap midpoint, but keep all
     // geometry snapped to integer pixels so the center cut line does not jitter.
-    const left = naturalWidth >= minWidth
+    const centeredLeft = naturalWidth >= effectiveWidth
       ? bridgeLeft
       : Math.round(((bridgeLeft + bridgeRight) / 2) - (effectiveWidth / 2));
+    const left = Math.min(Math.max(centeredLeft, leftClipStart), rightClipEnd - effectiveWidth);
 
     return {
       left,

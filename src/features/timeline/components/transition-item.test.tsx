@@ -110,6 +110,36 @@ describe('TransitionItem preview bridge motion', () => {
     expect(overlay.style.bottom).toBe('0px');
   });
 
+  it('keeps a minimum-width bridge inside the previewed right clip during slide on a speed-adjusted segment', () => {
+    const slideTransition: Transition = {
+      ...transition,
+      durationInFrames: 4,
+      leftClipId: 'middle',
+      rightClipId: 'right',
+    };
+    const middle = makeVideoItem({ id: 'middle', from: 100, durationInFrames: 60, speed: 1.23 });
+    const right = makeVideoItem({ id: 'right', from: 160, durationInFrames: 12, mediaId: 'media-2', speed: 1.23 });
+    useItemsStore.getState().setItems([middle, right]);
+
+    render(<TransitionItem transition={slideTransition} />);
+
+    act(() => {
+      useSlideEditPreviewStore.getState().setPreview({
+        itemId: 'middle',
+        trackId: 'track-1',
+        leftNeighborId: null,
+        rightNeighborId: 'right',
+        slideDelta: 8,
+      });
+    });
+
+    const overlay = screen.getByTitle('Fade (0.1s)');
+    const rightEdge = parseFloat(overlay.style.left) + parseFloat(overlay.style.width);
+    const previewedRightClipEnd = ((right.from + right.durationInFrames) / 30) * 100;
+
+    expect(rightEdge).toBeLessThanOrEqual(Math.round(previewedRightClipEnd));
+  });
+
   it('selects the transition when an edge handle is clicked', () => {
     const left = makeVideoItem({ id: 'left', from: 100, durationInFrames: 60 });
     const right = makeVideoItem({ id: 'right', from: 140, durationInFrames: 80, mediaId: 'media-2' });
