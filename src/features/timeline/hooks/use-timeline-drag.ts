@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
 import type { DragState, UseTimelineDragReturn, SnapTarget } from '../types/drag';
 import { useTimelineStore } from '../stores/timeline-store';
+import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
 import { useTimelineZoom } from './use-timeline-zoom';
 import { useSnapCalculator } from './use-snap-calculator';
@@ -478,16 +479,17 @@ export function useTimelineDrag(
       const isInSelection = currentSelectedIds.includes(item.id);
 
       const allItems = getItems();
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
 
       // If not in selection, select it (multi-select handled by TimelineItem's onClick)
-      const linkedIds = getLinkedItemIds(allItems, item.id);
+      const linkedIds = linkedSelectionEnabled ? getLinkedItemIds(allItems, item.id) : [item.id];
       if (!isInSelection) {
         selectItems(linkedIds);
       }
 
       // Determine which items to drag
       const itemsToDrag = isInSelection
-        ? expandSelectionWithLinkedItems(allItems, currentSelectedIds)
+        ? (linkedSelectionEnabled ? expandSelectionWithLinkedItems(allItems, currentSelectedIds) : currentSelectedIds)
         : linkedIds;
       if (isInSelection && itemsToDrag.length !== currentSelectedIds.length) {
         selectItems(itemsToDrag);

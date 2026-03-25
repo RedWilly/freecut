@@ -22,6 +22,7 @@ describe('editor-store', () => {
       rightSidebarWidth: editorLayout.sidebarDefaultWidth,
       timelineHeight: 250,
       sourcePreviewMediaId: null,
+      linkedSelectionEnabled: true,
       colorScopesOpen: false,
     });
   });
@@ -34,6 +35,7 @@ describe('editor-store', () => {
     expect(state.activeTab).toBe('media');
     expect(state.clipInspectorTab).toBe('transform');
     expect(state.sourcePreviewMediaId).toBe(null);
+    expect(state.linkedSelectionEnabled).toBe(true);
     expect(state.colorScopesOpen).toBe(false);
   });
 
@@ -110,6 +112,16 @@ describe('editor-store', () => {
 
     useEditorStore.getState().setColorScopesOpen(false);
     expect(useEditorStore.getState().colorScopesOpen).toBe(false);
+  });
+
+  it('toggles linked selection', () => {
+    expect(useEditorStore.getState().linkedSelectionEnabled).toBe(true);
+
+    useEditorStore.getState().setLinkedSelectionEnabled(false);
+    expect(useEditorStore.getState().linkedSelectionEnabled).toBe(false);
+
+    useEditorStore.getState().toggleLinkedSelectionEnabled();
+    expect(useEditorStore.getState().linkedSelectionEnabled).toBe(true);
   });
 
   it('directly sets left/right sidebar open state', () => {

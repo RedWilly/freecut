@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TimelineItem } from '@/types/timeline';
 import { usePlaybackStore } from '@/shared/state/playback';
+import { useEditorStore } from '@/shared/state/editor';
 import { toast } from 'sonner';
 import type { SnapTarget } from '../types/drag';
 import { useTimelineStore } from '../stores/timeline-store';
@@ -441,11 +442,14 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
       // Update local state for visual feedback
       const isRolling = isRollingEdit && neighborId !== null;
       const linkedPreviewUpdates: PreviewItemUpdate[] = [];
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
 
       if (isRolling && neighborId) {
-        const counterpartPair = handle === 'end'
-          ? getSynchronizedLinkedCounterpartPair(allItems, currentItem.id, neighborId)
-          : getSynchronizedLinkedCounterpartPair(allItems, neighborId, currentItem.id);
+        const counterpartPair = linkedSelectionEnabled
+          ? (handle === 'end'
+            ? getSynchronizedLinkedCounterpartPair(allItems, currentItem.id, neighborId)
+            : getSynchronizedLinkedCounterpartPair(allItems, neighborId, currentItem.id))
+          : null;
 
         if (counterpartPair) {
           linkedPreviewUpdates.push(
@@ -454,7 +458,9 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
           );
         }
       } else if (isRippleEdit) {
-        const synchronizedItems = getSynchronizedLinkedItems(allItems, currentItem.id);
+        const synchronizedItems = linkedSelectionEnabled
+          ? getSynchronizedLinkedItems(allItems, currentItem.id)
+          : [currentItem];
         const linkedCompanions = synchronizedItems.filter((linkedItem) => linkedItem.id !== currentItem.id);
 
         for (const linkedItem of linkedCompanions) {
@@ -508,7 +514,9 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
           );
         }
       } else {
-        const synchronizedItems = getSynchronizedLinkedItems(allItems, currentItem.id);
+        const synchronizedItems = linkedSelectionEnabled
+          ? getSynchronizedLinkedItems(allItems, currentItem.id)
+          : [currentItem];
         for (const linkedItem of synchronizedItems) {
           if (linkedItem.id === currentItem.id) continue;
           linkedPreviewUpdates.push(

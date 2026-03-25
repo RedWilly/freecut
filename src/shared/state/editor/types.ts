@@ -12,6 +12,7 @@ export interface EditorState {
   sourcePreviewMediaId: string | null;
   sourcePatchVideoEnabled: boolean;
   sourcePatchAudioEnabled: boolean;
+  linkedSelectionEnabled: boolean;
   colorScopesOpen: boolean;
 }
 
@@ -36,6 +37,8 @@ export interface EditorActions {
   setSourcePatchAudioEnabled: (enabled: boolean) => void;
   toggleSourcePatchVideoEnabled: () => void;
   toggleSourcePatchAudioEnabled: () => void;
+  setLinkedSelectionEnabled: (enabled: boolean) => void;
+  toggleLinkedSelectionEnabled: () => void;
   setColorScopesOpen: (open: boolean) => void;
   toggleColorScopesOpen: () => void;
 }

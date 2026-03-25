@@ -1,5 +1,6 @@
-﻿import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react';
+import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
+import { useShallow } from 'zustand/react/shallow';
 import { useTimelineZoomContext } from '../../contexts/timeline-zoom-context';
 import { useTimelineStore } from '../../stores/timeline-store';
 import { useItemsStore } from '../../stores/items-store';
@@ -70,7 +71,14 @@ import { useBentoLayoutDialogStore } from '../bento-layout-dialog-store';
 import { getRazorSplitPosition } from '../../utils/razor-snap';
 import type { RazorSnapTarget } from '../../utils/razor-snap';
 import { getFilteredItemSnapEdges } from '../../utils/timeline-snap-utils';
-import { canLinkItems, expandSelectionWithLinkedItems, getLinkedItemIds, hasLinkedItems } from '../../utils/linked-items';
+import {
+  canLinkItems,
+  expandSelectionWithLinkedItems,
+  getLinkedItemIds,
+  getLinkedItems,
+  getLinkedSyncOffsetFrames,
+  hasLinkedItems,
+} from '../../utils/linked-items';
 import { getVisibleTrackIds } from '../../utils/group-utils';
 import {
   isDragPointInsideElement,
@@ -571,6 +579,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const fps = useTimelineStore((s) => s.fps);
   const addEffects = useTimelineStore((s) => s.addEffects);
   const updateTimelineItem = useTimelineStore((s) => s.updateItem);
+  const linkedItemsForSync = useItemsStore(
+    useShallow(
+      useCallback(
+        (s) => getLinkedItems(s.items, item.id).filter((linkedItem) => linkedItem.id !== item.id),
+        [item.id],
+      ),
+    ),
+  );
+  const linkedSyncOffsetFrames = useMemo(() => (
+    linkedItemsForSync.length > 0
+      ? getLinkedSyncOffsetFrames([previewBaseItem, ...linkedItemsForSync], previewBaseItem.id, fps)
+      : null
+  ), [linkedItemsForSync, previewBaseItem, fps]);
 
   const draggedTransition = useTransitionDragStore((s) => s.draggedTransition);
   const transitionDragPreview = useTransitionDragStore(
@@ -1071,7 +1092,10 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       // Keep selection focused on the split clip so downstream panels
       // (like transitions) immediately evaluate the new adjacency.
       const items = useTimelineStore.getState().items;
-      useSelectionStore.getState().selectItems(getLinkedItemIds(items, item.id));
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+      useSelectionStore.getState().selectItems(
+        linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id]
+      );
       return;
     }
 
@@ -1093,17 +1117,20 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     // Selection tool: handle item selection
     const { selectedItemIds, selectItems } = useSelectionStore.getState();
     const items = useTimelineStore.getState().items;
-    const linkedIds = getLinkedItemIds(items, item.id);
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const targetIds = linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id];
     if (e.metaKey || e.ctrlKey) {
-      const isLinkedSelectionActive = linkedIds.some((id) => selectedItemIds.includes(id));
+      const isLinkedSelectionActive = targetIds.some((id) => selectedItemIds.includes(id));
       if (isLinkedSelectionActive) {
-        const linkedIdSet = new Set(linkedIds);
+        const linkedIdSet = new Set(targetIds);
         selectItems(selectedItemIds.filter((id) => !linkedIdSet.has(id)));
       } else {
-        selectItems(expandSelectionWithLinkedItems(items, [...selectedItemIds, ...linkedIds]));
+        selectItems(linkedSelectionEnabled
+          ? expandSelectionWithLinkedItems(items, [...selectedItemIds, ...targetIds])
+          : Array.from(new Set([...selectedItemIds, ...targetIds])));
       }
     } else {
-      selectItems(linkedIds);
+      selectItems(targetIds);
     }
   }, [trackLocked, frameToPixels, pixelsToFrame, item.from, item.id]);
 
@@ -2196,14 +2223,17 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
     const { selectedItemIds, selectItems } = useSelectionStore.getState();
     const items = useTimelineStore.getState().items;
-    const linkedIds = getLinkedItemIds(items, item.id);
-    const isCurrentSelection = linkedIds.some((id) => selectedItemIds.includes(id));
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const targetIds = linkedSelectionEnabled ? getLinkedItemIds(items, item.id) : [item.id];
+    const isCurrentSelection = targetIds.some((id) => selectedItemIds.includes(id));
 
     if (!isCurrentSelection) {
-      if (selectedItemIds.length === 1 && linkedIds.length === 1 && !selectedItemIds.includes(item.id)) {
-        selectItems(expandSelectionWithLinkedItems(items, [...selectedItemIds, item.id]));
+      if (selectedItemIds.length === 1 && targetIds.length === 1 && !selectedItemIds.includes(item.id)) {
+        selectItems(linkedSelectionEnabled
+          ? expandSelectionWithLinkedItems(items, [...selectedItemIds, item.id])
+          : Array.from(new Set([...selectedItemIds, item.id])));
       } else {
-        selectItems(linkedIds);
+        selectItems(targetIds);
       }
     }
   }, [item.id]);
@@ -2542,12 +2572,14 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
               item={contentVisualPreviewItem}
               clipWidth={visualWidth}
               fps={fps}
+              isLinked={isLinked}
               isClipVisible={clipVisibility.isVisible}
               visibleStartRatio={clipVisibility.visibleStartRatio}
               visibleEndRatio={clipVisibility.visibleEndRatio}
               pixelsPerSecond={pixelsPerSecond}
               preferImmediateRendering={preferImmediateContentRendering}
               audioWaveformScale={audioVisualizationScale}
+              linkedSyncOffsetFrames={linkedSyncOffsetFrames}
             />
 
             {/* Status indicators */}
@@ -2558,7 +2590,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
               stretchFeedback={stretchFeedback}
               isBroken={isBroken}
               hasMediaId={!!item.mediaId}
-              isLinked={isLinked}
               isMask={item.type === 'shape' ? item.isMask ?? false : false}
               isShape={item.type === 'shape'}
             />

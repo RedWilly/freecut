@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useEffectEvent } from 'react';
 import type { TimelineItem } from '@/types/timeline';
+import { useEditorStore } from '@/shared/state/editor';
 import { usePlaybackStore } from '@/shared/state/playback';
 import type { SnapTarget } from '../types/drag';
 import { useTimelineStore } from '../stores/timeline-store';
@@ -242,9 +243,12 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       if (deltaFrames !== stretchStateRef.current.currentDelta || isConstrained !== stretchStateRef.current.isConstrained) {
         setStretchState(prev => ({ ...prev, currentDelta: deltaFrames, isConstrained, constraintLabel: isConstrained ? 'speed limit' : null }));
       }
-      const linkedPreviewUpdates = getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
-        .filter((linkedItem) => linkedItem.id !== item.id)
-        .map((linkedItem) => applyRateStretchPreview(linkedItem, initialFrom, initialDuration, previewSpeed, fps));
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+      const linkedPreviewUpdates = linkedSelectionEnabled
+        ? getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+          .filter((linkedItem) => linkedItem.id !== item.id)
+          .map((linkedItem) => applyRateStretchPreview(linkedItem, initialFrom, initialDuration, previewSpeed, fps))
+        : [];
       useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
       // No snap target visualization for GIFs since clip doesn't move
       return;
@@ -320,9 +324,12 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       previewFrom = Math.round(initialFrom + (initialDuration - previewDuration));
     }
 
-    const linkedPreviewUpdates = getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
-      .filter((linkedItem) => linkedItem.id !== item.id)
-      .map((linkedItem) => applyRateStretchPreview(linkedItem, linkedItem.from + (previewFrom - initialFrom), previewDuration, previewSpeed, fps));
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const linkedPreviewUpdates = linkedSelectionEnabled
+      ? getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+        .filter((linkedItem) => linkedItem.id !== item.id)
+        .map((linkedItem) => applyRateStretchPreview(linkedItem, linkedItem.from + (previewFrom - initialFrom), previewDuration, previewSpeed, fps))
+      : [];
     useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
 
     // Update snap target visualization (only when changed)

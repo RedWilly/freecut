@@ -5,6 +5,7 @@ import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineCommandStore } from '../timeline-command-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
+import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
 import {
   closeAllGapsOnTrack,
@@ -52,6 +53,7 @@ describe('linked timeline items', () => {
   beforeEach(() => {
     useTimelineCommandStore.getState().clearHistory();
     useTimelineSettingsStore.setState({ fps: 30, isDirty: false });
+    useEditorStore.setState({ linkedSelectionEnabled: true });
     useItemsStore.getState().setItems([]);
     useItemsStore.getState().setTracks([]);
     useTransitionsStore.getState().setTransitions([]);
@@ -218,6 +220,39 @@ describe('linked timeline items', () => {
     const items = useItemsStore.getState().items;
     expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
     expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 60 });
+  });
+
+  it('close gap leaves linked companions in place when linked selection is off', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false });
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-anchor',
+        durationInFrames: 60,
+        linkedGroupId: undefined,
+        originId: 'origin-anchor',
+        mediaId: 'media-anchor',
+      }),
+      makeVideoItem({
+        id: 'video-2',
+        from: 90,
+        linkedGroupId: 'group-2',
+        originId: 'origin-2',
+        mediaId: 'media-2',
+      }),
+      makeAudioItem({
+        id: 'audio-2',
+        from: 90,
+        linkedGroupId: 'group-2',
+        originId: 'origin-2',
+        mediaId: 'media-2',
+      }),
+    ]);
+
+    closeGapAtPosition('video-track', 75);
+
+    const items = useItemsStore.getState().items;
+    expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
+    expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 90 });
   });
 
   it('close all gaps keeps linked clips aligned across tracks', () => {

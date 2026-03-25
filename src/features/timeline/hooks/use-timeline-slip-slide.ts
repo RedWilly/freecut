@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TimelineItem } from '@/types/timeline';
 import { usePlaybackStore } from '@/shared/state/playback';
+import { useEditorStore } from '@/shared/state/editor';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useTransitionsStore } from '../stores/transitions-store';
 import { useSelectionStore } from '@/shared/state/selection';
@@ -215,12 +216,15 @@ export function useTimelineSlipSlide(
           }));
         }
 
-        const linkedPreviewUpdates: PreviewItemUpdate[] = getSynchronizedLinkedItems(
-          useTimelineStore.getState().items,
-          currentItem.id,
-        )
-          .filter((linkedItem) => linkedItem.id !== currentItem.id)
-          .map((linkedItem) => applySlipPreview(linkedItem, clamped));
+        const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+        const linkedPreviewUpdates: PreviewItemUpdate[] = linkedSelectionEnabled
+          ? getSynchronizedLinkedItems(
+            useTimelineStore.getState().items,
+            currentItem.id,
+          )
+            .filter((linkedItem) => linkedItem.id !== currentItem.id)
+            .map((linkedItem) => applySlipPreview(linkedItem, clamped))
+          : [];
         useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
 
       } else if (mode === 'slide') {
@@ -311,8 +315,11 @@ export function useTimelineSlipSlide(
         }
 
         const allItems = useTimelineStore.getState().items;
-        const synchronizedCounterpart = getSynchronizedLinkedItems(allItems, storeItem.id)
-          .find((candidate) => candidate.id !== storeItem.id) ?? null;
+        const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+        const synchronizedCounterpart = linkedSelectionEnabled
+          ? getSynchronizedLinkedItems(allItems, storeItem.id)
+            .find((candidate) => candidate.id !== storeItem.id) ?? null
+          : null;
         const linkedPreviewUpdates: PreviewItemUpdate[] = [];
 
         if (synchronizedCounterpart) {

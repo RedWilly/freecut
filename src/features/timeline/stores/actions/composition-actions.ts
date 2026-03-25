@@ -18,6 +18,7 @@ import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
 import { useCompositionsStore, type SubComposition } from '../compositions-store';
+import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
 import { DEFAULT_TRACK_HEIGHT } from '../../constants';
 import { useCompositionNavigationStore } from '../composition-navigation-store';
@@ -212,7 +213,10 @@ export function createPreComp(name?: string, itemIds?: string[]): TimelineItem |
     const { keyframes } = useKeyframesStore.getState();
     const { fps } = useTimelineSettingsStore.getState();
     const requestedIds = itemIds ?? useSelectionStore.getState().selectedItemIds;
-    const selectedIds = expandSelectionWithLinkedItems(items, requestedIds);
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const selectedIds = linkedSelectionEnabled
+      ? expandSelectionWithLinkedItems(items, requestedIds)
+      : Array.from(new Set(requestedIds));
 
     if (selectedIds.length === 0) return null;
 

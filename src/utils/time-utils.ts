@@ -47,6 +47,15 @@ export function formatTimecode(frame: number, fps: number): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}:${pad(frames)}`;
 }
 
+export function formatSignedFrameDelta(frameDelta: number, fps: number): string {
+  const parts = formatTimecode(Math.abs(frameDelta), fps).split(':');
+  while (parts.length > 2 && parts[0] === '00') {
+    parts.shift();
+  }
+
+  return `${frameDelta > 0 ? '+' : '-'}${parts.join(':')}`;
+}
+
 /**
  * Convert seconds to frame number
  * @param seconds - Time in seconds

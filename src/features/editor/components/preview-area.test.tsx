@@ -24,6 +24,7 @@ function resetStores() {
   useMaskEditorStore.getState().stopEditing();
   useItemsStore.getState().setItems([]);
   useEditorStore.setState({
+    linkedSelectionEnabled: true,
     sourcePreviewMediaId: null,
     colorScopesOpen: false,
   });

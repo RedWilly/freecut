@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo } from 'react';
+import { Link2 } from 'lucide-react';
 import type { TimelineItem } from '@/types/timeline';
 import { ClipFilmstrip } from '../clip-filmstrip';
 import { ClipWaveform } from '../clip-waveform';
@@ -10,17 +11,20 @@ import { useItemsStore } from '../../stores/items-store';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { summarizeCompositionClipContent } from '../../utils/composition-clip-summary';
 import { hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
+import { formatSignedFrameDelta } from '@/utils/time-utils';
 
 interface ClipContentProps {
   item: TimelineItem;
   clipWidth: number;
   fps: number;
+  isLinked?: boolean;
   isClipVisible: boolean;
   visibleStartRatio?: number;
   visibleEndRatio?: number;
   pixelsPerSecond: number;
   preferImmediateRendering?: boolean;
   audioWaveformScale?: number;
+  linkedSyncOffsetFrames?: number | null;
 }
 
 /**
@@ -36,31 +40,18 @@ export const ClipContent = memo(function ClipContent({
   item,
   clipWidth,
   fps,
+  isLinked = false,
   isClipVisible,
   visibleStartRatio = 0,
   visibleEndRatio = 1,
   pixelsPerSecond,
   preferImmediateRendering = false,
   audioWaveformScale = 1,
+  linkedSyncOffsetFrames = null,
 }: ClipContentProps) {
   const showWaveforms = useSettingsStore((s) => s.showWaveforms);
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
   const isCompositionAudioWrapper = item.type === 'audio' && !!item.compositionId;
-
-  const renderCompoundClipLabel = useCallback((label: string) => (
-    <div
-      className="flex items-center gap-1.5 px-2 shrink-0"
-      style={{
-        height: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
-        lineHeight: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
-      }}
-    >
-      <span className="rounded bg-violet-950/40 px-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-100/90">
-        Compound
-      </span>
-      <span className="min-w-0 truncate text-[11px] font-medium">{label}</span>
-    </div>
-  ), []);
 
   // For composition items: find the topmost video in the sub-comp for filmstrip
   const compositionId = item.type === 'composition' || isCompositionAudioWrapper ? item.compositionId : undefined;
@@ -91,6 +82,37 @@ export const ClipContent = memo(function ClipContent({
   }, [composition]);
   const compositionVisualMediaId = compositionSummary.visualMediaId;
   const showCompositionWaveform = showWaveforms && compositionSummary.hasOwnedAudio && !hasCompositionAudioCompanion;
+  const linkedSyncOffsetLabel = linkedSyncOffsetFrames === null
+    ? null
+    : formatSignedFrameDelta(linkedSyncOffsetFrames, fps);
+
+  const renderTitleText = useCallback((label: string) => (
+    <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+      {linkedSyncOffsetLabel && (
+        <span
+          className="shrink-0 rounded bg-destructive/90 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-destructive-foreground"
+          title={`Linked clips out of sync by ${linkedSyncOffsetLabel}`}
+        >
+          {linkedSyncOffsetLabel}
+        </span>
+      )}
+      {isLinked && (
+        <span
+          className={`inline-flex shrink-0 items-center justify-center rounded p-0.5 ${
+            linkedSyncOffsetLabel
+              ? 'bg-destructive/85 text-destructive-foreground'
+              : 'bg-black/55 text-white/90'
+          }`}
+          title={linkedSyncOffsetLabel
+            ? `Linked audio/video pair out of sync by ${linkedSyncOffsetLabel}`
+            : 'Linked audio/video pair'}
+        >
+          <Link2 className="h-3 w-3" />
+        </span>
+      )}
+      <span className="min-w-0 truncate">{label}</span>
+    </div>
+  ), [isLinked, linkedSyncOffsetLabel]);
 
   // Use the relevant mediaId so source mapping remains stable for each clip type.
   const effectiveMediaId = item.mediaId ?? compositionVisualMediaId;
@@ -158,6 +180,23 @@ export const ClipContent = memo(function ClipContent({
   const compoundClipSourceDuration = compositionSourceDurationFrames / compoundClipTimelineFps;
   const compoundClipSourceStart = compositionSourceStartFrames / compoundClipTimelineFps;
 
+  const renderCompoundClipLabel = useCallback((label: string) => (
+    <div
+      className="flex items-center gap-1.5 px-2 shrink-0"
+      style={{
+        height: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
+        lineHeight: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
+      }}
+    >
+      <span className="rounded bg-violet-950/40 px-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-100/90">
+        Compound
+      </span>
+      <div className="min-w-0 flex-1">
+        {renderTitleText(label)}
+      </div>
+    </div>
+  ), [renderTitleText]);
+
   // Video clip 2-row layout: label | filmstrip
   if (item.type === 'video' && item.mediaId) {
     return (
@@ -170,7 +209,7 @@ export const ClipContent = memo(function ClipContent({
             lineHeight: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
           }}
         >
-          {item.label}
+          {renderTitleText(item.label)}
         </div>
         {/* Row 2: Filmstrip - flex-1 to fill remaining space */}
         <div className="relative overflow-hidden flex-1 min-h-0">
@@ -207,7 +246,7 @@ export const ClipContent = memo(function ClipContent({
             lineHeight: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
           }}
         >
-          {item.label}
+          {renderTitleText(item.label)}
         </div>
         {/* Row 2: Waveform - fills remaining space */}
         {showWaveforms && (

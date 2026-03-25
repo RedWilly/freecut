@@ -5,6 +5,7 @@ import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineCommandStore } from '../timeline-command-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
+import { useEditorStore } from '@/shared/state/editor';
 import {
   addTransition,
 } from './transition-actions';
@@ -98,6 +99,7 @@ describe('linked edit tools', () => {
   beforeEach(() => {
     useTimelineCommandStore.getState().clearHistory();
     useTimelineSettingsStore.setState({ fps: 30, isDirty: false });
+    useEditorStore.setState({ linkedSelectionEnabled: true });
     useItemsStore.getState().setTracks([
       makeTrack({ id: 'video-track', name: 'V1', order: 0, kind: 'video' }),
       makeTrack({ id: 'audio-track', name: 'A1', order: 1, kind: 'audio' }),
@@ -118,6 +120,20 @@ describe('linked edit tools', () => {
     const itemById = useItemsStore.getState().itemById;
     expect(itemById['video-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 10, sourceEnd: 60 });
     expect(itemById['audio-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 10, sourceEnd: 60 });
+  });
+
+  it('trims only the targeted clip when linked selection is off', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false });
+    useItemsStore.getState().setItems([
+      makeVideoItem(),
+      makeAudioItem(),
+    ]);
+
+    trimItemStart('video-1', 10);
+
+    const itemById = useItemsStore.getState().itemById;
+    expect(itemById['video-1']).toMatchObject({ from: 10, durationInFrames: 50, sourceStart: 10, sourceEnd: 60 });
+    expect(itemById['audio-1']).toMatchObject({ from: 0, durationInFrames: 60, sourceStart: 0, sourceEnd: 60 });
   });
 
   it('trims synchronized compound wrappers together', () => {

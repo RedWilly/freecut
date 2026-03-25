@@ -1,4 +1,5 @@
 import type { TimelineItem } from '@/types/timeline';
+import { getSourceProperties, sourceToTimelineFrames } from './source-calculations';
 
 function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
   return (left.type === 'video' && right.type === 'audio')
@@ -99,6 +100,44 @@ export function getSynchronizedLinkedCounterpartPair(
   }
 
   return null;
+}
+
+function getLinkedSyncAnchorFrame(item: TimelineItem, timelineFps: number): number {
+  const { sourceStart, sourceFps, speed } = getSourceProperties(item);
+  const sourceOffsetOnTimeline = sourceToTimelineFrames(
+    sourceStart,
+    speed,
+    sourceFps ?? timelineFps,
+    timelineFps,
+  );
+
+  return item.from - sourceOffsetOnTimeline;
+}
+
+export function getLinkedSyncOffsetFrames(
+  items: TimelineItem[],
+  itemId: string,
+  timelineFps: number,
+): number | null {
+  const linkedItems = getLinkedItems(items, itemId);
+  const anchor = linkedItems.find((item) => item.id === itemId);
+  if (!anchor || linkedItems.length <= 1) return null;
+
+  const anchorSyncFrame = getLinkedSyncAnchorFrame(anchor, timelineFps);
+  let resolvedOffset: number | null = null;
+
+  for (const linkedItem of linkedItems) {
+    if (linkedItem.id === anchor.id) continue;
+
+    const candidateOffset = anchorSyncFrame - getLinkedSyncAnchorFrame(linkedItem, timelineFps);
+    if (candidateOffset === 0) continue;
+
+    if (resolvedOffset === null || Math.abs(candidateOffset) > Math.abs(resolvedOffset)) {
+      resolvedOffset = candidateOffset;
+    }
+  }
+
+  return resolvedOffset;
 }
 
 export function buildSynchronizedLinkedMoveUpdates(

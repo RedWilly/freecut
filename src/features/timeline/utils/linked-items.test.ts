@@ -4,6 +4,7 @@ import {
   canLinkItems,
   expandSelectionWithLinkedItems,
   getLinkedItemIds,
+  getLinkedSyncOffsetFrames,
   getUniqueLinkedItemAnchorIds,
   hasLinkedItems,
 } from './linked-items';
@@ -78,5 +79,25 @@ describe('linked items', () => {
       { ...video, linkedGroupId: 'group-1' },
       { ...audio, linkedGroupId: 'group-1' },
     ], 'video-1')).toBe(true);
+  });
+
+  it('reports opposing sync offsets when linked clips move independently', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 0, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 10, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30)).toBe(-10);
+    expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30)).toBe(10);
+  });
+
+  it('reports sync offsets when linked clips are slipped apart', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 12, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30)).toBe(-12);
+    expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30)).toBe(12);
   });
 });

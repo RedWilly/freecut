@@ -77,6 +77,7 @@ function activateTab(name: 'Effects' | 'Media' | 'Transform') {
 function resetStores(items: Array<VideoItem | AudioItem>, selectedItemIds: string[]) {
   useEditorStore.setState({
     clipInspectorTab: 'transform',
+    linkedSelectionEnabled: true,
   });
 
   useSelectionStore.setState({

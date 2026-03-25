@@ -8,6 +8,7 @@ import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
+import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import {
@@ -98,13 +99,69 @@ function placeItemsWithoutTimelineOverlap(items: TimelineItem[]): TimelineItem[]
 }
 
 function expandIdsWithLinkedItems(ids: string[]): string[] {
+  if (!useEditorStore.getState().linkedSelectionEnabled) {
+    return Array.from(new Set(ids));
+  }
+
   return expandSelectionWithLinkedItems(useItemsStore.getState().items, ids);
+}
+
+function getLinkedItemsForEdit(items: TimelineItem[], itemId: string): TimelineItem[] {
+  if (useEditorStore.getState().linkedSelectionEnabled) {
+    return getLinkedItems(items, itemId);
+  }
+
+  const anchor = items.find((item) => item.id === itemId);
+  return anchor ? [anchor] : [];
+}
+
+function getSynchronizedLinkedItemsForEdit(items: TimelineItem[], itemId: string): TimelineItem[] {
+  if (useEditorStore.getState().linkedSelectionEnabled) {
+    return getSynchronizedLinkedItems(items, itemId);
+  }
+
+  const anchor = items.find((item) => item.id === itemId);
+  return anchor ? [anchor] : [];
+}
+
+function getSynchronizedLinkedCounterpartPairForEdit(
+  items: TimelineItem[],
+  leftId: string,
+  rightId: string,
+): { leftCounterpart: TimelineItem; rightCounterpart: TimelineItem } | null {
+  if (!useEditorStore.getState().linkedSelectionEnabled) {
+    return null;
+  }
+
+  return getSynchronizedLinkedCounterpartPair(items, leftId, rightId);
+}
+
+function getMatchingSynchronizedLinkedCounterpartForEdit(
+  items: TimelineItem[],
+  itemId: string,
+  trackId: string,
+  type: TimelineItem['type'],
+): TimelineItem | null {
+  if (!useEditorStore.getState().linkedSelectionEnabled) {
+    return null;
+  }
+
+  return getMatchingSynchronizedLinkedCounterpart(items, itemId, trackId, type);
 }
 
 function buildLinkedLeftShiftUpdates(
   items: TimelineItem[],
   baseShiftByItemId: ReadonlyMap<string, number>
 ): Array<{ id: string; from: number }> {
+  if (!useEditorStore.getState().linkedSelectionEnabled) {
+    return items.flatMap((item) => {
+      const shiftAmount = baseShiftByItemId.get(item.id) ?? 0;
+      return shiftAmount > 0
+        ? [{ id: item.id, from: item.from - shiftAmount }]
+        : [];
+    });
+  }
+
   const shiftByItemId = new Map(baseShiftByItemId);
   const visited = new Set<string>();
 
@@ -192,6 +249,15 @@ function buildSynchronizedLinkedMoveUpdates(
   items: TimelineItem[],
   baseDeltaByItemId: ReadonlyMap<string, number>,
 ): Array<{ id: string; from: number }> {
+  if (!useEditorStore.getState().linkedSelectionEnabled) {
+    return items.flatMap((item) => {
+      const delta = baseDeltaByItemId.get(item.id) ?? 0;
+      return delta !== 0
+        ? [{ id: item.id, from: item.from + delta }]
+        : [];
+    });
+  }
+
   const deltaByItemId = new Map(baseDeltaByItemId);
   const visited = new Set<string>();
 
@@ -542,7 +608,7 @@ export function duplicateItemsWithTrackChanges(
 function applySynchronizedTrim(id: string, handle: 'start' | 'end', trimAmount: number): void {
   const itemsStore = useItemsStore.getState();
   const itemsBefore = itemsStore.items;
-  const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
+  const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
   const anchorBefore = synchronizedItems.find((item) => item.id === id);
   if (!anchorBefore) return;
 
@@ -626,10 +692,7 @@ export function splitItem(
   splitFrame: number
 ): { leftItem: TimelineItem; rightItem: TimelineItem } | null {
   const items = useItemsStore.getState().items;
-  const linkedItems = getLinkedItems(items, id);
-  const itemsToSplit = linkedItems.length > 0
-    ? linkedItems
-    : items.filter((item) => item.id === id);
+  const itemsToSplit = getLinkedItemsForEdit(items, id);
 
   for (const item of itemsToSplit) {
     // Bounds check first â€” out-of-range splits are a silent no-op (handled by _splitItem),
@@ -704,7 +767,7 @@ export function joinItems(itemIds: string[]): void {
     if (itemsToJoin.length === 2) {
       const [leftItem, rightItem] = itemsToJoin;
       if (leftItem && rightItem) {
-        const counterpartPair = getSynchronizedLinkedCounterpartPair(items, leftItem.id, rightItem.id);
+        const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(items, leftItem.id, rightItem.id);
         if (counterpartPair) {
           joinGroups.push([counterpartPair.leftCounterpart.id, counterpartPair.rightCounterpart.id]);
         }
@@ -771,7 +834,7 @@ export function rateStretchItem(
   execute('RATE_STRETCH_ITEM', () => {
     const itemsStore = useItemsStore.getState();
     const itemsBefore = itemsStore.items;
-    const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
     const anchorBefore = synchronizedItems.find((item) => item.id === id);
     if (!anchorBefore) return;
 
@@ -1074,7 +1137,7 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
     const itemsBefore = itemsStore.items;
     const item = itemsBefore.find((i) => i.id === id);
     if (!item) return;
-    const synchronizedItems = getSynchronizedLinkedItems(itemsBefore, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
     const synchronizedIds = new Set(synchronizedItems.map((synchronizedItem) => synchronizedItem.id));
     const oldById = new Map(synchronizedItems.map((synchronizedItem) => [synchronizedItem.id, synchronizedItem]));
 
@@ -1188,7 +1251,7 @@ export function rollingTrimItems(leftId: string, rightId: string, editPointDelta
   execute('ROLLING_EDIT', () => {
     const itemsStore = useItemsStore.getState();
     const itemsBefore = itemsStore.items;
-    const counterpartPair = getSynchronizedLinkedCounterpartPair(itemsBefore, leftId, rightId);
+    const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(itemsBefore, leftId, rightId);
     const rightBefore = itemsBefore.find((item) => item.id === rightId);
     if (!rightBefore) return;
 
@@ -1245,7 +1308,7 @@ export function slipItem(id: string, slipDelta: number): void {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') return;
-    const synchronizedItems = getSynchronizedLinkedItems(items, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(items, id);
 
     const sourceStart = item.sourceStart ?? 0;
     const sourceEnd = item.sourceEnd;
@@ -1301,12 +1364,13 @@ export function slideItem(
     if (!item) return;
     const leftNeighbor = leftNeighborId ? (items.find((i) => i.id === leftNeighborId) ?? null) : null;
     const rightNeighbor = rightNeighborId ? (items.find((i) => i.id === rightNeighborId) ?? null) : null;
-    const synchronizedCounterpart = getSynchronizedLinkedItems(items, id).find((candidate) => candidate.id !== id) ?? null;
+    const synchronizedCounterpart = getSynchronizedLinkedItemsForEdit(items, id)
+      .find((candidate) => candidate.id !== id) ?? null;
     const leftCounterpart = synchronizedCounterpart && leftNeighborId
-      ? getMatchingSynchronizedLinkedCounterpart(items, leftNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+      ? getMatchingSynchronizedLinkedCounterpartForEdit(items, leftNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
       : null;
     const rightCounterpart = synchronizedCounterpart && rightNeighborId
-      ? getMatchingSynchronizedLinkedCounterpart(items, rightNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+      ? getMatchingSynchronizedLinkedCounterpartForEdit(items, rightNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
       : null;
     const itemFromBefore = item.from;
     const itemSourceStartBefore = item.sourceStart;

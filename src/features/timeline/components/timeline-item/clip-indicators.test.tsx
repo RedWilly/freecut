@@ -3,21 +3,20 @@ import { describe, expect, it } from 'vitest';
 import { ClipIndicators } from './clip-indicators';
 
 describe('ClipIndicators', () => {
-  it('shows a linked-state icon for synced clips', () => {
+  it('shows a speed badge when playback speed differs from 1x', () => {
     render(
       <ClipIndicators
         hasKeyframes={false}
-        currentSpeed={1}
+        currentSpeed={1.25}
         isStretching={false}
         stretchFeedback={null}
         isBroken={false}
         hasMediaId
-        isLinked
         isMask={false}
         isShape={false}
       />
     );
 
-    expect(screen.getByTitle('Linked audio/video pair')).toBeInTheDocument();
+    expect(screen.getByTitle('Speed: 1.25x')).toBeInTheDocument();
   });
 });

@@ -45,6 +45,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   sourcePreviewMediaId: null,
   sourcePatchVideoEnabled: true,
   sourcePatchAudioEnabled: true,
+  linkedSelectionEnabled: true,
   colorScopesOpen: false,
 
   // Actions
@@ -81,6 +82,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   setSourcePatchAudioEnabled: (enabled) => set({ sourcePatchAudioEnabled: enabled }),
   toggleSourcePatchVideoEnabled: () => set((state) => ({ sourcePatchVideoEnabled: !state.sourcePatchVideoEnabled })),
   toggleSourcePatchAudioEnabled: () => set((state) => ({ sourcePatchAudioEnabled: !state.sourcePatchAudioEnabled })),
+  setLinkedSelectionEnabled: (enabled) => set({ linkedSelectionEnabled: enabled }),
+  toggleLinkedSelectionEnabled: () => set((state) => ({ linkedSelectionEnabled: !state.linkedSelectionEnabled })),
   setColorScopesOpen: (open) => set({ colorScopesOpen: open }),
   toggleColorScopesOpen: () => set((state) => ({ colorScopesOpen: !state.colorScopesOpen })),
 }));

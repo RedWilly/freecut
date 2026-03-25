@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, memo, useMemo } from 'react';
+import { useRef, useEffect, useCallback, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -28,7 +28,6 @@ import {
   LineChart,
   Activity,
   Link2,
-  Unlink2,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { formatHotkeyBinding } from '@/config/hotkeys';
@@ -38,8 +37,6 @@ import { useTimelineCommandStore } from '../stores/timeline-command-store';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
-import { canLinkItems, hasLinkedItems } from '@/features/timeline/utils/linked-items';
-import { linkItems, unlinkItems } from '../stores/actions/item-actions';
 import {
   ZOOM_FRICTION,
   ZOOM_MIN_VELOCITY,
@@ -103,32 +100,16 @@ export const TimelineHeader = memo(function TimelineHeader({
   const setActiveTool = useSelectionStore((s) => s.setActiveTool);
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
-  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
   const sourcePatchVideoEnabled = useEditorStore((s) => s.sourcePatchVideoEnabled);
   const sourcePatchAudioEnabled = useEditorStore((s) => s.sourcePatchAudioEnabled);
+  const linkedSelectionEnabled = useEditorStore((s) => s.linkedSelectionEnabled);
   const toggleSourcePatchVideoEnabled = useEditorStore((s) => s.toggleSourcePatchVideoEnabled);
   const toggleSourcePatchAudioEnabled = useEditorStore((s) => s.toggleSourcePatchAudioEnabled);
+  const setLinkedSelectionEnabled = useEditorStore((s) => s.setLinkedSelectionEnabled);
   const canUndo = useTimelineCommandStore((s) => s.canUndo);
   const canRedo = useTimelineCommandStore((s) => s.canRedo);
   const undoLabel = useTimelineCommandStore((s) => s.getUndoLabel());
   const redoLabel = useTimelineCommandStore((s) => s.getRedoLabel());
-  const items = useTimelineStore((s) => s.items);
-
-  const canLinkSelected = useMemo(() => {
-    if (selectedItemIds.length !== 2) return false;
-
-    const selectedItems = selectedItemIds
-      .map((id) => items.find((item) => item.id === id))
-      .filter((item): item is NonNullable<typeof item> => item !== undefined);
-
-    return selectedItems.length === 2
-      && canLinkItems(selectedItems)
-      && selectedItems.every((item) => !hasLinkedItems(items, item.id));
-  }, [items, selectedItemIds]);
-
-  const canUnlinkSelected = useMemo(() => (
-    selectedItemIds.length > 0 && selectedItemIds.some((id) => hasLinkedItems(items, id))
-  ), [items, selectedItemIds]);
 
   const SlipSlideFlyoutIcon = activeTool === 'slide' ? BetweenHorizontalEnd : ArrowRightLeft;
 
@@ -530,25 +511,15 @@ export const TimelineHeader = memo(function TimelineHeader({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
-          onClick={() => void linkItems(selectedItemIds)}
-          disabled={!canLinkSelected}
-          aria-label="Link selected audio and video clips"
-          data-tooltip={`Link Audio/Video (${formatHotkeyBinding(hotkeys.LINK_AUDIO_VIDEO)})`}
+          className={`h-7 w-7 ${
+            linkedSelectionEnabled ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
+          }`}
+          onClick={() => setLinkedSelectionEnabled(!linkedSelectionEnabled)}
+          aria-label={linkedSelectionEnabled ? 'Disable linked selection' : 'Enable linked selection'}
+          aria-pressed={linkedSelectionEnabled}
+          data-tooltip={linkedSelectionEnabled ? 'Linked Selection On' : 'Linked Selection Off'}
         >
           <Link2 className="w-3.5 h-3.5" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => unlinkItems(selectedItemIds)}
-          disabled={!canUnlinkSelected}
-          aria-label="Unlink selected audio and video clips"
-          data-tooltip={`Unlink Audio/Video (${formatHotkeyBinding(hotkeys.UNLINK_AUDIO_VIDEO)})`}
-        >
-          <Unlink2 className="w-3.5 h-3.5" />
         </Button>
 
         <Separator orientation="vertical" className="h-5 mx-1.5" />

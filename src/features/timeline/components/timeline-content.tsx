@@ -8,6 +8,7 @@ import { useTimelineViewportStore } from '../stores/timeline-viewport-store';
 import { useTimelineZoom } from '../hooks/use-timeline-zoom';
 import { registerZoomTo100 } from '../stores/zoom-store';
 import { usePlaybackStore } from '@/shared/state/playback';
+import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
 
 // Hooks
@@ -424,7 +425,10 @@ export const TimelineContent = memo(function TimelineContent({
     containerRef: containerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
     onSelectionChange: (ids) => {
-      selectItems(expandSelectionWithLinkedItems(useTimelineStore.getState().items, ids));
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+      selectItems(linkedSelectionEnabled
+        ? expandSelectionWithLinkedItems(useTimelineStore.getState().items, ids)
+        : ids);
     },
     enabled: true,
     threshold: 5,
