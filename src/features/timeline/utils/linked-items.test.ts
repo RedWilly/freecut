@@ -152,4 +152,54 @@ describe('linked items', () => {
     expect(getLinkedSyncOffsetFrames(items, 'video-1', 30)).toBe(-10);
     expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30)).toBe(10);
   });
+
+  it('ignores trim preview drift while linked companions preview together', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 0, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    const previewUpdatesById = {
+      'video-1': { id: 'video-1', from: 10, sourceStart: 10 },
+      'audio-1': { id: 'audio-1', from: 10, sourceStart: 10 },
+    };
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30, previewUpdatesById)).toBe(null);
+    expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30, previewUpdatesById)).toBe(null);
+  });
+
+  it('ignores active trim preview drift when linked companions receive matching preview updates', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 10, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    const previewUpdatesById = {
+      'audio-1': { id: 'audio-1', sourceStart: 10 },
+    };
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30, previewUpdatesById)).toBe(null);
+  });
+
+  it('ignores active trim preview drift when the anchor item preview already includes the moved in-point', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 10, sourceStart: 10, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    const previewUpdatesById = {
+      'audio-1': { id: 'audio-1', from: 10, sourceStart: 10 },
+    };
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30, previewUpdatesById)).toBe(null);
+  });
+
+  it('shows trim preview drift when only one linked clip previews independently', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 10, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+    ];
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30)).toBe(-10);
+  });
 });

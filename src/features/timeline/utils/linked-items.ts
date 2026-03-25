@@ -1,5 +1,6 @@
 import type { TimelineItem } from '@/types/timeline';
 import { getLinkedAudioCompanion, getLinkedVideoCompanion } from '@/shared/utils/linked-media';
+import type { PreviewItemUpdate } from './item-edit-preview';
 import { getSourceProperties, sourceToTimelineFrames } from './source-calculations';
 
 function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
@@ -127,16 +128,29 @@ function getLinkedSyncCompanion(items: TimelineItem[], anchor: TimelineItem): Ti
   return null;
 }
 
+function applyPreviewUpdate(
+  item: TimelineItem,
+  previewUpdate: PreviewItemUpdate | null | undefined,
+): TimelineItem {
+  return previewUpdate
+    ? ({ ...item, ...previewUpdate } as TimelineItem)
+    : item;
+}
+
 export function getLinkedSyncOffsetFrames(
   items: TimelineItem[],
   itemId: string,
   timelineFps: number,
+  previewUpdatesById: Readonly<Record<string, PreviewItemUpdate | undefined>> = {},
 ): number | null {
-  const anchor = items.find((item) => item.id === itemId);
-  if (!anchor) return null;
+  const anchorBase = items.find((item) => item.id === itemId);
+  if (!anchorBase) return null;
 
-  const companion = getLinkedSyncCompanion(items, anchor);
-  if (!companion) return null;
+  const companionBase = getLinkedSyncCompanion(items, anchorBase);
+  if (!companionBase) return null;
+
+  const anchor = applyPreviewUpdate(anchorBase, previewUpdatesById[anchorBase.id]);
+  const companion = applyPreviewUpdate(companionBase, previewUpdatesById[companionBase.id]);
 
   const anchorSyncFrame = getLinkedSyncAnchorFrame(anchor, timelineFps);
   const candidateOffset = anchorSyncFrame - getLinkedSyncAnchorFrame(companion, timelineFps);

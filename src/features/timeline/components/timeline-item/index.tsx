@@ -23,6 +23,7 @@ import {
   type DraggedTransitionDescriptor,
 } from '@/shared/state/transition-drag';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
+import type { PreviewItemUpdate } from '../../utils/item-edit-preview';
 import { mediaTranscriptionService } from '@/features/timeline/deps/media-transcription-service';
 import { getMediaDragData } from '@/features/timeline/deps/media-library-resolver';
 import { useSettingsStore } from '@/features/timeline/deps/settings';
@@ -42,6 +43,7 @@ import {
 } from '../../utils/transition-edit-guards';
 import { ClipContent } from './clip-content';
 import { ClipIndicators } from './clip-indicators';
+import { shouldSuppressLinkedSyncBadge } from './linked-sync-badge';
 import { TrimHandles } from './trim-handles';
 import { StretchHandles } from './stretch-handles';
 import { AudioFadeHandles } from './audio-fade-handles';
@@ -231,6 +233,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const isLinked = useItemsStore(
     useCallback((s) => hasLinkedItems(s.items, item.id), [item.id])
   );
+  const linkedSelectionEnabled = useEditorStore((s) => s.linkedSelectionEnabled);
   const segmentOverlays = useTimelineItemOverlayStore(
     useCallback((s) => s.overlaysByItemId[item.id] ?? EMPTY_SEGMENT_OVERLAYS, [item.id])
   );
@@ -587,11 +590,22 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       ),
     ),
   );
-  const linkedSyncOffsetFrames = useMemo(() => (
-    linkedItemsForSync.length > 0
-      ? getLinkedSyncOffsetFrames([previewBaseItem, ...linkedItemsForSync], previewBaseItem.id, fps)
-      : null
-  ), [linkedItemsForSync, previewBaseItem, fps]);
+  const linkedSyncPreviewUpdatesById = useLinkedEditPreviewStore(
+    useShallow(
+      useCallback((s) => {
+        const updatesById: Record<string, PreviewItemUpdate> = {};
+
+        for (const linkedItem of linkedItemsForSync) {
+          const linkedPreviewUpdate = s.updatesById[linkedItem.id];
+          if (linkedPreviewUpdate) {
+            updatesById[linkedItem.id] = linkedPreviewUpdate;
+          }
+        }
+
+        return updatesById;
+      }, [item.id, linkedItemsForSync]),
+    ),
+  );
 
   const draggedTransition = useTransitionDragStore((s) => s.draggedTransition);
   const transitionDragPreview = useTransitionDragStore(
@@ -863,7 +877,6 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     fps,
     effectiveSourceFps,
   ]);
-
   // During edit previews, prioritize visual sync over deferred rendering so
   // filmstrip growth keeps up with the edit gesture.
   const preferImmediateContentRendering =
@@ -2102,6 +2115,61 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       volume: audioVolumeEdit.previewVolume,
     };
   }, [audioVolumeEdit, contentPreviewItem]);
+  const linkedSyncPreviewItem = useMemo<TimelineItemType>(() => {
+    let fromOffset = slideFromOffset + rippleEditOffset;
+
+    if (isTrimming && trimHandle === 'start') {
+      fromOffset += trimDelta;
+    }
+
+    if (rollingEditDelta !== 0 && rollingEditHandle === 'end') {
+      fromOffset += rollingEditDelta;
+    }
+
+    if (slideNeighborSide === 'right' && slideNeighborDelta !== 0) {
+      fromOffset += slideNeighborDelta;
+    }
+
+    if (fromOffset === 0) {
+      return contentVisualPreviewItem;
+    }
+
+    return {
+      ...contentVisualPreviewItem,
+      from: contentVisualPreviewItem.from + fromOffset,
+    };
+  }, [
+    contentVisualPreviewItem,
+    isTrimming,
+    trimHandle,
+    trimDelta,
+    rollingEditDelta,
+    rollingEditHandle,
+    slideNeighborSide,
+    slideNeighborDelta,
+    slideFromOffset,
+    rippleEditOffset,
+  ]);
+  const suppressLinkedSyncBadge = shouldSuppressLinkedSyncBadge({
+    linkedSelectionEnabled,
+    linkedEditPreviewActive: linkedEditPreviewUpdate !== null,
+    isDragging,
+    isPartOfDrag,
+    isTrimming,
+    isStretching,
+    isSlipSlideActive,
+    rollingEditDelta,
+    rippleEditOffset,
+    rippleEdgeDelta,
+    slipEditDelta,
+    slideEditOffset,
+    slideNeighborDelta,
+  });
+  const linkedSyncOffsetFrames = useMemo(() => (
+    !suppressLinkedSyncBadge && linkedItemsForSync.length > 0
+      ? getLinkedSyncOffsetFrames([linkedSyncPreviewItem, ...linkedItemsForSync], linkedSyncPreviewItem.id, fps, linkedSyncPreviewUpdatesById)
+      : null
+  ), [linkedItemsForSync, linkedSyncPreviewItem, fps, linkedSyncPreviewUpdatesById, suppressLinkedSyncBadge]);
 
   const handleCreatePreComp = useCallback(() => {
     // Capture selection synchronously â€” context menu close may clear it before the dynamic import resolves
