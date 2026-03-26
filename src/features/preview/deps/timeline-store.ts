@@ -7,6 +7,7 @@ export type { TimelineState } from './timeline-contract';
 export {
   useTimelineStore,
   useItemsStore,
+  useKeyframesStore,
   useTransitionsStore,
   useTimelineSettingsStore,
   useMediaDependencyStore,

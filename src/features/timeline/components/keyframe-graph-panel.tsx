@@ -9,6 +9,7 @@ import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ChevronUp, ChevronDown, ClipboardPaste, Copy, Scissors, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/shared/ui/cn';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,8 +34,9 @@ import {
 } from '@/features/timeline/deps/composition-runtime';
 import { useProjectStore } from '@/features/timeline/deps/projects';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '../stores/timeline-store';
+import { useItemsStore } from '../stores/items-store';
 import { useKeyframesStore } from '../stores/keyframes-store';
+import { useTransitionsStore } from '../stores/transitions-store';
 import { useKeyframeSelectionStore } from '../stores/keyframe-selection-store';
 import { useTimelineCommandStore } from '../stores/timeline-command-store';
 import { captureSnapshot } from '../stores/commands/snapshot';
@@ -306,10 +308,37 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   // Selected items
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
 
-  // Timeline state
-  const items = useTimelineStore((s) => s.items);
-  const keyframes = useKeyframesStore((s) => s.keyframes);
-  const transitions = useTimelineStore((s) => s.transitions);
+  const selectedItemForEditor = useItemsStore(
+    useCallback((s) => {
+      for (const itemId of selectedItemIds) {
+        const item = s.itemById[itemId];
+        if (item) {
+          return item;
+        }
+      }
+
+      return null;
+    }, [selectedItemIds])
+  );
+  const selectedItemKeyframes = useKeyframesStore(
+    useCallback(
+      (s) => selectedItemForEditor ? (s.keyframesByItemId[selectedItemForEditor.id] ?? null) : null,
+      [selectedItemForEditor]
+    )
+  );
+  const selectedItemTransitions = useTransitionsStore(
+    useShallow(
+      useCallback((s) => {
+        if (!selectedItemForEditor) return [];
+
+        return s.transitions.filter(
+          (transition) => transition.leftClipId === selectedItemForEditor.id
+            || transition.rightClipId === selectedItemForEditor.id
+        );
+      }, [selectedItemForEditor])
+    )
+  );
+
   // Use _updateKeyframe directly (no undo per call) for dragging
   const _updateKeyframe = useKeyframesStore((s) => s._updateKeyframe);
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -375,24 +404,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     height: currentProject?.metadata.height ?? 1080,
     fps: currentProject?.metadata.fps ?? 30,
   }), [currentProject]);
-
-  // Use the first selected item so the panel can create first keyframes too.
-  const selectedItemForEditor = useMemo(() => {
-    for (const itemId of selectedItemIds) {
-      const item = items.find((i) => i.id === itemId);
-      if (item) {
-        return item;
-      }
-    }
-    return null;
-  }, [selectedItemIds, items]);
-
-  const selectedItemKeyframes = useMemo(
-    () => selectedItemForEditor
-      ? keyframes.find((itemKeyframes) => itemKeyframes.itemId === selectedItemForEditor.id)
-      : undefined,
-    [selectedItemForEditor, keyframes]
-  );
 
   const availableProperties = useMemo(
     () => selectedItemForEditor ? getAnimatablePropertiesForItem(selectedItemForEditor) : [],
@@ -543,9 +554,9 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     return getTransitionBlockedRanges(
       selectedItemForEditor.id,
       selectedItemForEditor,
-      transitions
+      selectedItemTransitions
     );
-  }, [selectedItemForEditor, transitions]);
+  }, [selectedItemForEditor, selectedItemTransitions]);
 
   useEffect(() => {
     if (editorMode !== 'split' || !selectedItemForEditor) return;

@@ -11,10 +11,10 @@ import { Eye, EyeOff, Lock, GripVertical, Volume2, VolumeX, Radio, FoldHorizonta
 import type { TimelineTrack } from '@/types/timeline';
 import { useTrackDrag } from '../hooks/use-track-drag';
 import { TIMELINE_SIDEBAR_WIDTH } from '../constants';
+import { useItemsStore } from '../stores/items-store';
 
 interface TrackHeaderProps {
   track: TimelineTrack;
-  itemCount: number;
   isActive: boolean;
   isSelected: boolean;
   canDeleteTrack: boolean;
@@ -38,7 +38,6 @@ interface TrackHeaderProps {
 function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps): boolean {
   return (
     prev.track === next.track &&
-    prev.itemCount === next.itemCount &&
     prev.isActive === next.isActive &&
     prev.isSelected === next.isSelected &&
     prev.canDeleteTrack === next.canDeleteTrack &&
@@ -58,7 +57,6 @@ function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps
  */
 export const TrackHeader = memo(function TrackHeader({
   track,
-  itemCount,
   isActive,
   isSelected,
   canDeleteTrack,
@@ -75,6 +73,8 @@ export const TrackHeader = memo(function TrackHeader({
   onDeleteTrack,
   onDeleteEmptyTracks,
 }: TrackHeaderProps) {
+  const itemCount = useItemsStore((s) => s.itemsByTrackId[track.id]?.length ?? 0);
+
   // Use track drag hook (visuals handled centrally by timeline.tsx via DOM)
   const { handleDragStart } = useTrackDrag(track);
   const itemCountLabel = `${itemCount} ${itemCount === 1 ? 'Clip' : 'Clips'}`;

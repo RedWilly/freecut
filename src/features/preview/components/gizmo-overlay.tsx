@@ -2,7 +2,7 @@ import { useMemo, useCallback, useRef, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '@/features/preview/deps/timeline-store';
+import { useKeyframesStore, useTimelineStore } from '@/features/preview/deps/timeline-store';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { getResolvedPlaybackFrame } from '@/shared/state/playback/frame-resolution';
 import { useGizmoStore } from '../stores/gizmo-store';
@@ -77,7 +77,6 @@ export function GizmoOverlay({
   );
   const tracks = useTimelineStore((s) => s.tracks);
   const snapEnabled = useTimelineStore((s) => s.snapEnabled);
-  const keyframes = useTimelineStore((s) => s.keyframes);
   const updateItemTransform = useTimelineStore((s) => s.updateItemTransform);
   const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap);
   const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations);
@@ -306,7 +305,7 @@ export function GizmoOverlay({
       const item = visualItems.find((i) => i.id === itemId);
       if (!item) return;
 
-      const itemKeyframes = keyframes.find((k) => k.itemId === itemId);
+      const itemKeyframes = useKeyframesStore.getState().keyframesByItemId[itemId];
 
       // Map of property to value for gizmo-animatable properties
       const propValues: Record<TransformAnimatableProperty, number> = {
@@ -363,7 +362,7 @@ export function GizmoOverlay({
         justFinishedDragRef.current = false;
       }, 100);
     },
-    [visualItems, keyframes, updateItemTransform, applyAutoKeyframeOperations]
+    [visualItems, updateItemTransform, applyAutoKeyframeOperations]
   );
 
   // Handle group transform end - commit transforms for all items as a single undo operation

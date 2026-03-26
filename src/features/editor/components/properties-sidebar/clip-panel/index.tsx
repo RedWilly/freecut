@@ -1,10 +1,11 @@
 import { useMemo, useCallback, useEffect, memo } from 'react';
 import { Move, Sparkles, Film } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '@/features/editor/deps/timeline-store';
+import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store';
 import { useProjectStore } from '@/features/editor/deps/projects';
 import type { ClipInspectorTab } from '@/shared/state/editor';
 import type { SelectionState, SelectionActions } from '@/shared/state/selection';
@@ -65,33 +66,34 @@ export const ClipPanel = memo(function ClipPanel() {
   const selectedItemIds = useSelectionStore((s: SelectionState & SelectionActions) => s.selectedItemIds);
   const fps = useTimelineStore((s: TimelineState & TimelineActions) => s.fps);
   const updateItemsTransform = useTimelineStore((s: TimelineState & TimelineActions) => s.updateItemsTransform);
-  const currentProject = useProjectStore((s) => s.currentProject);
+  const projectWidth = useProjectStore((s) => s.currentProject?.metadata.width ?? 1920);
+  const projectHeight = useProjectStore((s) => s.currentProject?.metadata.height ?? 1080);
+  const projectFps = useProjectStore((s) => s.currentProject?.metadata.fps ?? 30);
+  const selectedItems = useItemsStore(
+    useShallow(
+      useCallback((s) => {
+        const items: TimelineItem[] = [];
 
-  // Get all items from the timeline store, then derive selected items via useMemo.
-  // NOTE: Do NOT use useShallow(useCallback(..., [selectedItemIds])) as a combined
-  // selector here. React 19's useSyncExternalStore does not re-evaluate a changed
-  // selector function when the re-render was triggered by a different store
-  // (selection store), causing stale items to be returned. Wrapping cross-store
-  // deps like selectedItemIds in the selector reintroduces this stale-selector bug.
-  // Trade-off: subscribing to s.items means ClipPanel re-renders on any item
-  // mutation. useTimelineStore (the facade in timeline-store-facade.ts) only accepts
-  // a single selector — no custom equality comparator. If perf becomes a problem,
-  // consider subscribeWithSelector or restructuring to avoid deriving here.
-  const items = useTimelineStore((s: TimelineState & TimelineActions) => s.items);
-  const selectedItemIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
-  const selectedItems = useMemo(
-    () => items.filter((item: TimelineItem) => selectedItemIdSet.has(item.id)),
-    [items, selectedItemIdSet]
+        for (const itemId of selectedItemIds) {
+          const item = s.itemById[itemId];
+          if (item) {
+            items.push(item);
+          }
+        }
+
+        return items;
+      }, [selectedItemIds])
+    )
   );
 
   // Canvas settings
   const canvas = useMemo(
     () => ({
-      width: currentProject?.metadata.width ?? 1920,
-      height: currentProject?.metadata.height ?? 1080,
-      fps: currentProject?.metadata.fps ?? 30,
+      width: projectWidth,
+      height: projectHeight,
+      fps: projectFps,
     }),
-    [currentProject]
+    [projectFps, projectHeight, projectWidth]
   );
 
   // CONSOLIDATED: Single pass for all item type checks

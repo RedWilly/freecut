@@ -62,8 +62,6 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
     toggleTrackMute,
     toggleTrackSolo,
   } = useTimelineTracks();
-  const itemsByTrackId = useItemsStore((s) => s.itemsByTrackId);
-
   // Selection state - use granular selectors
   const activeTrackId = useSelectionStore((s) => s.activeTrackId);
   const selectedTrackIds = useSelectionStore((s) => s.selectedTrackIds);
@@ -73,6 +71,21 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   const selectedTrackIdsSet = useMemo(() => new Set(selectedTrackIds), [selectedTrackIds]);
 
   const visibleTracks = tracks;
+  const canDeleteEmptyTracks = useItemsStore(
+    useCallback((s) => {
+      let emptyTrackCount = 0;
+
+      for (const track of tracks) {
+        if ((s.itemsByTrackId[track.id]?.length ?? 0) === 0) {
+          emptyTrackCount += 1;
+        }
+      }
+
+      if (emptyTrackCount === 0) return false;
+      if (emptyTrackCount < tracks.length) return true;
+      return tracks.length > 1;
+    }, [tracks])
+  );
   const videoTracks = useMemo(
     () => visibleTracks.filter((track) => getTrackKind(track) === 'video'),
     [visibleTracks]
@@ -528,7 +541,11 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   }, [removeTracks, syncTrackSelectionAfterRemoval, tracks]);
 
   const handleDeleteEmptyTracks = useCallback((contextTrackId: string) => {
-    const emptyTrackIds = getEmptyTrackIdsForRemoval(tracks, itemsByTrackId, contextTrackId);
+    const emptyTrackIds = getEmptyTrackIdsForRemoval(
+      tracks,
+      useItemsStore.getState().itemsByTrackId,
+      contextTrackId
+    );
     if (emptyTrackIds.length === 0) return;
 
     const removedTrackIdsSet = new Set(emptyTrackIds);
@@ -536,7 +553,7 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
 
     const remainingTracks = tracks.filter((track) => !removedTrackIdsSet.has(track.id));
     syncTrackSelectionAfterRemoval(emptyTrackIds, remainingTracks[0]?.id ?? null);
-  }, [itemsByTrackId, removeTracks, syncTrackSelectionAfterRemoval, tracks]);
+  }, [removeTracks, syncTrackSelectionAfterRemoval, tracks]);
 
   /**
    * Handle removing selected tracks
@@ -602,7 +619,6 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
           )}
 
           {sectionTracks.map((track, index) => {
-            const emptyTrackIdsToRemove = getEmptyTrackIdsForRemoval(tracks, itemsByTrackId, track.id);
             return (
               <TrackRowFrame
                 key={track.id}
@@ -614,11 +630,10 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
               >
                 <TrackHeader
                   track={track}
-                  itemCount={itemsByTrackId[track.id]?.length ?? 0}
                   isActive={activeTrackId === track.id}
                   isSelected={selectedTrackIdsSet.has(track.id)}
                   canDeleteTrack={tracks.length > 1}
-                  canDeleteEmptyTracks={emptyTrackIdsToRemove.length > 0}
+                  canDeleteEmptyTracks={canDeleteEmptyTracks}
                   onToggleLock={() => toggleTrackLock(track.id)}
                   onToggleVisibility={() => toggleTrackVisibility(track.id)}
                   onToggleMute={() => toggleTrackMute(track.id)}

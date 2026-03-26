@@ -6,7 +6,7 @@
  * passes coordinate params to the overlay.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useMaskEditorStore } from '../stores/mask-editor-store';
 import { useItemsStore } from '@/features/preview/deps/timeline-store';
 import { MaskEditorOverlay } from './mask-editor-overlay';
@@ -31,11 +31,11 @@ export const MaskEditorContainer = memo(function MaskEditorContainer({
   const editingItemId = useMaskEditorStore((s) => s.editingItemId);
   const shapePenMode = useMaskEditorStore((s) => s.shapePenMode);
 
-  const items = useItemsStore((s) => s.items);
-
-  const editingItem = useMemo(
-    () => (editingItemId ? items.find((i) => i.id === editingItemId) : null),
-    [editingItemId, items]
+  const editingItem = useItemsStore(
+    useCallback(
+      (s) => editingItemId ? (s.itemById[editingItemId] ?? null) : null,
+      [editingItemId]
+    )
   );
   const visualTransforms = useVisualTransforms(editingItem ? [editingItem] : [], projectSize);
 
