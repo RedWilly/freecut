@@ -6,6 +6,10 @@ interface TrackRowFrameProps extends PropsWithChildren {
   className?: string;
   showTopDivider?: boolean;
   hideBottomDivider?: boolean;
+  onResizeMouseDown?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onResizeDoubleClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  resizeHandleLabel?: string;
+  resizeHandlePosition?: 'top' | 'bottom';
 }
 
 interface TrackSectionDividerProps {
@@ -16,7 +20,18 @@ interface TrackSectionDividerProps {
 /**
  * Keeps the row separator outside the lane content so clips can fill the row.
  */
-export function TrackRowFrame({ children, className, showTopDivider = false, hideBottomDivider = false }: TrackRowFrameProps) {
+export function TrackRowFrame({
+  children,
+  className,
+  showTopDivider = false,
+  hideBottomDivider = false,
+  onResizeMouseDown,
+  onResizeDoubleClick,
+  resizeHandleLabel,
+  resizeHandlePosition = 'bottom',
+}: TrackRowFrameProps) {
+  const resizeHandlePositionClass = resizeHandlePosition === 'top' ? 'top-0' : 'bottom-0';
+
   return (
     <div className={cn('relative', className)}>
       {showTopDivider && (
@@ -32,6 +47,19 @@ export function TrackRowFrame({ children, className, showTopDivider = false, hid
           aria-hidden="true"
           data-testid="track-row-divider"
           className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
+        />
+      )}
+      {onResizeMouseDown && (
+        <button
+          type="button"
+          tabIndex={-1}
+          className={cn(
+            'absolute inset-x-0 z-30 h-[6px] cursor-row-resize bg-transparent focus-visible:outline-none',
+            resizeHandlePositionClass
+          )}
+          aria-label={resizeHandleLabel ?? 'Resize track height'}
+          onMouseDown={onResizeMouseDown}
+          onDoubleClick={onResizeDoubleClick}
         />
       )}
     </div>

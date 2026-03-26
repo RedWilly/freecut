@@ -27,8 +27,8 @@ export const EDITOR_DENSITY_PRESETS = {
     timelineTracksHeaderHeight: 44,
     timelineRulerHeight: 44,
     timelineSidebarWidth: 192,
-    timelineTrackHeight: 80,
-    timelineClipLabelRowHeight: 18,
+    timelineTrackHeight: 140,
+    timelineClipLabelRowHeight: 24,
     timelineWaveformRowHeight: 30,
   },
   compact: {
@@ -51,8 +51,8 @@ export const EDITOR_DENSITY_PRESETS = {
     timelineTracksHeaderHeight: 40,
     timelineRulerHeight: 40,
     timelineSidebarWidth: 176,
-    timelineTrackHeight: 72,
-    timelineClipLabelRowHeight: 16,
+    timelineTrackHeight: 140,
+    timelineClipLabelRowHeight: 24,
     timelineWaveformRowHeight: 24,
   },
 } as const;

@@ -16,6 +16,7 @@ import { TIMELINE_SIDEBAR_WIDTH } from '../constants';
 
 interface TrackHeaderProps {
   track: TimelineTrack;
+  itemCount: number;
   isActive: boolean;
   isSelected: boolean;
   canDeleteTrack: boolean;
@@ -40,6 +41,7 @@ interface TrackHeaderProps {
 function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps): boolean {
   return (
     prev.track === next.track &&
+    prev.itemCount === next.itemCount &&
     prev.isActive === next.isActive &&
     prev.isSelected === next.isSelected &&
     prev.canDeleteTrack === next.canDeleteTrack &&
@@ -59,6 +61,7 @@ function areTrackHeaderPropsEqual(prev: TrackHeaderProps, next: TrackHeaderProps
  */
 export const TrackHeader = memo(function TrackHeader({
   track,
+  itemCount,
   isActive,
   isSelected,
   canDeleteTrack,
@@ -80,13 +83,14 @@ export const TrackHeader = memo(function TrackHeader({
   const { handleDragStart } = useTrackDrag(track);
   const trackVolume = track.volume ?? 0;
   const formattedTrackVolume = `${trackVolume > 0 ? '+' : ''}${trackVolume.toFixed(1)} dB`;
+  const itemCountLabel = `${itemCount} ${itemCount === 1 ? 'Clip' : 'Clips'}`;
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           className={`
-            flex items-center px-1
+            flex flex-col overflow-hidden px-1
             cursor-grab active:cursor-grabbing relative
             ${isSelected ? 'bg-primary/10' : 'hover:bg-secondary/50'}
             ${isActive ? 'border-l-3 border-l-primary' : 'border-l-3 border-l-transparent'}
@@ -102,68 +106,10 @@ export const TrackHeader = memo(function TrackHeader({
           onMouseDown={handleDragStart}
           data-track-id={track.id}
         >
-          {/* Left column: Drag handle */}
-          <div className="flex items-center shrink-0 mr-0.5">
-            <GripVertical className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
-          </div>
-
-          {/* Right column: Name row + Icons row, centered as a block */}
-          <div className="flex items-center justify-center min-w-0 flex-1">
-            <div className="flex flex-col items-start gap-1">
-              {/* Row 1: Name */}
-              <div className="flex items-center gap-1 min-w-0">
-                <span className="text-xs font-semibold leading-none font-mono truncate">
-                  {track.name}
-                </span>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-4 px-1.5 rounded-sm text-[10px] font-mono text-muted-foreground hover:text-foreground"
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      aria-label={`Track gain ${formattedTrackVolume}`}
-                    >
-                      {formattedTrackVolume}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-52 p-3"
-                    align="start"
-                    onOpenAutoFocus={(e) => e.preventDefault()}
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-xs font-medium">Track gain</span>
-                        <span className="text-[11px] font-mono text-muted-foreground">{formattedTrackVolume}</span>
-                      </div>
-                      <Slider
-                        value={[trackVolume]}
-                        min={-60}
-                        max={12}
-                        step={0.1}
-                        onValueChange={(values) => onSetVolume(values[0] ?? 0)}
-                        aria-label="Track gain"
-                      />
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>-60 dB</span>
-                        <button
-                          type="button"
-                          className="hover:text-foreground transition-colors"
-                          onClick={() => onSetVolume(0)}
-                        >
-                          Reset
-                        </button>
-                        <span>+12 dB</span>
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              {/* Row 2: Control icons */}
-              <div className="flex items-center gap-0.5">
+          <div className="flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-b border-border/60">
+            <div className="flex h-5 w-4 shrink-0 items-center justify-center">
+              <GripVertical className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
+            </div>
             {/* Visibility Button */}
             <Button
               variant="ghost"
@@ -254,8 +200,61 @@ export const TrackHeader = memo(function TrackHeader({
             >
               <FoldHorizontal className="w-3 h-3" />
             </Button>
-              </div>
-            </div>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-5 px-1.5 rounded-sm text-[10px] font-mono text-muted-foreground hover:text-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  aria-label={`Track gain ${formattedTrackVolume}`}
+                >
+                  {formattedTrackVolume}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-52 p-3"
+                align="start"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium">Track gain</span>
+                    <span className="text-[11px] font-mono text-muted-foreground">{formattedTrackVolume}</span>
+                  </div>
+                  <Slider
+                    value={[trackVolume]}
+                    min={-60}
+                    max={12}
+                    step={0.1}
+                    onValueChange={(values) => onSetVolume(values[0] ?? 0)}
+                    aria-label="Track gain"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>-60 dB</span>
+                    <button
+                      type="button"
+                      className="hover:text-foreground transition-colors"
+                      onClick={() => onSetVolume(0)}
+                    >
+                      Reset
+                    </button>
+                    <span>+12 dB</span>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col items-start justify-start px-1.5 py-1">
+            <span className="max-w-full truncate text-xs font-semibold leading-none font-mono">
+              {track.name}
+            </span>
+            <span className="mt-1 text-[10px] leading-none text-muted-foreground">
+              {itemCountLabel}
+            </span>
           </div>
         </div>
       </ContextMenuTrigger>

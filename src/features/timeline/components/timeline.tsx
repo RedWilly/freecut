@@ -27,6 +27,8 @@ import { getEmptyTrackIdsForRemoval } from '../utils/track-removal';
 import { createLogger } from '@/shared/logging/logger';
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/shared/ui/editor-layout';
 import { TRACK_SECTION_DIVIDER_HEIGHT } from '../constants';
+import { useTrackHeightResize } from '../hooks/use-track-height-resize';
+import { getMinimumTrackSectionSpacerHeight } from '../utils/track-resize';
 
 const logger = createLogger('Timeline');
 
@@ -106,6 +108,7 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen);
   const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen);
   const setTimelineTracks = useTimelineStore((s) => s.setTracks);
+  const { handleTrackResizeStart, handleTrackResizeReset } = useTrackHeightResize();
 
   const setEditorPanelOpen = useCallback(
     (nextOpen: boolean) => {
@@ -156,7 +159,7 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   );
   const availableSpacerHeight = Math.max(0, trackRowsViewportHeight - tracksContentHeight);
   const minimumSectionZoneHeight = hasTrackSections
-    ? Math.min(24, Math.floor(availableSpacerHeight / 2))
+    ? Math.min(getMinimumTrackSectionSpacerHeight(editorLayout.timelineTracksHeaderHeight), Math.floor(availableSpacerHeight / 2))
     : 0;
   const maxSectionDividerOffset = Math.max(0, (availableSpacerHeight / 2) - minimumSectionZoneHeight);
   const clampedSectionDividerOffset = Math.max(
@@ -613,9 +616,17 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
                     {showSectionDivider && (
                       <TrackSectionDivider onMouseDown={handleSectionDividerMouseDown} />
                     )}
-                    <TrackRowFrame showTopDivider={trackIndex === 0} hideBottomDivider={hideBottomDivider}>
+                    <TrackRowFrame
+                      showTopDivider={trackIndex === 0}
+                      hideBottomDivider={hideBottomDivider}
+                      onResizeMouseDown={(event) => handleTrackResizeStart(event, track.id)}
+                      onResizeDoubleClick={(event) => handleTrackResizeReset(event, track.id)}
+                      resizeHandleLabel={`Resize ${track.name} height`}
+                      resizeHandlePosition={getTrackKind(track) === 'video' ? 'top' : 'bottom'}
+                    >
                       <TrackHeader
                         track={track}
+                        itemCount={itemsByTrackId[track.id]?.length ?? 0}
                         isActive={activeTrackId === track.id}
                         isSelected={selectedTrackIdsSet.has(track.id)}
                         canDeleteTrack={tracks.length > 1}

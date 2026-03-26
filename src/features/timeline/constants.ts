@@ -20,7 +20,7 @@ export const TIMELINE_SIDEBAR_WIDTH = EDITOR_LAYOUT.timelineSidebarWidth;
 // =============================================================================
 
 export const MIN_TRACK_HEIGHT = 48;
-export const MAX_TRACK_HEIGHT = 200;
+export const MAX_TRACK_HEIGHT = 140;
 export const TRACK_SECTION_DIVIDER_HEIGHT = 3;
 
 // Clip fills entire track height (selection ring is inset)
