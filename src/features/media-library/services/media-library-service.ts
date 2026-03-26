@@ -259,6 +259,7 @@ class MediaLibraryService {
       audioCodec: metadata.type === 'video' ? metadata.audioCodec : undefined,
       audioCodecSupported: metadata.type === 'video' ? metadata.audioCodecSupported : true,
       keyframeTimestamps: metadata.type === 'video' ? metadata.keyframeTimestamps : undefined,
+      gopInterval: metadata.type === 'video' ? metadata.gopInterval : undefined,
       thumbnailId,
       tags: [],
       createdAt: Date.now(),

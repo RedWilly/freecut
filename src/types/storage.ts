@@ -59,6 +59,12 @@ export interface MediaMetadata {
    * Undefined for images/audio, null-ish for all-intra video (no optimization needed).
    */
   keyframeTimestamps?: number[];
+  /**
+   * Average interval between keyframes in seconds (GOP length).
+   * Derived from keyframeTimestamps at import time.
+   * Useful for diagnostics, UI display, and fallback seek heuristics.
+   */
+  gopInterval?: number;
   thumbnailId?: string;
   tags: string[];
   createdAt: number;

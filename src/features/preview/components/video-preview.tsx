@@ -1,6 +1,7 @@
 ﻿import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback, memo } from 'react';
 import {
   backgroundPreseek as workerBackgroundPreseek,
+  backgroundBatchPreseek as workerBackgroundBatchPreseek,
   getDecoderPrewarmMetricsSnapshot,
 } from '../utils/decoder-prewarm';
 import { Player, type PlayerRef } from '@/features/preview/deps/player-core';
@@ -3199,7 +3200,11 @@ export const VideoPreview = memo(function VideoPreview({
         && Math.abs(state.currentFrame - prev.currentFrame) >= JUMP_PRESEEK_THRESHOLD_FRAMES
         && !state.isPlaying
       ) {
+        // Group timestamps by source URL for batch preseek — mediabunny's
+        // samplesAtTimestamps() shares decoder state across the batch,
+        // decoding each packet at most once.
         const frame = state.currentFrame;
+        const bySource = new Map<string, number[]>();
         for (const track of combinedTracks) {
           for (const item of track.items) {
             if (item.type !== 'video' || !('src' in item) || !item.src) continue;
@@ -3211,8 +3216,16 @@ export const VideoPreview = memo(function VideoPreview({
             const sourceStart = item.sourceStart ?? item.trimStart ?? 0;
             const speed = item.speed ?? 1;
             const sourceTime = (sourceStart / item.sourceFps) + (localFrame / fps) * speed;
-            void workerBackgroundPreseek(item.src, sourceTime);
+            const existing = bySource.get(item.src);
+            if (existing) {
+              existing.push(sourceTime);
+            } else {
+              bySource.set(item.src, [sourceTime]);
+            }
           }
+        }
+        for (const [src, timestamps] of bySource) {
+          void workerBackgroundBatchPreseek(src, timestamps);
         }
       }
 
@@ -3331,13 +3344,22 @@ export const VideoPreview = memo(function VideoPreview({
               state.currentFrame,
             );
           }
-          for (const clip of [activeTransitionWindow.leftClip, activeTransitionWindow.rightClip]) {
-            if (clip.type === 'video' && 'src' in clip && clip.src && clip.sourceFps) {
-              const localFrame = state.currentFrame - clip.from;
-              const sourceStart = clip.sourceStart ?? clip.trimStart ?? 0;
-              const clipSpeed = clip.speed ?? 1;
-              const sourceTime = (sourceStart / clip.sourceFps) + (localFrame / fps) * clipSpeed;
-              void workerBackgroundPreseek(clip.src, sourceTime);
+          {
+            const transClips = [activeTransitionWindow.leftClip, activeTransitionWindow.rightClip];
+            const transBySource = new Map<string, number[]>();
+            for (const clip of transClips) {
+              if (clip.type === 'video' && 'src' in clip && clip.src && clip.sourceFps) {
+                const localFrame = state.currentFrame - clip.from;
+                const sourceStart = clip.sourceStart ?? clip.trimStart ?? 0;
+                const clipSpeed = clip.speed ?? 1;
+                const sourceTime = (sourceStart / clip.sourceFps) + (localFrame / fps) * clipSpeed;
+                const existing = transBySource.get(clip.src);
+                if (existing) existing.push(sourceTime);
+                else transBySource.set(clip.src, [sourceTime]);
+              }
+            }
+            for (const [src, timestamps] of transBySource) {
+              void workerBackgroundBatchPreseek(src, timestamps);
             }
           }
         }

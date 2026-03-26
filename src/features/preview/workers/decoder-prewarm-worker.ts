@@ -356,6 +356,91 @@ async function preseek(src: string, timestamp: number, blob?: Blob): Promise<Ima
   return result;
 }
 
+/**
+ * Batch-decode multiple timestamps for the same source using mediabunny's
+ * optimized samplesAtTimestamps() pipeline. This decodes each packet at
+ * most once (unlike individual getSample/preseek calls which may re-seek
+ * the decoder for each timestamp).
+ *
+ * Timestamps MUST be sorted ascending for the optimization to apply.
+ */
+async function batchPreseek(
+  src: string,
+  timestamps: number[],
+  blob?: Blob,
+): Promise<Map<number, ImageBitmap>> {
+  const results = new Map<number, ImageBitmap>();
+  const state = await getExtractor(src, blob);
+  if (!state || timestamps.length === 0) return results;
+
+  // Serialize with the single-frame path via drawLock
+  const previous = state.drawLock ?? Promise.resolve();
+  const result = previous.then(async () => {
+    try {
+      // samplesAtTimestamps uses an optimized pipeline that shares decoder
+      // state across the batch — each packet decoded at most once.
+      const iterator = state.sink.samplesAtTimestamps(timestamps);
+      let i = 0;
+      for await (const sample of iterator) {
+        if (!sample || i >= timestamps.length) {
+          i++;
+          continue;
+        }
+
+        const ts = timestamps[i]!;
+        i++;
+
+        try {
+          const videoFrame: VideoFrame | null =
+            typeof sample.toVideoFrame === 'function' ? sample.toVideoFrame() : (sample.frame ?? null);
+          if (!videoFrame) {
+            sample.close?.();
+            continue;
+          }
+
+          const visibleRect = (videoFrame as VideoFrame & {
+            visibleRect?: { x: number; y: number; width: number; height: number };
+          }).visibleRect;
+
+          const width = visibleRect?.width && visibleRect.width > 0
+            ? visibleRect.width : videoFrame.displayWidth;
+          const height = visibleRect?.height && visibleRect.height > 0
+            ? visibleRect.height : videoFrame.displayHeight;
+          if (width < 1 || height < 1) {
+            videoFrame.close();
+            sample.close?.();
+            continue;
+          }
+
+          state.canvas.width = width;
+          state.canvas.height = height;
+
+          if (visibleRect && visibleRect.width > 0 && visibleRect.height > 0) {
+            state.ctx.drawImage(
+              videoFrame,
+              visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height,
+              0, 0, width, height,
+            );
+          } else {
+            state.ctx.drawImage(videoFrame, 0, 0, width, height);
+          }
+
+          videoFrame.close();
+          const bitmap = state.canvas.transferToImageBitmap();
+          results.set(ts, bitmap);
+        } finally {
+          sample.close?.();
+        }
+      }
+    } catch {
+      // Batch decode failed — return whatever we got
+    }
+    return results;
+  });
+  state.drawLock = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 // Signal worker is alive.
 self.postMessage({ type: 'ready' });
 
@@ -366,6 +451,35 @@ self.onmessage = async (event: MessageEvent) => {
   if (msg.type === 'set_keyframes') {
     if (msg.src && Array.isArray(msg.keyframeTimestamps)) {
       keyframeIndexBySrc.set(msg.src, msg.keyframeTimestamps);
+    }
+    return;
+  }
+
+  // Batch preseek: decode multiple timestamps via optimized pipeline
+  if (msg.type === 'batch_preseek') {
+    if (msg.keyframeTimestamps && !keyframeIndexBySrc.has(msg.src)) {
+      keyframeIndexBySrc.set(msg.src, msg.keyframeTimestamps);
+    }
+    try {
+      const sorted = [...msg.timestamps].sort((a: number, b: number) => a - b);
+      const bitmaps = await batchPreseek(msg.src, sorted, msg.blob);
+      const transfer: Transferable[] = [];
+      const entries: Array<{ timestamp: number; bitmap: ImageBitmap }> = [];
+      for (const [ts, bitmap] of bitmaps) {
+        entries.push({ timestamp: ts, bitmap });
+        transfer.push(bitmap);
+      }
+      self.postMessage(
+        { type: 'batch_preseek_done', id: msg.id, success: true, entries },
+        { transfer },
+      );
+    } catch (error) {
+      self.postMessage({
+        type: 'batch_preseek_done',
+        id: msg.id,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     return;
   }

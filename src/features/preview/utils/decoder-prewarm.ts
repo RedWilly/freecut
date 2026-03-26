@@ -47,6 +47,9 @@ let requestId = 0;
 const pendingRequests = new Map<string, {
   resolve: (bitmap: ImageBitmap | null) => void;
 }>();
+const pendingBatchRequests = new Map<string, {
+  resolve: (bitmaps: Map<number, ImageBitmap>) => void;
+}>();
 
 /** Cache of pre-decoded bitmaps keyed by video source URL. Multiple entries per source. */
 type CachedBitmapEntry = { bitmap: ImageBitmap; timestamp: number };
@@ -91,6 +94,18 @@ function handleWorkerMessage(event: MessageEvent): void {
     if (pending) {
       pendingRequests.delete(msg.id);
       pending.resolve(msg.bitmap ?? null);
+    }
+  } else if (msg.type === 'batch_preseek_done') {
+    const pending = pendingBatchRequests.get(msg.id);
+    if (pending) {
+      pendingBatchRequests.delete(msg.id);
+      const results = new Map<number, ImageBitmap>();
+      if (msg.success && Array.isArray(msg.entries)) {
+        for (const entry of msg.entries) {
+          results.set(entry.timestamp, entry.bitmap);
+        }
+      }
+      pending.resolve(results);
     }
   }
 }
@@ -316,6 +331,78 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
 }
 
 /**
+ * Batch pre-decode multiple timestamps for the same source in a single worker call.
+ * Uses mediabunny's samplesAtTimestamps() which shares decoder state across the
+ * batch — each packet decoded at most once. Much more efficient than individual
+ * backgroundPreseek() calls when multiple timestamps are needed for the same source.
+ *
+ * All returned bitmaps are also cached in the per-source bitmap cache.
+ */
+export function backgroundBatchPreseek(
+  src: string,
+  timestamps: number[],
+): Promise<Map<number, ImageBitmap>> {
+  if (timestamps.length === 0) return Promise.resolve(new Map());
+  // For single timestamps, fall back to the simpler path
+  if (timestamps.length === 1) {
+    return backgroundPreseek(src, timestamps[0]!).then((bitmap) => {
+      const map = new Map<number, ImageBitmap>();
+      if (bitmap) map.set(timestamps[0]!, bitmap);
+      return map;
+    });
+  }
+
+  const pw = acquireWorker();
+  if (!pw) return Promise.resolve(new Map());
+
+  const id = `batch-preseek-${++requestId}`;
+
+  let keyframeTimestamps: number[] | undefined;
+  if (!keyframesSentForSrc.has(src)) {
+    keyframeTimestamps = getKeyframeTimestamps(src);
+    if (keyframeTimestamps) keyframesSentForSrc.add(src);
+  }
+
+  const promise = new Promise<Map<number, ImageBitmap>>((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingBatchRequests.delete(id);
+      releaseWorker(pw);
+      resolve(new Map());
+    }, 8000);
+
+    pendingBatchRequests.set(id, {
+      resolve: (bitmaps) => {
+        clearTimeout(timeout);
+        releaseWorker(pw);
+        // Cache all returned bitmaps
+        for (const [ts, bitmap] of bitmaps) {
+          cachePredecodedBitmap(src, ts, bitmap);
+        }
+        resolve(bitmaps);
+      },
+    });
+
+    const w = pw.worker;
+    const cachedBlob = blobByUrl.get(src);
+    const msg = { type: 'batch_preseek', id, src, timestamps, keyframeTimestamps, blob: cachedBlob };
+    if (cachedBlob) {
+      w.postMessage(msg);
+    } else if (src.startsWith('blob:')) {
+      void fetch(src).then((r) => r.blob()).then((blob) => {
+        blobByUrl.set(src, blob);
+        w.postMessage({ ...msg, blob });
+      }).catch(() => {
+        w.postMessage(msg);
+      });
+    } else {
+      w.postMessage(msg);
+    }
+  });
+
+  return promise;
+}
+
+/**
  * Get a pre-decoded bitmap from the cache for a video source.
  * Returns the bitmap if it exists and is for a nearby timestamp.
  */
@@ -416,6 +503,10 @@ export function disposePrewarmWorker(): void {
     pending.resolve(null);
   }
   pendingRequests.clear();
+  for (const pending of pendingBatchRequests.values()) {
+    pending.resolve(new Map());
+  }
+  pendingBatchRequests.clear();
   inflightPreseekBySrc.clear();
   clearPredecodedCache();
 }
