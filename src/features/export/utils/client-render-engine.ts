@@ -1608,6 +1608,112 @@ export async function createCompositionRenderer(
       }
     },
 
+    /**
+     * Batch-prewarm multiple frames using mediabunny's samplesAtTimestamps()
+     * pipeline. Groups source timestamps by extractor and decodes each packet
+     * at most once across the batch.
+     *
+     * Falls back to sequential prewarmFrame() for extractors where batch mode
+     * has been disabled (e.g. due to "key frame required after flush" errors).
+     *
+     * @returns Number of frames that used batch path (vs fallback).
+     */
+    async prewarmFrames(frames: number[]) {
+      if (frames.length === 0) return;
+      const ctx2d = getPrewarmContext();
+      if (!ctx2d) return;
+
+      // Expand frames → candidate items → source timestamps grouped by extractor
+      const batchByExtractor = new Map<string, { extractor: ReturnType<typeof videoExtractors.get>; timestamps: number[] }>();
+      const fallbackFrames: number[] = [];
+
+      for (const frame of frames) {
+        const minFrame = frame - 1;
+        const maxFrame = frame + 1;
+        const candidates = collectFrameVideoCandidates({
+          tracksByOrderAsc: tracksTopToBottom,
+          visibleTrackIds,
+          minFrame,
+          maxFrame,
+          maxItems: PREWARM_DECODE_MAX_ITEMS,
+        });
+
+        for (const item of candidates) {
+          if (!useMediabunny.has(item.id) || mediabunnyDisabledItems.has(item.id)) continue;
+          const extractor = videoExtractors.get(item.id);
+          if (!extractor) continue;
+
+          // Check if batch mode is available for this extractor
+          if (!extractor.isBatchPrewarmAvailable()) {
+            if (!fallbackFrames.includes(frame)) fallbackFrames.push(frame);
+            continue;
+          }
+
+          const localFrame = frame - item.from;
+          const sourceStart = item.sourceStart ?? item.trimStart ?? 0;
+          const sourceFps = item.sourceFps ?? fps;
+          const speed = item.speed ?? 1;
+          const sourceTime = (sourceStart / sourceFps) + (localFrame / fps) * speed;
+          const clampedTime = Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01));
+
+          const existing = batchByExtractor.get(item.id);
+          if (existing) {
+            existing.timestamps.push(clampedTime);
+          } else {
+            batchByExtractor.set(item.id, { extractor, timestamps: [clampedTime] });
+          }
+        }
+      }
+
+      // Initialize any missing extractors
+      const missingIds = [...batchByExtractor.keys()].filter(
+        (id) => !useMediabunny.has(id) && !mediabunnyDisabledItems.has(id),
+      );
+      if (missingIds.length > 0) {
+        await initializeMediabunnyForItems(missingIds);
+      }
+
+      // Batch decode per extractor — sorted timestamps for optimal pipeline
+      await Promise.all([...batchByExtractor.entries()].map(async ([itemId, { extractor, timestamps }]) => {
+        if (isDisposed || !extractor) return;
+        timestamps.sort((a, b) => a - b);
+        const result = await extractor.prewarmBatch(ctx2d, timestamps, 0, 0, 1, 1);
+        if (result >= 0) {
+          mediabunnyFailureCountByItem.set(itemId, 0);
+        }
+        // result === -1 means batch disabled or failed — fallback frames
+        // are handled below
+      }));
+
+      // Sequential fallback for extractors where batch is disabled
+      for (const frame of fallbackFrames) {
+        if (isDisposed) break;
+        const minFrame = frame - 1;
+        const maxFrame = frame + 1;
+        const candidates = collectFrameVideoCandidates({
+          tracksByOrderAsc: tracksTopToBottom,
+          visibleTrackIds,
+          minFrame,
+          maxFrame,
+          maxItems: PREWARM_DECODE_MAX_ITEMS,
+        });
+        for (const item of candidates) {
+          if (!useMediabunny.has(item.id) || mediabunnyDisabledItems.has(item.id)) continue;
+          const extractor = videoExtractors.get(item.id);
+          if (!extractor) continue;
+          const localFrame = frame - item.from;
+          const sourceStart = item.sourceStart ?? item.trimStart ?? 0;
+          const sourceFps = item.sourceFps ?? fps;
+          const speed = item.speed ?? 1;
+          const sourceTime = (sourceStart / sourceFps) + (localFrame / fps) * speed;
+          const clampedTime = Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01));
+          try {
+            await extractor.drawFrame(ctx2d, clampedTime, 0, 0, 1, 1);
+          } catch { /* best-effort fallback */ }
+        }
+      }
+    },
+
     setDomVideoElementProvider(provider: ((itemId: string) => HTMLVideoElement | null) | undefined) {
       itemRenderContext.domVideoElementProvider = provider;
     },

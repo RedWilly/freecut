@@ -3039,9 +3039,26 @@ export const VideoPreview = memo(function VideoPreview({
               }
             }
           } else {
-            // Background scrub prewarm only needs to advance decode state for
-            // nearby sources. Avoid full composition work for non-visible frames.
-            await renderer.prewarmFrame(frameToRender);
+            // Background scrub prewarm: collect eligible frames into a batch
+            // for samplesAtTimestamps() optimized pipeline, then dispatch.
+            const prewarmBatch: number[] = [frameToRender];
+            // Drain more frames from the queue while within budget and not stale
+            while (scrubPrewarmQueueRef.current.length > 0) {
+              if (scrubRequestedFrameRef.current !== null) break;
+              if (suppressScrubBackgroundPrewarmRef.current) break;
+              if (usePlaybackStore.getState().isPlaying) break;
+              if (prewarmBudgetStart > 0 && performance.now() - prewarmBudgetStart > FAST_SCRUB_PREWARM_RENDER_BUDGET_MS) break;
+              const next = scrubPrewarmQueueRef.current.shift()!;
+              scrubPrewarmQueuedSetRef.current.delete(next);
+              prewarmBatch.push(next);
+            }
+            // Batch prewarm via samplesAtTimestamps — each packet decoded at most
+            // once across the batch. Falls back to sequential drawFrame internally
+            // for sources where batch mode has been disabled.
+            await renderer.prewarmFrames(prewarmBatch);
+            for (const f of prewarmBatch) {
+              markPrewarmed(f);
+            }
           }
           if (!scrubMountedRef.current || isStale()) break;
 

@@ -29,6 +29,15 @@ export interface VideoFrameSource {
   getLastFailureKind(): VideoFrameFailureKind;
   getDimensions(): { width: number; height: number };
   getDuration(): number;
+  prewarmBatch(
+    ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+    timestamps: number[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): Promise<number>;
+  isBatchPrewarmAvailable(): boolean;
   dispose(): void;
 }
 
@@ -104,6 +113,21 @@ class SharedItemVideoSource implements VideoFrameSource {
 
   getDuration(): number {
     return this.pool.getItemDuration(this.itemId, this.src);
+  }
+
+  prewarmBatch(
+    ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+    timestamps: number[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): Promise<number> {
+    return this.pool.prewarmItemBatch(this.itemId, this.src, ctx, timestamps, x, y, width, height);
+  }
+
+  isBatchPrewarmAvailable(): boolean {
+    return this.pool.isItemBatchPrewarmAvailable(this.itemId, this.src);
   }
 
   // Shared lanes are owned/disposed by the pool.
@@ -254,6 +278,31 @@ export class SharedVideoExtractorPool {
   getItemDuration(itemId: string, src: string): number {
     const extractor = this.getExtractorForItem(itemId, src);
     return extractor?.getDuration() ?? 0;
+  }
+
+  /**
+   * Batch prewarm via the first lane's extractor. samplesAtTimestamps creates
+   * its own independent decode pipeline, so it doesn't conflict with the
+   * persistent samples() iterator used by drawFrame.
+   */
+  async prewarmItemBatch(
+    itemId: string,
+    src: string,
+    ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+    timestamps: number[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): Promise<number> {
+    const extractor = this.getExtractorForItem(itemId, src);
+    if (!extractor) return -1;
+    return extractor.prewarmBatch(ctx, timestamps, x, y, width, height);
+  }
+
+  isItemBatchPrewarmAvailable(itemId: string, src: string): boolean {
+    const extractor = this.getExtractorForItem(itemId, src);
+    return extractor?.isBatchPrewarmAvailable() ?? false;
   }
 
   dispose(): void {

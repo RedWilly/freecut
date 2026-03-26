@@ -16,6 +16,7 @@ const log = createLogger('VideoFrameExtractor');
 /** Types for dynamically imported mediabunny module */
 interface MediabunnySink {
   samples(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<MediabunnySample, void, unknown>;
+  samplesAtTimestamps(timestamps: Iterable<number> | AsyncIterable<number>): AsyncGenerator<MediabunnySample | null, void, unknown>;
 }
 
 interface MediabunnySample {
@@ -479,6 +480,92 @@ export class VideoFrameExtractor {
 
   getLastFailureKind(): 'none' | 'no-sample' | 'decode-error' {
     return this.lastFailureKind;
+  }
+
+  /**
+   * Whether samplesAtTimestamps has been disabled for this source due to
+   * decoder errors (falls back to the safe samples() streaming path).
+   */
+  private batchDisabled = false;
+
+  /**
+   * Batch-prewarm multiple timestamps using mediabunny's optimized
+   * samplesAtTimestamps() pipeline. This decodes each packet at most
+   * once when timestamps are sorted ascending.
+   *
+   * Used for background scrub prewarm where multiple nearby frames are
+   * decoded speculatively. Does NOT update the streaming samples() iterator
+   * state — the two paths are independent.
+   *
+   * Returns the number of successfully decoded frames. Returns -1 if
+   * batch mode has been disabled for this source (caller should fall back
+   * to sequential drawFrame calls).
+   */
+  async prewarmBatch(
+    ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+    timestamps: number[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): Promise<number> {
+    if (this.batchDisabled || !this.ready || !this.sink || timestamps.length === 0) {
+      return -1;
+    }
+
+    let decoded = 0;
+    try {
+      for await (const sample of this.sink.samplesAtTimestamps(timestamps)) {
+        if (!sample) continue;
+        try {
+          const videoFrame = sample.toVideoFrame();
+          if (videoFrame) {
+            const visibleRect = videoFrame.visibleRect;
+            if (
+              visibleRect
+              && Number.isFinite(visibleRect.width)
+              && Number.isFinite(visibleRect.height)
+              && visibleRect.width > 0
+              && visibleRect.height > 0
+            ) {
+              ctx.drawImage(
+                videoFrame,
+                visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height,
+                x, y, width, height,
+              );
+            } else {
+              ctx.drawImage(videoFrame, x, y, width, height);
+            }
+            videoFrame.close();
+            decoded++;
+          }
+        } finally {
+          sample.close();
+        }
+      }
+      return decoded;
+    } catch (error) {
+      // "key frame required after flush" or similar decoder error —
+      // disable batch mode for this source permanently.
+      const message = error instanceof Error ? error.message : String(error);
+      const isDecoderFlushError = /key frame|flush|InvalidStateError/i.test(message);
+      if (isDecoderFlushError) {
+        log.warn('Disabling batch prewarm for source (decoder flush error)', {
+          itemId: this.itemId,
+          error: message,
+          decoded,
+        });
+        this.batchDisabled = true;
+      }
+      return decoded > 0 ? decoded : -1;
+    }
+  }
+
+  /**
+   * Whether batch prewarm (samplesAtTimestamps) is available for this source.
+   */
+  isBatchPrewarmAvailable(): boolean {
+    return !this.batchDisabled && this.ready && this.sink !== null;
   }
 
   /**
