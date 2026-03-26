@@ -1738,6 +1738,10 @@ export async function createCompositionRenderer(
       }
       // Seek decoders to the target frame position using a 1x1 draw.
       // Run all clips in parallel — each has its own decoder lane.
+      // NOTE: localFrame may be negative for incoming transition clips whose
+      // timeline `from` is after targetFrame — the transition renderer will
+      // still render them. We allow negative localFrame and clamp sourceTime
+      // to zero so the decoder is positioned at the clip's start.
       if (targetFrame !== undefined) {
         const ctx2d = getPrewarmContext();
         if (!ctx2d) return;
@@ -1748,7 +1752,7 @@ export async function createCompositionRenderer(
           const item = videoItemsById.get(itemId);
           if (!item || item.type !== 'video') return;
           const localFrame = targetFrame - item.from;
-          if (localFrame < 0 || localFrame >= item.durationInFrames) return;
+          if (localFrame >= item.durationInFrames) return;
           const sourceStart = item.sourceStart ?? item.trimStart ?? 0;
           const sourceFps = item.sourceFps ?? fps;
           const speed = item.speed ?? 1;
