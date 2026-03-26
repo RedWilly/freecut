@@ -101,6 +101,17 @@ export type PreviewPerfSnapshot = {
   sourcePoolActiveClips: number;
   fastScrubPrewarmedSources: number;
   fastScrubPrewarmSourceEvictions: number;
+  preseekRequests: number;
+  preseekCacheHits: number;
+  preseekInflightReuses: number;
+  preseekWorkerPosts: number;
+  preseekWorkerSuccesses: number;
+  preseekWorkerFailures: number;
+  preseekWaitRequests: number;
+  preseekWaitMatches: number;
+  preseekWaitResolved: number;
+  preseekWaitTimeouts: number;
+  preseekCachedBitmaps: number;
   staleScrubOverlayDrops: number;
   scrubDroppedFrames: number;
   scrubUpdates: number;

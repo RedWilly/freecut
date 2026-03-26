@@ -15,6 +15,21 @@ const log = createLogger('DecoderPrewarm');
 const MAX_CACHED_BITMAPS_PER_SOURCE = 6;
 const PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS = 1 / 240;
 
+export interface DecoderPrewarmMetricsSnapshot {
+  requests: number;
+  cacheHits: number;
+  inflightReuses: number;
+  workerPosts: number;
+  workerSuccesses: number;
+  workerFailures: number;
+  waitRequests: number;
+  waitMatches: number;
+  waitResolved: number;
+  waitTimeouts: number;
+  cacheSources: number;
+  cacheBitmaps: number;
+}
+
 let worker: Worker | null = null;
 let requestId = 0;
 const pendingRequests = new Map<string, {
@@ -28,6 +43,21 @@ const bitmapCache = new Map<string, CachedBitmapEntry[]>();
 type InflightPreseek = {
   timestamp: number;
   promise: Promise<ImageBitmap | null>;
+};
+
+const decoderPrewarmMetrics: DecoderPrewarmMetricsSnapshot = {
+  requests: 0,
+  cacheHits: 0,
+  inflightReuses: 0,
+  workerPosts: 0,
+  workerSuccesses: 0,
+  workerFailures: 0,
+  waitRequests: 0,
+  waitMatches: 0,
+  waitResolved: 0,
+  waitTimeouts: 0,
+  cacheSources: 0,
+  cacheBitmaps: 0,
 };
 
 /** In-flight preseek promises keyed by source URL — lets the render engine await
@@ -122,6 +152,8 @@ function cachePredecodedBitmap(src: string, timestamp: number, bitmap: ImageBitm
     old?.bitmap.close();
   }
   bitmapCache.set(src, entries);
+  decoderPrewarmMetrics.cacheSources = bitmapCache.size;
+  decoderPrewarmMetrics.cacheBitmaps = [...bitmapCache.values()].reduce((sum, sourceEntries) => sum + sourceEntries.length, 0);
 }
 
 function addInflightPreseek(src: string, entry: InflightPreseek): void {
@@ -154,6 +186,7 @@ const blobByUrl = new Map<string, Blob>();
 export function backgroundPreseek(src: string, timestamp: number): Promise<ImageBitmap | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
+  decoderPrewarmMetrics.requests += 1;
 
   const cachedBitmap = getCachedPredecodedBitmap(
     src,
@@ -161,6 +194,7 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
     PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
   );
   if (cachedBitmap) {
+    decoderPrewarmMetrics.cacheHits += 1;
     return Promise.resolve(cachedBitmap);
   }
 
@@ -170,6 +204,7 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
     PRESEEK_REQUEST_REUSE_TOLERANCE_SECONDS,
   );
   if (inflightMatch) {
+    decoderPrewarmMetrics.inflightReuses += 1;
     return inflightMatch.promise;
   }
 
@@ -184,7 +219,10 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
       resolve: (bitmap) => {
         clearTimeout(timeout);
         if (bitmap) {
+          decoderPrewarmMetrics.workerSuccesses += 1;
           cachePredecodedBitmap(src, timestamp, bitmap);
+        } else {
+          decoderPrewarmMetrics.workerFailures += 1;
         }
         resolve(bitmap);
       },
@@ -192,6 +230,7 @@ export function backgroundPreseek(src: string, timestamp: number): Promise<Image
 
     // Send the blob directly to avoid slow UrlSource fetch in the worker.
     // Blobs are transferred via structured clone — fast and avoids re-fetch.
+    decoderPrewarmMetrics.workerPosts += 1;
     const cachedBlob = blobByUrl.get(src);
     if (cachedBlob) {
       w.postMessage({ type: 'preseek', id, src, timestamp, blob: cachedBlob });
@@ -241,20 +280,29 @@ export async function waitForInflightPredecodedBitmap(
   toleranceSeconds = 0.5,
   maxWaitMs = 12,
 ): Promise<ImageBitmap | null> {
+  decoderPrewarmMetrics.waitRequests += 1;
   const inflight = findMatchingInflightPreseek(src, timestamp, toleranceSeconds);
   if (!inflight) return null;
+  decoderPrewarmMetrics.waitMatches += 1;
 
   let resolved: ImageBitmap | null = null;
   if (maxWaitMs <= 0) {
     resolved = await inflight.promise;
+    if (resolved) {
+      decoderPrewarmMetrics.waitResolved += 1;
+    }
   } else {
     resolved = await new Promise<ImageBitmap | null>((resolve) => {
       const timeoutId = setTimeout(() => {
+        decoderPrewarmMetrics.waitTimeouts += 1;
         resolve(null);
       }, maxWaitMs);
 
       void inflight.promise.then((bitmap) => {
         clearTimeout(timeoutId);
+        if (bitmap) {
+          decoderPrewarmMetrics.waitResolved += 1;
+        }
         resolve(bitmap);
       }).catch(() => {
         clearTimeout(timeoutId);
@@ -288,6 +336,8 @@ export function clearPredecodedCache(src?: string): void {
     bitmapCache.clear();
     blobByUrl.clear();
   }
+  decoderPrewarmMetrics.cacheSources = bitmapCache.size;
+  decoderPrewarmMetrics.cacheBitmaps = [...bitmapCache.values()].reduce((sum, sourceEntries) => sum + sourceEntries.length, 0);
 }
 
 /**
@@ -304,4 +354,8 @@ export function disposePrewarmWorker(): void {
   pendingRequests.clear();
   inflightPreseekBySrc.clear();
   clearPredecodedCache();
+}
+
+export function getDecoderPrewarmMetricsSnapshot(): DecoderPrewarmMetricsSnapshot {
+  return { ...decoderPrewarmMetrics };
 }

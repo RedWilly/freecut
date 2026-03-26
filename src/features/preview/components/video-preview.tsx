@@ -1,5 +1,8 @@
 ﻿import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback, memo } from 'react';
-import { backgroundPreseek as workerBackgroundPreseek } from '../utils/decoder-prewarm';
+import {
+  backgroundPreseek as workerBackgroundPreseek,
+  getDecoderPrewarmMetricsSnapshot,
+} from '../utils/decoder-prewarm';
 import { Player, type PlayerRef } from '@/features/preview/deps/player-core';
 import type { CaptureOptions, PreviewQuality } from '@/shared/state/playback';
 import { usePlaybackStore } from '@/shared/state/playback';
@@ -1258,6 +1261,7 @@ export const VideoPreview = memo(function VideoPreview({
       const pendingSeekAgeMs = pendingSeekLatencyRef.current
         ? Math.max(0, seekNow - pendingSeekLatencyRef.current.startedAtMs)
         : 0;
+      const preseekMetrics = getDecoderPrewarmMetricsSnapshot();
       const snapshot: PreviewPerfSnapshot = {
         ts: Date.now(),
         unresolvedQueue: unresolvedMediaIdsRef.current.length,
@@ -1290,6 +1294,17 @@ export const VideoPreview = memo(function VideoPreview({
         sourcePoolActiveClips: stats.sourcePoolActiveClips,
         fastScrubPrewarmedSources: stats.fastScrubPrewarmedSources,
         fastScrubPrewarmSourceEvictions: stats.fastScrubPrewarmSourceEvictions,
+        preseekRequests: preseekMetrics.requests,
+        preseekCacheHits: preseekMetrics.cacheHits,
+        preseekInflightReuses: preseekMetrics.inflightReuses,
+        preseekWorkerPosts: preseekMetrics.workerPosts,
+        preseekWorkerSuccesses: preseekMetrics.workerSuccesses,
+        preseekWorkerFailures: preseekMetrics.workerFailures,
+        preseekWaitRequests: preseekMetrics.waitRequests,
+        preseekWaitMatches: preseekMetrics.waitMatches,
+        preseekWaitResolved: preseekMetrics.waitResolved,
+        preseekWaitTimeouts: preseekMetrics.waitTimeouts,
+        preseekCachedBitmaps: preseekMetrics.cacheBitmaps,
         staleScrubOverlayDrops: stats.staleScrubOverlayDrops,
         scrubDroppedFrames: stats.scrubDroppedFrames,
         scrubUpdates: stats.scrubUpdates,
@@ -4852,6 +4867,26 @@ export const VideoPreview = memo(function VideoPreview({
                       <span style={{ color: '#fbbf24' }}> {p.sourceWarmEvictions} evict</span>
                     )}
                   </div>
+
+                  {/* Preseek worker */}
+                  {(p.preseekRequests > 0 || p.preseekCachedBitmaps > 0) && (
+                    <div style={{ color: '#a1a1aa' }}>
+                      Preseek {p.preseekCacheHits + p.preseekInflightReuses}/{p.preseekRequests} hit
+                      {' '}post {p.preseekWorkerSuccesses}/{p.preseekWorkerPosts}
+                      {' '}cache {p.preseekCachedBitmaps}
+                      {p.preseekWaitMatches > 0 && (
+                        <span>
+                          {' '}wait {p.preseekWaitResolved}/{p.preseekWaitMatches}
+                        </span>
+                      )}
+                      {p.preseekWorkerFailures > 0 && (
+                        <span style={{ color: '#fbbf24' }}> {p.preseekWorkerFailures} fail</span>
+                      )}
+                      {p.preseekWaitTimeouts > 0 && (
+                        <span style={{ color: '#fbbf24' }}> {p.preseekWaitTimeouts} timeout</span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Media resolution */}
                   {(p.unresolvedQueue > 0 || p.pendingResolves > 0) && (
