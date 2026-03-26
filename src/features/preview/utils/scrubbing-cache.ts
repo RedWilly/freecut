@@ -452,16 +452,22 @@ export class ScrubbingCache {
    * Cache a fully composited frame into Tier 1 + Tier 3.
    * Call after renderFrame() completes.
    *
-   * Tier 1 (GPU) is populated synchronously from the canvas via
-   * copyExternalImageToTexture — no bitmap creation needed (<1ms).
-   * Tier 3 (RAM) uses async createImageBitmap in the background.
-   * The source canvas is NOT modified — safe for display canvases.
+   * Tier 1 (GPU) is always populated via copyExternalImageToTexture
+   * (near-free: <0.5ms CPU, GPU handles the copy asynchronously).
+   * Tier 3 (RAM) uses createImageBitmap (~2-5ms) and can be skipped
+   * during sequential forward playback where mediabunny decode is cheaper.
+   *
+   * @param gpuOnly - When true, only populate Tier 1 (GPU). Use during
+   *   sequential forward playback to avoid createImageBitmap overhead
+   *   while still building GPU cache for backward scrub coverage.
    */
-  cacheFrame(frame: number, canvas: OffscreenCanvas): void {
-    // Tier 1: GPU upload directly from canvas (synchronous, no bitmap copy)
+  cacheFrame(frame: number, canvas: OffscreenCanvas, gpuOnly = false): void {
+    // Tier 1: GPU upload directly from canvas (near-free)
     if (!this.tier1.has(frame)) {
       this.tier1.put(frame, canvas);
     }
+
+    if (gpuOnly) return;
 
     // Tier 3: RAM buffer (async bitmap creation in background)
     if (!this.tier3.has(frame)) {

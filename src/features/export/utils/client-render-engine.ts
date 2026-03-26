@@ -1518,23 +1518,22 @@ export async function createCompositionRenderer(
       // Release content canvas back to pool
       canvasPool.release(contentCanvas);
 
-      // Cache the rendered frame into Tier 1 (GPU) + Tier 3 (RAM).
-      // Skip during rapid forward skimming (frame = last+1..+3) — mediabunny
-      // sequential decode is ~1ms/frame, faster than cache write overhead.
-      // Cache on backward seeks (mediabunny stream restart = seconds), jumps,
-      // and non-sequential access where the cache actually helps.
-      // Tier 1 uploads from canvas synchronously (<1ms). Tier 3 bitmap
-      // creation runs in the background asynchronously.
+      // Cache the rendered frame. Tier 1 (GPU) is always populated because
+      // copyExternalImageToTexture is near-free (<0.5ms CPU, GPU-async).
+      // Tier 3 (RAM) uses createImageBitmap (~2-5ms) — skip during rapid
+      // forward playback where mediabunny sequential decode is faster (~1ms).
+      //
+      // Always caching to Tier 1 means backward scrubs after forward playback
+      // get GPU cache hits instead of full WASM re-decodes (50-200ms saved
+      // per frame on long-GOP video).
       if (scrubbingCache) {
         const delta = frame - lastRenderedFrame;
         const isSequentialForward = delta > 0 && delta <= 3;
         lastRenderedFrame = frame;
-        if (!isSequentialForward) {
-          if (gpuPipeline) {
-            scrubbingCache.setGpuDevice(gpuPipeline.getDevice(), canvas.width, canvas.height);
-          }
-          scrubbingCache.cacheFrame(frame, canvas);
+        if (gpuPipeline) {
+          scrubbingCache.setGpuDevice(gpuPipeline.getDevice(), canvas.width, canvas.height);
         }
+        scrubbingCache.cacheFrame(frame, canvas, isSequentialForward);
       }
     },
 
