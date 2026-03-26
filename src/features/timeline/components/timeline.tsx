@@ -28,7 +28,10 @@ import { createLogger } from '@/shared/logging/logger';
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/shared/ui/editor-layout';
 import { TRACK_SECTION_DIVIDER_HEIGHT } from '../constants';
 import { useTrackHeightResize } from '../hooks/use-track-height-resize';
-import { getMinimumTrackSectionSpacerHeight } from '../utils/track-resize';
+import {
+  getAnchoredSectionDividerOffset,
+  getTrackSectionLayout,
+} from '../utils/track-resize';
 
 const logger = createLogger('Timeline');
 
@@ -108,7 +111,6 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen);
   const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen);
   const setTimelineTracks = useTimelineStore((s) => s.setTracks);
-  const { handleTrackResizeStart, handleTrackResizeReset } = useTrackHeightResize();
 
   const setEditorPanelOpen = useCallback(
     (nextOpen: boolean) => {
@@ -152,26 +154,42 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
     (s) => (s.dragState?.isDragging && s.dragState.draggedTrackIds && s.dragState.draggedTrackIds.length > 0) ?? false
   );
 
-  const tracksContentHeight = useMemo(
-    () => visibleTracks.reduce((sum, track) => sum + track.height, 0)
-      + (hasTrackSections ? TRACK_SECTION_DIVIDER_HEIGHT : 0),
-    [hasTrackSections, visibleTracks]
-  );
-  const availableSpacerHeight = Math.max(0, trackRowsViewportHeight - tracksContentHeight);
-  const minimumSectionZoneHeight = hasTrackSections
-    ? Math.min(getMinimumTrackSectionSpacerHeight(editorLayout.timelineTracksHeaderHeight), Math.floor(availableSpacerHeight / 2))
-    : 0;
-  const maxSectionDividerOffset = Math.max(0, (availableSpacerHeight / 2) - minimumSectionZoneHeight);
-  const clampedSectionDividerOffset = Math.max(
-    -maxSectionDividerOffset,
-    Math.min(maxSectionDividerOffset, sectionDividerOffset)
-  );
-  const topSectionSpacerHeight = hasTrackSections
-    ? Math.max(0, Math.round((availableSpacerHeight / 2) + clampedSectionDividerOffset))
-    : 0;
-  const bottomSectionSpacerHeight = hasTrackSections
-    ? Math.max(0, Math.round((availableSpacerHeight / 2) - clampedSectionDividerOffset))
-    : 0;
+  const trackSectionLayout = useMemo(() => getTrackSectionLayout({
+    viewportHeight: trackRowsViewportHeight,
+    tracks: visibleTracks,
+    sectionDividerOffset,
+    trackTitleBarHeight: editorLayout.timelineTracksHeaderHeight,
+  }), [editorLayout.timelineTracksHeaderHeight, sectionDividerOffset, trackRowsViewportHeight, visibleTracks]);
+  const {
+    maximumSectionDividerOffset: maxSectionDividerOffset,
+    clampedSectionDividerOffset,
+    topSectionSpacerHeight,
+    bottomSectionSpacerHeight,
+    videoSectionHeight,
+  } = trackSectionLayout;
+  const getDividerAnchorY = useCallback(() => {
+    if (!hasTrackSections) {
+      return null;
+    }
+
+    return topSectionSpacerHeight + videoSectionHeight;
+  }, [hasTrackSections, topSectionSpacerHeight, videoSectionHeight]);
+  const syncSectionDividerAnchor = useCallback((dividerAnchorY: number, nextTracks: typeof visibleTracks) => {
+    if (!hasTrackSections) {
+      return;
+    }
+
+    setSectionDividerOffset(getAnchoredSectionDividerOffset({
+      viewportHeight: trackRowsViewportHeight,
+      tracks: nextTracks,
+      dividerAnchorY,
+      trackTitleBarHeight: editorLayout.timelineTracksHeaderHeight,
+    }));
+  }, [editorLayout.timelineTracksHeaderHeight, hasTrackSections, trackRowsViewportHeight]);
+  const { handleTrackResizeStart, handleTrackResizeReset } = useTrackHeightResize({
+    getDividerAnchorY,
+    syncSectionDividerAnchor,
+  });
   const getTrackStackOffset = useCallback((trackCount: number) => getTrackDropIndicatorTop({
     tracks: visibleTracks,
     dropIndex: trackCount,
