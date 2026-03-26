@@ -3717,6 +3717,15 @@ export const VideoPreview = memo(function VideoPreview({
         scrubDirectionRef.current = 0;
       }
 
+      // Update cache eviction hint so Tier 1/3 prefer evicting frames in the
+      // opposite scrub direction — preserves frames the user is moving toward.
+      if (targetFrame !== null && scrubRendererRef.current && 'getScrubbingCache' in scrubRendererRef.current) {
+        scrubRendererRef.current.getScrubbingCache()?.setEvictionHint(
+          targetFrame,
+          scrubDirectionRef.current,
+        );
+      }
+
       const nextSuppressBackgroundPrewarm = FAST_SCRUB_DISABLE_BACKGROUND_PREWARM_ON_BACKWARD
         && scrubDirectionRef.current < 0;
       const nextFallbackToPlayer = !forceFastScrubOverlay
