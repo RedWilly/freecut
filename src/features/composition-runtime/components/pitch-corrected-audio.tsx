@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useVideoConfig, useIsPlaying } from '../hooks/use-player-compat';
-import { interpolate, useSequenceContext } from '@/features/composition-runtime/deps/player';
+import { useSequenceContext } from '@/features/composition-runtime/deps/player';
 import { getAudioTargetTimeSeconds } from '../utils/video-timing';
 import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
 import { usePlaybackStore } from '@/features/composition-runtime/deps/stores';
 import { useTimelineStore } from '@/features/composition-runtime/deps/stores';
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
-import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
+import { getAudioClipFadeMultiplier, getAudioFadeMultiplier, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
 
 let sharedAudioContext: AudioContext | null = null;
 
@@ -45,6 +45,11 @@ interface PitchCorrectedAudioProps {
   audioFadeOutCurve?: number;
   audioFadeInCurveX?: number;
   audioFadeOutCurveX?: number;
+  clipFadeSpans?: AudioClipFadeSpan[];
+  contentStartOffsetFrames?: number;
+  contentEndOffsetFrames?: number;
+  fadeInDelayFrames?: number;
+  fadeOutLeadFrames?: number;
   /** Crossfade fade in duration in FRAMES (for transitions - overrides audioFadeIn) */
   crossfadeFadeIn?: number;
   /** Crossfade fade out duration in FRAMES (for transitions - overrides audioFadeOut) */
@@ -76,6 +81,11 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
   audioFadeOutCurve = 0,
   audioFadeInCurveX = 0.52,
   audioFadeOutCurveX = 0.52,
+  clipFadeSpans,
+  contentStartOffsetFrames = 0,
+  contentEndOffsetFrames = 0,
+  fadeInDelayFrames = 0,
+  fadeOutLeadFrames = 0,
   crossfadeFadeIn,
   crossfadeFadeOut,
   volumeMultiplier = 1,
@@ -140,72 +150,30 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
   // Calculate fade multiplier
   // Crossfade props are in frames and override normal fades when present
   // Normal fades are in seconds and need conversion
-  const fadeInFrames = crossfadeFadeIn !== undefined
-    ? Math.min(crossfadeFadeIn, durationInFrames)
-    : Math.min(effectiveFadeIn * fps, durationInFrames);
-  const fadeOutFrames = crossfadeFadeOut !== undefined
-    ? Math.min(crossfadeFadeOut, durationInFrames)
-    : Math.min(effectiveFadeOut * fps, durationInFrames);
+  const clipFadeMultiplier = clipFadeSpans
+    ? getAudioClipFadeMultiplier(frame, clipFadeSpans)
+    : getAudioFadeMultiplier({
+      frame,
+      durationInFrames,
+      fadeInFrames: effectiveFadeIn * fps,
+      fadeOutFrames: effectiveFadeOut * fps,
+      contentStartOffsetFrames,
+      contentEndOffsetFrames,
+      fadeInDelayFrames,
+      fadeOutLeadFrames,
+      fadeInCurve: preview?.audioFadeInCurve ?? audioFadeInCurve,
+      fadeOutCurve: preview?.audioFadeOutCurve ?? audioFadeOutCurve,
+      fadeInCurveX: preview?.audioFadeInCurveX ?? audioFadeInCurveX,
+      fadeOutCurveX: preview?.audioFadeOutCurveX ?? audioFadeOutCurveX,
+    });
 
-  // Check if this is a transition crossfade (uses equal-power curve to avoid volume dip)
-  const isCrossfade = crossfadeFadeIn !== undefined || crossfadeFadeOut !== undefined;
-
-  let fadeMultiplier = 1;
-  const hasFadeIn = fadeInFrames > 0;
-  const hasFadeOut = fadeOutFrames > 0;
-
-  if (hasFadeIn || hasFadeOut) {
-    const fadeOutStart = durationInFrames - fadeOutFrames;
-
-    if (isCrossfade) {
-      // Equal-power crossfade: uses sin/cos curves to maintain constant perceived loudness
-      // This prevents the volume dip that occurs with linear crossfades
-      // At midpoint: sin(45°)² + cos(45°)² = 0.5 + 0.5 = 1 (constant power)
-      if (hasFadeIn && frame < fadeInFrames) {
-        // Fade in: sin curve (0 to 1)
-        const progress = frame / fadeInFrames;
-        fadeMultiplier = Math.sin(progress * Math.PI / 2);
-      } else if (hasFadeOut && frame >= fadeOutStart) {
-        // Fade out: cos curve (1 to 0)
-        const progress = (frame - fadeOutStart) / fadeOutFrames;
-        fadeMultiplier = Math.cos(progress * Math.PI / 2);
-      }
-    } else {
-      // Regular linear fades for non-crossfade scenarios
-      if (hasFadeIn && hasFadeOut) {
-        if (fadeInFrames >= fadeOutStart) {
-          // Overlapping fades
-          const midPoint = durationInFrames / 2;
-          const peakVolume = Math.min(1, midPoint / Math.max(fadeInFrames, 1));
-          fadeMultiplier = interpolate(
-            frame,
-            [0, midPoint, durationInFrames],
-            [0, peakVolume, 0],
-            { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-          );
-        } else {
-          fadeMultiplier = interpolate(
-            frame,
-            [0, fadeInFrames, fadeOutStart, durationInFrames],
-            [0, 1, 1, 0],
-            { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-          );
-        }
-      } else if (hasFadeIn) {
-        fadeMultiplier = evaluateAudioFadeInCurve(
-          frame / fadeInFrames,
-          preview?.audioFadeInCurve ?? audioFadeInCurve,
-          preview?.audioFadeInCurveX ?? audioFadeInCurveX,
-        );
-      } else {
-        fadeMultiplier = evaluateAudioFadeOutCurve(
-          (frame - fadeOutStart) / fadeOutFrames,
-          preview?.audioFadeOutCurve ?? audioFadeOutCurve,
-          preview?.audioFadeOutCurveX ?? audioFadeOutCurveX,
-        );
-      }
-    }
-  }
+  const fadeMultiplier = clipFadeMultiplier * getAudioFadeMultiplier({
+    frame,
+    durationInFrames,
+    fadeInFrames: crossfadeFadeIn,
+    fadeOutFrames: crossfadeFadeOut,
+    useEqualPower: true,
+  });
 
   // Convert dB to linear (0 dB = unity gain = 1.0)
   // +20dB = 10x, -20dB = 0.1x, -60dB ≈ 0.001x

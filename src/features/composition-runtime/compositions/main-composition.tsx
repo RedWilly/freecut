@@ -385,12 +385,17 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                     durationInFrames={segment.durationInFrames}
                     audioFadeIn={segment.audioFadeIn}
                     audioFadeOut={segment.audioFadeOut}
-                    audioFadeInCurve={segment.audioFadeInCurve}
-                    audioFadeOutCurve={segment.audioFadeOutCurve}
-                    audioFadeInCurveX={segment.audioFadeInCurveX}
-                    audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                    crossfadeFadeIn={segment.crossfadeFadeIn}
-                    crossfadeFadeOut={segment.crossfadeFadeOut}
+                     audioFadeInCurve={segment.audioFadeInCurve}
+                     audioFadeOutCurve={segment.audioFadeOutCurve}
+                     audioFadeInCurveX={segment.audioFadeInCurveX}
+                     audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                     clipFadeSpans={segment.clipFadeSpans}
+                     contentStartOffsetFrames={segment.contentStartOffsetFrames}
+                     contentEndOffsetFrames={segment.contentEndOffsetFrames}
+                     fadeInDelayFrames={segment.fadeInDelayFrames}
+                     fadeOutLeadFrames={segment.fadeOutLeadFrames}
+                     crossfadeFadeIn={segment.crossfadeFadeIn}
+                     crossfadeFadeOut={segment.crossfadeFadeOut}
                   />
                 ) : (
                   <PitchCorrectedAudio
@@ -404,12 +409,17 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                     durationInFrames={segment.durationInFrames}
                     audioFadeIn={segment.audioFadeIn}
                     audioFadeOut={segment.audioFadeOut}
-                    audioFadeInCurve={segment.audioFadeInCurve}
-                    audioFadeOutCurve={segment.audioFadeOutCurve}
-                    audioFadeInCurveX={segment.audioFadeInCurveX}
-                    audioFadeOutCurveX={segment.audioFadeOutCurveX}
-                    crossfadeFadeIn={segment.crossfadeFadeIn}
-                    crossfadeFadeOut={segment.crossfadeFadeOut}
+                     audioFadeInCurve={segment.audioFadeInCurve}
+                     audioFadeOutCurve={segment.audioFadeOutCurve}
+                     audioFadeInCurveX={segment.audioFadeInCurveX}
+                     audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                     clipFadeSpans={segment.clipFadeSpans}
+                     contentStartOffsetFrames={segment.contentStartOffsetFrames}
+                     contentEndOffsetFrames={segment.contentEndOffsetFrames}
+                     fadeInDelayFrames={segment.fadeInDelayFrames}
+                     fadeOutLeadFrames={segment.fadeOutLeadFrames}
+                     crossfadeFadeIn={segment.crossfadeFadeIn}
+                     crossfadeFadeOut={segment.crossfadeFadeOut}
                   />
                 )}
               </Sequence>
@@ -444,6 +454,7 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                     audioFadeOutCurve={segment.audioFadeOutCurve}
                     audioFadeInCurveX={segment.audioFadeInCurveX}
                     audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                    clipFadeSpans={segment.clipFadeSpans}
                   />
                 ) : (
                   <PitchCorrectedAudio
@@ -461,6 +472,7 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                     audioFadeOutCurve={segment.audioFadeOutCurve}
                     audioFadeInCurveX={segment.audioFadeInCurveX}
                     audioFadeOutCurveX={segment.audioFadeOutCurveX}
+                    clipFadeSpans={segment.clipFadeSpans}
                   />
                 )}
               </Sequence>

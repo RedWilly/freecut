@@ -29,7 +29,7 @@ import {
   getManagedLinkedAudioTransitions,
   isCompositionAudioItem,
 } from '@/shared/utils/linked-media';
-import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
+import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
 
 const log = createLogger('CanvasAudio');
 
@@ -69,7 +69,13 @@ interface AudioSegment {
   fadeOutCurve: number;
   fadeInCurveX: number;
   fadeOutCurveX: number;
-  useEqualPowerFades: boolean;
+  contentStartOffsetFrames?: number;
+  contentEndOffsetFrames?: number;
+  fadeInDelayFrames?: number;
+  fadeOutLeadFrames?: number;
+  clipFadeSpans?: AudioClipFadeSpan[];
+  crossfadeFadeInFrames?: number;
+  crossfadeFadeOutFrames?: number;
   speed: number;             // Playback rate
   muted: boolean;
   type: 'video' | 'audio';
@@ -89,6 +95,28 @@ interface TransitionAudioEntry<TItem extends TransitionAudioItem> {
   audioCodec?: string;
   volumeKeyframes?: VolumeKeyframe[];
   itemFrom: number;
+}
+
+function buildClipFadeSpan(params: {
+  startFrame: number;
+  durationInFrames: number;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  fadeInCurve?: number;
+  fadeOutCurve?: number;
+  fadeInCurveX?: number;
+  fadeOutCurveX?: number;
+}): AudioClipFadeSpan {
+  return {
+    startFrame: params.startFrame,
+    durationInFrames: params.durationInFrames,
+    fadeInFrames: params.fadeInFrames ?? 0,
+    fadeOutFrames: params.fadeOutFrames ?? 0,
+    fadeInCurve: params.fadeInCurve ?? 0,
+    fadeOutCurve: params.fadeOutCurve ?? 0,
+    fadeInCurveX: params.fadeInCurveX ?? 0.52,
+    fadeOutCurveX: params.fadeOutCurveX ?? 0.52,
+  };
 }
 
 function getTransitionAudioTrimBefore(item: TransitionAudioItem): number {
@@ -144,11 +172,11 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
 ): AudioSegment[] {
   if (entriesById.size === 0 || transitions.length === 0) return [];
 
-  const extensionByClipId = new Map<string, { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number }>();
-  const ensureExtension = (clipId: string): { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number } => {
+  const extensionByClipId = new Map<string, { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number; fadeInDelay: number; fadeOutLead: number }>();
+  const ensureExtension = (clipId: string): { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number; fadeInDelay: number; fadeOutLead: number } => {
     const existing = extensionByClipId.get(clipId);
     if (existing) return existing;
-    const created = { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
+    const created = { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0, fadeInDelay: 0, fadeOutLead: 0 };
     extensionByClipId.set(clipId, created);
     return created;
   };
@@ -184,8 +212,10 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
     if (window.durationInFrames > 0) {
       const leftExt = ensureExtension(left.id);
       leftExt.overlapFadeOut = Math.max(leftExt.overlapFadeOut, window.durationInFrames);
+      leftExt.fadeOutLead = Math.max(leftExt.fadeOutLead, window.leftPortion);
       const rightExt = ensureExtension(right.id);
       rightExt.overlapFadeIn = Math.max(rightExt.overlapFadeIn, window.durationInFrames);
+      rightExt.fadeInDelay = Math.max(rightExt.fadeInDelay, window.rightPortion);
     }
   }
 
@@ -235,19 +265,18 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
     const speed = item.speed ?? 1;
     const sourceFps = item.sourceFps ?? fps;
     const baseTrimBefore = resolvedTrimBeforeById.get(item.id) ?? getTransitionAudioTrimBefore(item);
-    const extension = extensionByClipId.get(item.id) ?? { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
+    const extension = extensionByClipId.get(item.id) ?? { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0, fadeInDelay: 0, fadeOutLead: 0 };
     const maxBeforeBySource = speed > 0
       ? sourceToTimelineFrames(baseTrimBefore, speed, sourceFps, fps)
       : 0;
     const before = Math.max(0, Math.min(extension.before, maxBeforeBySource));
     const after = Math.max(0, extension.after);
-    const hasOverlapFade = extension.overlapFadeOut > 0 || extension.overlapFadeIn > 0;
-    const fadeIn = extension.overlapFadeIn > 0
+    const crossfadeFadeInFrames = extension.overlapFadeIn > 0
       ? extension.overlapFadeIn
-      : (before > 0 ? before : ((item.audioFadeIn ?? 0) * fps));
-    const fadeOut = extension.overlapFadeOut > 0
+      : (before > 0 ? before : undefined);
+    const crossfadeFadeOutFrames = extension.overlapFadeOut > 0
       ? extension.overlapFadeOut
-      : (after > 0 ? after : ((item.audioFadeOut ?? 0) * fps));
+      : (after > 0 ? after : undefined);
 
     expandedSegments.push({
       itemId: item.id,
@@ -259,13 +288,28 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
       sourceStartFrame: baseTrimBefore - timelineToSourceFrames(before, speed, fps, sourceFps),
       sourceFps,
       volume: (item.volume ?? 0) + entry.trackVolume,
-      fadeInFrames: fadeIn,
-      fadeOutFrames: fadeOut,
+      fadeInFrames: (item.audioFadeIn ?? 0) * fps,
+      fadeOutFrames: (item.audioFadeOut ?? 0) * fps,
       fadeInCurve: item.audioFadeInCurve ?? 0,
       fadeOutCurve: item.audioFadeOutCurve ?? 0,
       fadeInCurveX: item.audioFadeInCurveX ?? 0.52,
       fadeOutCurveX: item.audioFadeOutCurveX ?? 0.52,
-      useEqualPowerFades: before > 0 || after > 0 || hasOverlapFade,
+      contentStartOffsetFrames: before,
+      contentEndOffsetFrames: after,
+      fadeInDelayFrames: extension.fadeInDelay,
+      fadeOutLeadFrames: extension.fadeOutLead,
+      clipFadeSpans: [buildClipFadeSpan({
+        startFrame: before,
+        durationInFrames: item.durationInFrames,
+        fadeInFrames: (item.audioFadeIn ?? 0) * fps,
+        fadeOutFrames: (item.audioFadeOut ?? 0) * fps,
+        fadeInCurve: item.audioFadeInCurve,
+        fadeOutCurve: item.audioFadeOutCurve,
+        fadeInCurveX: item.audioFadeInCurveX,
+        fadeOutCurveX: item.audioFadeOutCurveX,
+      })],
+      crossfadeFadeInFrames,
+      crossfadeFadeOutFrames,
       speed,
       muted: entry.muted,
       type: entry.type,
@@ -314,7 +358,13 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
     fadeOutCurve: segment.fadeOutCurve,
     fadeInCurveX: segment.fadeInCurveX,
     fadeOutCurveX: segment.fadeOutCurveX,
-    useEqualPowerFades: segment.useEqualPowerFades,
+    contentStartOffsetFrames: segment.contentStartOffsetFrames,
+    contentEndOffsetFrames: segment.contentEndOffsetFrames,
+    fadeInDelayFrames: segment.fadeInDelayFrames,
+    fadeOutLeadFrames: segment.fadeOutLeadFrames,
+    clipFadeSpans: segment.clipFadeSpans,
+    crossfadeFadeInFrames: segment.crossfadeFadeInFrames,
+    crossfadeFadeOutFrames: segment.crossfadeFadeOutFrames,
     speed: segment.speed,
     muted: segment.muted,
     type: segment.type,
@@ -330,12 +380,19 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
     }
 
     if (canMergeContinuousBoundary(active, segment)) {
+      const activeStartFrame = active.startFrame;
       const mergedEnd = segment.startFrame + segment.durationFrames;
       active.durationFrames = mergedEnd - active.startFrame;
       active.fadeOutFrames = segment.fadeOutFrames;
       active.fadeOutCurve = segment.fadeOutCurve;
       active.fadeOutCurveX = segment.fadeOutCurveX;
-      active.useEqualPowerFades = segment.useEqualPowerFades;
+      active.contentEndOffsetFrames = segment.contentEndOffsetFrames;
+      active.fadeOutLeadFrames = segment.fadeOutLeadFrames;
+      active.crossfadeFadeOutFrames = segment.crossfadeFadeOutFrames;
+      active.clipFadeSpans = [...(active.clipFadeSpans ?? []), ...((segment.clipFadeSpans ?? []).map((span) => ({
+        ...span,
+        startFrame: span.startFrame + (segment.startFrame - activeStartFrame),
+      })))];
       active.clip = segment.clip;
       active.afterFrames = segment.afterFrames;
       continue;
@@ -448,7 +505,20 @@ function appendCompositionAudioSegments(params: {
       fadeOutCurve: subItem.audioFadeOutCurve ?? 0,
       fadeInCurveX: subItem.audioFadeInCurveX ?? 0.52,
       fadeOutCurveX: subItem.audioFadeOutCurveX ?? 0.52,
-      useEqualPowerFades: false,
+      contentStartOffsetFrames: 0,
+      contentEndOffsetFrames: 0,
+      fadeInDelayFrames: 0,
+      fadeOutLeadFrames: 0,
+      clipFadeSpans: [buildClipFadeSpan({
+        startFrame: 0,
+        durationInFrames: effectiveDuration,
+        fadeInFrames: adjustedFadeInFrames,
+        fadeOutFrames: adjustedFadeOutFrames,
+        fadeInCurve: subItem.audioFadeInCurve,
+        fadeOutCurve: subItem.audioFadeOutCurve,
+        fadeInCurveX: subItem.audioFadeInCurveX,
+        fadeOutCurveX: subItem.audioFadeOutCurveX,
+      })],
       speed,
       muted: trackMuted || subTrackMuted,
       type: subItem.type as 'video' | 'audio',
@@ -561,7 +631,20 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
           fadeOutCurve: item.audioFadeOutCurve ?? 0,
           fadeInCurveX: item.audioFadeInCurveX ?? 0.52,
           fadeOutCurveX: item.audioFadeOutCurveX ?? 0.52,
-          useEqualPowerFades: false,
+          contentStartOffsetFrames: 0,
+          contentEndOffsetFrames: 0,
+          fadeInDelayFrames: 0,
+          fadeOutLeadFrames: 0,
+          clipFadeSpans: [buildClipFadeSpan({
+            startFrame: 0,
+            durationInFrames: item.durationInFrames,
+            fadeInFrames: (item.audioFadeIn ?? 0) * fps,
+            fadeOutFrames: (item.audioFadeOut ?? 0) * fps,
+            fadeInCurve: item.audioFadeInCurve,
+            fadeOutCurve: item.audioFadeOutCurve,
+            fadeInCurveX: item.audioFadeInCurveX,
+            fadeOutCurveX: item.audioFadeOutCurveX,
+          })],
           speed: audioItem.speed ?? 1,
           muted: track.muted ?? false,
           type: 'audio',
@@ -926,32 +1009,85 @@ function applyFades(
   fadeOutCurve: number = 0,
   fadeInCurveX: number = 0.52,
   fadeOutCurveX: number = 0.52,
+  contentStartOffsetSamples: number = 0,
+  contentEndOffsetSamples: number = 0,
+  fadeInDelaySamples: number = 0,
+  fadeOutLeadSamples: number = 0,
 ): Float32Array {
   const output = new Float32Array(samples.length);
   output.set(samples);
+  const contentStart = Math.max(0, Math.min(contentStartOffsetSamples + Math.max(0, fadeInDelaySamples), output.length));
+  const contentEnd = Math.max(contentStart, output.length - Math.max(0, contentEndOffsetSamples + Math.max(0, fadeOutLeadSamples)));
+  const contentLength = Math.max(0, contentEnd - contentStart);
 
   // Apply fade in
   if (fadeInSamples > 0) {
-    for (let i = 0; i < fadeInSamples && i < output.length; i++) {
+    for (let i = 0; i < contentStart && i < output.length; i++) {
+      output[i] = 0;
+    }
+    for (let i = 0; i < fadeInSamples && i < contentLength; i++) {
+      const sampleIndex = contentStart + i;
       const progress = i / fadeInSamples;
       const gain = useEqualPower
         ? Math.sin(progress * Math.PI / 2)
         : evaluateAudioFadeInCurve(progress, fadeInCurve, fadeInCurveX);
-      output[i] = output[i]! * gain;
+      output[sampleIndex] = output[sampleIndex]! * gain;
     }
   }
 
   // Apply fade out
   if (fadeOutSamples > 0) {
-    const fadeOutStart = output.length - fadeOutSamples;
+    const fadeOutStart = Math.max(contentStart, contentEnd - fadeOutSamples);
     for (let i = 0; i < fadeOutSamples; i++) {
       const sampleIndex = fadeOutStart + i;
-      if (sampleIndex < 0 || sampleIndex >= output.length) continue;
+      if (sampleIndex < contentStart || sampleIndex >= contentEnd) continue;
 
       const progress = i / fadeOutSamples;
       const gain = useEqualPower
         ? Math.cos(progress * Math.PI / 2)
         : evaluateAudioFadeOutCurve(progress, fadeOutCurve, fadeOutCurveX);
+      output[sampleIndex] = output[sampleIndex]! * gain;
+    }
+    for (let i = contentEnd; i < output.length; i++) {
+      output[i] = 0;
+    }
+  }
+
+  return output;
+}
+
+function applyClipFadeSpans(
+  samples: Float32Array,
+  fadeSpans: AudioClipFadeSpan[] | undefined,
+  sampleRate: number,
+  fps: number,
+): Float32Array {
+  if (!fadeSpans || fadeSpans.length === 0) return samples;
+
+  const output = new Float32Array(samples.length);
+  output.set(samples);
+
+  for (const span of fadeSpans) {
+    const spanStart = Math.max(0, Math.floor((span.startFrame / fps) * sampleRate));
+    const spanEnd = Math.min(output.length, Math.floor(((span.startFrame + span.durationInFrames) / fps) * sampleRate));
+    const spanLength = Math.max(0, spanEnd - spanStart);
+    if (spanLength === 0) continue;
+
+    const fadeInSamples = Math.max(0, Math.min(spanLength, Math.floor(((span.fadeInFrames ?? 0) / fps) * sampleRate)));
+    const fadeOutSamples = Math.max(0, Math.min(spanLength, Math.floor(((span.fadeOutFrames ?? 0) / fps) * sampleRate)));
+
+    for (let i = 0; i < fadeInSamples; i++) {
+      const progress = i / Math.max(1, fadeInSamples);
+      const gain = evaluateAudioFadeInCurve(progress, span.fadeInCurve, span.fadeInCurveX);
+      output[spanStart + i] = output[spanStart + i]! * gain;
+    }
+
+    const fadeOutStart = spanEnd - fadeOutSamples;
+    for (let i = 0; i < fadeOutSamples; i++) {
+      const sampleIndex = fadeOutStart + i;
+      if (sampleIndex < spanStart || sampleIndex >= spanEnd) continue;
+      const progress = i / Math.max(1, fadeOutSamples);
+      const gain = evaluateAudioFadeOutCurve(progress, span.fadeOutCurve, span.fadeOutCurveX);
       output[sampleIndex] = output[sampleIndex]! * gain;
     }
   }
@@ -1310,6 +1446,24 @@ export async function processAudio(
       const fadeOutSamples = Math.floor(
         (segment.fadeOutFrames / fps) * decoded.sampleRate
       );
+      const crossfadeFadeInSamples = Math.floor(
+        ((segment.crossfadeFadeInFrames ?? 0) / fps) * decoded.sampleRate
+      );
+      const crossfadeFadeOutSamples = Math.floor(
+        ((segment.crossfadeFadeOutFrames ?? 0) / fps) * decoded.sampleRate
+      );
+      const contentStartOffsetSamples = Math.floor(
+        ((segment.contentStartOffsetFrames ?? 0) / fps) * decoded.sampleRate
+      );
+      const contentEndOffsetSamples = Math.floor(
+        ((segment.contentEndOffsetFrames ?? 0) / fps) * decoded.sampleRate
+      );
+      const fadeInDelaySamples = Math.floor(
+        ((segment.fadeInDelayFrames ?? 0) / fps) * decoded.sampleRate
+      );
+      const fadeOutLeadSamples = Math.floor(
+        ((segment.fadeOutLeadFrames ?? 0) / fps) * decoded.sampleRate
+      );
 
       for (let c = 0; c < processedChannels.length; c++) {
         let channelSamples = processedChannels[c]!;
@@ -1330,16 +1484,31 @@ export async function processAudio(
         }
 
         // Apply fades
-        if (fadeInSamples > 0 || fadeOutSamples > 0) {
+        if (segment.clipFadeSpans && segment.clipFadeSpans.length > 0) {
+          channelSamples = applyClipFadeSpans(channelSamples, segment.clipFadeSpans, decoded.sampleRate, fps);
+        } else if (fadeInSamples > 0 || fadeOutSamples > 0) {
           channelSamples = applyFades(
             channelSamples,
             fadeInSamples,
             fadeOutSamples,
-            segment.useEqualPowerFades,
+            false,
             segment.fadeInCurve,
             segment.fadeOutCurve,
             segment.fadeInCurveX,
             segment.fadeOutCurveX,
+            contentStartOffsetSamples,
+            contentEndOffsetSamples,
+            fadeInDelaySamples,
+            fadeOutLeadSamples,
+          );
+        }
+
+        if (crossfadeFadeInSamples > 0 || crossfadeFadeOutSamples > 0) {
+          channelSamples = applyFades(
+            channelSamples,
+            crossfadeFadeInSamples,
+            crossfadeFadeOutSamples,
+            true,
           );
         }
 

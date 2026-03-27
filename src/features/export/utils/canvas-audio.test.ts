@@ -174,16 +174,16 @@ describe('extractAudioSegments', () => {
       type: 'audio',
       startFrame: 0,
       durationFrames: 35,
-      fadeOutFrames: 10,
-      useEqualPowerFades: true,
+      fadeOutFrames: 0,
+      crossfadeFadeOutFrames: 10,
     });
     expect(segments[1]).toMatchObject({
       itemId: 'audio-2',
       type: 'audio',
       startFrame: 25,
       durationFrames: 35,
-      fadeInFrames: 10,
-      useEqualPowerFades: true,
+      fadeInFrames: 0,
+      crossfadeFadeInFrames: 10,
     });
   });
 });
