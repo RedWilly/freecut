@@ -76,10 +76,6 @@ export function needsLegacyAvTrackLayoutRepair(params: {
     return false;
   }
 
-  if (items.some((item) => item.type === 'video')) {
-    return true;
-  }
-
   const trackById = new Map(tracks.map((track) => [track.id, track]));
   return items.some((item) => {
     const track = trackById.get(item.trackId);
