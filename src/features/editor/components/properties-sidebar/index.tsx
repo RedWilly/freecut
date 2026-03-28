@@ -10,7 +10,7 @@ import { TransitionPanel } from './transition-panel';
 import { useSettingsStore } from '@/features/editor/deps/settings';
 import {
   EDITOR_LAYOUT_CSS_VALUES,
-  clampEditorSidebarWidth,
+  clampRightEditorSidebarWidth,
   getEditorLayout,
 } from '@/shared/ui/editor-layout';
 
@@ -52,7 +52,7 @@ export const PropertiesSidebar = memo(function PropertiesSidebar() {
       if (!isResizingRef.current) return;
       // Dragging left increases width for right sidebar
       const delta = startXRef.current - e.clientX;
-      const newWidth = clampEditorSidebarWidth(startWidthRef.current + delta, editorLayout);
+      const newWidth = clampRightEditorSidebarWidth(startWidthRef.current + delta, editorLayout);
       setRightSidebarWidth(newWidth);
     };
 

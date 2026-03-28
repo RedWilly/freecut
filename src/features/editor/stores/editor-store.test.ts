@@ -3,6 +3,7 @@ import { useEditorStore } from './editor-store';
 import {
   DEFAULT_EDITOR_DENSITY_PRESET,
   getEditorLayout,
+  getLeftEditorSidebarBounds,
 } from '@/shared/ui/editor-layout';
 import { useSettingsStore } from '@/features/editor/deps/settings';
 
@@ -16,10 +17,11 @@ describe('editor-store', () => {
       activePanel: null,
       leftSidebarOpen: true,
       rightSidebarOpen: true,
+      keyframeEditorOpen: false,
       activeTab: 'media',
       clipInspectorTab: 'transform',
-      sidebarWidth: editorLayout.sidebarDefaultWidth,
-      rightSidebarWidth: editorLayout.sidebarDefaultWidth,
+      sidebarWidth: editorLayout.leftSidebarDefaultWidth,
+      rightSidebarWidth: editorLayout.rightSidebarDefaultWidth,
       timelineHeight: 250,
       sourcePreviewMediaId: null,
       linkedSelectionEnabled: true,
@@ -32,6 +34,7 @@ describe('editor-store', () => {
     expect(state.activePanel).toBe(null);
     expect(state.leftSidebarOpen).toBe(true);
     expect(state.rightSidebarOpen).toBe(true);
+    expect(state.keyframeEditorOpen).toBe(false);
     expect(state.activeTab).toBe('media');
     expect(state.clipInspectorTab).toBe('transform');
     expect(state.sourcePreviewMediaId).toBe(null);
@@ -65,6 +68,19 @@ describe('editor-store', () => {
 
     useEditorStore.getState().toggleRightSidebar();
     expect(useEditorStore.getState().rightSidebarOpen).toBe(true);
+  });
+
+  it('opens the keyframe editor and reveals the left sidebar', () => {
+    useEditorStore.getState().setLeftSidebarOpen(false);
+    expect(useEditorStore.getState().keyframeEditorOpen).toBe(false);
+
+    useEditorStore.getState().toggleKeyframeEditorOpen();
+
+    expect(useEditorStore.getState().keyframeEditorOpen).toBe(true);
+    expect(useEditorStore.getState().leftSidebarOpen).toBe(true);
+
+    useEditorStore.getState().setKeyframeEditorOpen(false);
+    expect(useEditorStore.getState().keyframeEditorOpen).toBe(false);
   });
 
   it('sets active tab', () => {
@@ -133,13 +149,14 @@ describe('editor-store', () => {
   });
 
   it('reclamps sidebar widths when syncing sidebar layout', () => {
-    useEditorStore.getState().setSidebarWidth(480);
-    useEditorStore.getState().setRightSidebarWidth(480);
-
     const compactLayout = getEditorLayout('compact');
+    const compactLeftMaxWidth = getLeftEditorSidebarBounds(compactLayout).maxWidth;
+
+    useEditorStore.getState().setSidebarWidth(compactLeftMaxWidth + 100);
+    useEditorStore.getState().setRightSidebarWidth(480);
     useEditorStore.getState().syncSidebarLayout(compactLayout);
 
-    expect(useEditorStore.getState().sidebarWidth).toBe(compactLayout.sidebarMaxWidth);
-    expect(useEditorStore.getState().rightSidebarWidth).toBe(compactLayout.sidebarMaxWidth);
+    expect(useEditorStore.getState().sidebarWidth).toBe(compactLeftMaxWidth);
+    expect(useEditorStore.getState().rightSidebarWidth).toBe(compactLayout.rightSidebarMaxWidth);
   });
 });

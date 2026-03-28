@@ -26,6 +26,7 @@ import {
   MediaLibrary,
   setMediaDragData,
 } from '@/features/editor/deps/media-library';
+import { KeyframeGraphPanel } from '@/features/editor/deps/timeline-ui';
 import { TransitionsPanel } from './transitions-panel';
 import {
   createDefaultAdjustmentItem,
@@ -45,7 +46,7 @@ import { createLogger } from '@/shared/logging/logger';
 import { useSettingsStore } from '@/features/editor/deps/settings';
 import {
   EDITOR_LAYOUT_CSS_VALUES,
-  clampEditorSidebarWidth,
+  clampLeftEditorSidebarWidth,
   getEditorLayout,
 } from '@/shared/ui/editor-layout';
 
@@ -57,6 +58,9 @@ export const MediaSidebar = memo(function MediaSidebar() {
   // Use granular selectors - Zustand v5 best practice
   const leftSidebarOpen = useEditorStore((s) => s.leftSidebarOpen);
   const toggleLeftSidebar = useEditorStore((s) => s.toggleLeftSidebar);
+  const keyframeEditorOpen = useEditorStore((s) => s.keyframeEditorOpen);
+  const setKeyframeEditorOpen = useEditorStore((s) => s.setKeyframeEditorOpen);
+  const toggleKeyframeEditorOpen = useEditorStore((s) => s.toggleKeyframeEditorOpen);
   const activeTab = useEditorStore((s) => s.activeTab);
   const setActiveTab = useEditorStore((s) => s.setActiveTab);
   const sidebarWidth = useEditorStore((s) => s.sidebarWidth);
@@ -81,7 +85,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
       const delta = e.clientX - startXRef.current;
-      const newWidth = clampEditorSidebarWidth(startWidthRef.current + delta, editorLayout);
+      const newWidth = clampLeftEditorSidebarWidth(startWidthRef.current + delta, editorLayout);
       setSidebarWidth(newWidth);
     };
 
@@ -397,7 +401,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
       >
         {/* Use Activity for React 19 performance optimization - defers updates when hidden */}
         <Activity mode={leftSidebarOpen ? 'visible' : 'hidden'}>
-          <div className="h-full flex flex-col" style={{ width: sidebarWidth }}>
+          <div className="h-full min-h-0 flex flex-col" style={{ width: sidebarWidth }}>
           {/* Panel Header */}
           <div
             className="flex items-center px-3 border-b border-border flex-shrink-0"
@@ -408,13 +412,20 @@ export const MediaSidebar = memo(function MediaSidebar() {
             </span>
           </div>
 
+          <KeyframeGraphPanel
+            isOpen={keyframeEditorOpen}
+            onToggle={toggleKeyframeEditorOpen}
+            onClose={() => setKeyframeEditorOpen(false)}
+            placement="top"
+          />
+
           {/* Media Tab - Full Media Library */}
-          <div className={`flex-1 overflow-hidden ${activeTab === 'media' ? 'block' : 'hidden'}`}>
+          <div className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'media' ? 'block' : 'hidden'}`}>
             <MediaLibrary />
           </div>
 
           {/* Text Tab */}
-          <div className={`flex-1 overflow-y-auto p-3 ${activeTab === 'text' ? 'block' : 'hidden'}`}>
+          <div className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'text' ? 'block' : 'hidden'}`}>
             <div className="space-y-3">
               <button
                 draggable={true}
@@ -437,7 +448,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
           </div>
 
           {/* Shapes Tab */}
-          <div className={`flex-1 overflow-y-auto p-3 ${activeTab === 'shapes' ? 'block' : 'hidden'}`}>
+          <div className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'shapes' ? 'block' : 'hidden'}`}>
             <div className="grid grid-cols-3 gap-1.5">
                   <button
                     draggable={true}
@@ -581,7 +592,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
           </div>
 
           {/* Effects Tab */}
-          <div className={`flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}>
+          <div className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}>
             <div className="space-y-3">
               {/* Blank Adjustment Layer */}
               <button
@@ -695,7 +706,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
           </div>
 
           {/* Transitions Tab */}
-          <div className={`flex-1 overflow-hidden ${activeTab === 'transitions' ? 'block' : 'hidden'}`}>
+          <div className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'transitions' ? 'block' : 'hidden'}`}>
             <TransitionsPanel />
           </div>
           </div>

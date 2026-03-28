@@ -216,15 +216,14 @@ export const GraphPlayhead = memo(function GraphPlayhead({
 }: GraphPlayheadProps) {
   const { startFrame, endFrame, width, height } = viewport;
 
-  // Check if playhead is in visible range
-  if (frame < startFrame || frame > endFrame) return null;
-
   const graphLeft = padding.left;
   const graphTop = padding.top;
   const graphWidth = width - padding.left - padding.right;
   const graphHeight = height - padding.top - padding.bottom;
 
-  const x = graphLeft + ((frame - startFrame) / (endFrame - startFrame)) * graphWidth;
+  // Clamp playhead to visible graph area so it's always visible at the edges
+  const rawX = graphLeft + ((frame - startFrame) / (endFrame - startFrame)) * graphWidth;
+  const x = Math.max(graphLeft, Math.min(graphLeft + graphWidth, rawX));
 
   // Convert screen X to frame (clamped to valid range)
   const screenXToFrame = (screenX: number): number => {

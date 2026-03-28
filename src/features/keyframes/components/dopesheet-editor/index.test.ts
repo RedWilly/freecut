@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getFrameAxisX, getVisibleKeyframeX, KEYFRAME_EDGE_INSET } from './layout';
+import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX, KEYFRAME_EDGE_INSET } from './layout';
 
 describe('getVisibleKeyframeX', () => {
   const viewport = { startFrame: 10, endFrame: 20 };
@@ -21,5 +21,10 @@ describe('getVisibleKeyframeX', () => {
   it('uses the same inset axis for frame markers and edge keyframes', () => {
     expect(getFrameAxisX(10, viewport, 120)).toBe(KEYFRAME_EDGE_INSET);
     expect(getFrameAxisX(20, viewport, 120)).toBe(120 - KEYFRAME_EDGE_INSET);
+  });
+
+  it('clamps ruler scrubbing to the visible ruler edges', () => {
+    expect(getFrameFromAxisX(0, viewport, 120)).toBe(10);
+    expect(getFrameFromAxisX(120, viewport, 120)).toBe(20);
   });
 });

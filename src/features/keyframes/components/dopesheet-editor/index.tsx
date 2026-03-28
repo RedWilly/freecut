@@ -21,11 +21,14 @@ import {
   KeyframeMarqueeOverlay,
   type KeyframeMarqueeRect,
 } from '../keyframe-marquee';
-import type { AnimatableProperty, Keyframe, KeyframeRef } from '@/types/keyframe';
+import { ValueGraphEditor } from '../value-graph-editor';
+import type { AnimatableProperty, BezierControlPoints, Keyframe, KeyframeRef } from '@/types/keyframe';
 import { PROPERTY_LABELS } from '@/types/keyframe';
 import type { BlockedFrameRange } from '../../utils/transition-region';
 import { HOTKEY_OPTIONS } from '@/config/hotkeys';
 import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout';
+import { CompactNavigator } from './compact-navigator';
+import { normalizeKeyframeNavigatorViewport } from './compact-navigator-utils';
 import { getDopesheetRowControlState } from './row-controls';
 import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-ranges';
 import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store';
@@ -55,6 +58,8 @@ interface DopesheetEditorProps {
   height?: number;
   /** Callback when keyframe is moved */
   onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void;
+  /** Callback when bezier handles are moved in graph view */
+  onBezierHandleMove?: (ref: KeyframeRef, bezier: BezierControlPoints) => void;
   /** Callback when selection changes */
   onSelectionChange?: (keyframeIds: Set<string>) => void;
   /** Callback when property selection changes */
@@ -87,6 +92,8 @@ interface DopesheetEditorProps {
   transitionBlockedRanges?: BlockedFrameRange[];
   /** Whether the editor is disabled */
   disabled?: boolean;
+  /** Which visualization to render on the right side */
+  visualizationMode?: 'dopesheet' | 'graph';
   /** Additional class name */
   className?: string;
 }
@@ -123,12 +130,11 @@ interface MarqueeState {
   started: boolean;
 }
 
-const PROPERTY_COLUMN_WIDTH = 290;
+const PROPERTY_COLUMN_WIDTH = 224;
 const MIN_VISIBLE_FRAMES = 20;
-const DEFAULT_VISIBLE_FRAMES = 120;
 const SNAP_THRESHOLD_PX = 8;
-const ROW_HEIGHT = 36;
-const RULER_HEIGHT = 26;
+const ROW_HEIGHT = 30;
+const RULER_HEIGHT = 22;
 const ZOOM_IN_FACTOR = 0.8;
 const ZOOM_OUT_FACTOR = 1.25;
 const DRAG_THRESHOLD = 2;
@@ -200,6 +206,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   width = 600,
   height = 260,
   onKeyframeMove,
+  onBezierHandleMove,
   onSelectionChange,
   onPropertyChange,
   onActivePropertyChange,
@@ -214,14 +221,15 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
   disabled = false,
+  visualizationMode = 'dopesheet',
   className,
 }: DopesheetEditorProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const bodyTimelineRef = useRef<HTMLDivElement>(null);
+  const graphPaneRef = useRef<HTMLDivElement>(null);
   const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [timelineWidth, setTimelineWidth] = useState(0);
-  const [bodyTimelineWidth, setBodyTimelineWidth] = useState(0);
+  const [graphPaneSize, setGraphPaneSize] = useState({ width: 0, height: 0 });
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [marqueeRect, setMarqueeRect] = useState<KeyframeMarqueeRect | null>(null);
   const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({});
@@ -238,48 +246,62 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const skipNextBlurCommitPropertyRef = useRef<AnimatableProperty | null>(null);
   const skipNextHeaderFrameBlurRef = useRef<'local' | 'global' | null>(null);
   const appliedDragPreviewFramesRef = useRef<Record<string, number> | null>(null);
+  const contentFrameMax = useMemo(() => Math.max(totalFrames, 1), [totalFrames]);
+  const minViewportFrames = useMemo(
+    () => Math.max(1, Math.min(MIN_VISIBLE_FRAMES, contentFrameMax)),
+    [contentFrameMax]
+  );
+
+  const normalizeViewport = useCallback(
+    (nextViewport: Viewport) => normalizeKeyframeNavigatorViewport(nextViewport, contentFrameMax, minViewportFrames),
+    [contentFrameMax, minViewportFrames]
+  );
 
   const buildDefaultViewport = useCallback((): Viewport => {
-    return {
+    return normalizeViewport({
       startFrame: 0,
-      endFrame: Math.max(totalFrames, DEFAULT_VISIBLE_FRAMES),
-    };
-  }, [totalFrames]);
+      endFrame: contentFrameMax,
+    });
+  }, [contentFrameMax, normalizeViewport]);
 
   const [viewport, setViewport] = useState<Viewport>(() => frameViewport ?? buildDefaultViewport());
   const updateViewport = useCallback(
     (next: Viewport | ((prev: Viewport) => Viewport)) => {
       setViewport((prev) => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
+        const resolved = normalizeViewport(typeof next === 'function' ? next(prev) : next);
         if (resolved.startFrame !== prev.startFrame || resolved.endFrame !== prev.endFrame) {
           onFrameViewportChange?.(resolved);
         }
         return resolved;
       });
     },
-    [onFrameViewportChange]
+    [normalizeViewport, onFrameViewportChange]
   );
 
   useEffect(() => {
-    setViewport(frameViewport ?? buildDefaultViewport());
-  }, [buildDefaultViewport, frameViewport, selectedProperty]);
+    setViewport(frameViewport ? normalizeViewport(frameViewport) : buildDefaultViewport());
+  }, [buildDefaultViewport, frameViewport, normalizeViewport, selectedProperty]);
 
   useEffect(() => {
     if (!frameViewport) return;
     setViewport((prev) => {
+      const normalizedViewport = normalizeViewport(frameViewport);
       if (
-        prev.startFrame === frameViewport.startFrame &&
-        prev.endFrame === frameViewport.endFrame
+        prev.startFrame === normalizedViewport.startFrame &&
+        prev.endFrame === normalizedViewport.endFrame
       ) {
         return prev;
       }
-      return frameViewport;
+      return normalizedViewport;
     });
-  }, [frameViewport]);
+  }, [frameViewport, normalizeViewport]);
 
   useEffect(() => {
     const node = timelineRef.current;
-    if (!node) return;
+    if (!node) {
+      setTimelineWidth(0);
+      return;
+    }
 
     const updateWidth = () => {
       setTimelineWidth(node.clientWidth);
@@ -289,7 +311,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     const observer = new ResizeObserver(updateWidth);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [visualizationMode]);
 
   const availableProperties = useMemo(
     () => Object.keys(keyframesByProperty) as AnimatableProperty[],
@@ -306,7 +328,12 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     return availableProperties;
   }, [availableProperties, activeSelectedProperty]);
 
-  const rows = useMemo(
+  const propertyColumnProperties = useMemo(
+    () => (visualizationMode === 'graph' ? availableProperties : visibleProperties),
+    [availableProperties, visibleProperties, visualizationMode]
+  );
+
+  const sheetRows = useMemo(
     () =>
       visibleProperties.map((property) => ({
         property,
@@ -319,19 +346,37 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [visibleProperties, keyframesByProperty, currentFrame]
   );
 
+  const propertyRows = useMemo(
+    () =>
+      propertyColumnProperties.map((property) => ({
+        property,
+        keyframes: (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
+        controls: getDopesheetRowControlState(
+          (keyframesByProperty[property] ?? []).toSorted((a, b) => a.frame - b.frame),
+          currentFrame
+        ),
+      })),
+    [propertyColumnProperties, keyframesByProperty, currentFrame]
+  );
+
   useEffect(() => {
-    const node = bodyTimelineRef.current;
+    if (visualizationMode !== 'graph') return;
+
+    const node = graphPaneRef.current;
     if (!node) return;
 
-    const updateWidth = () => {
-      setBodyTimelineWidth(node.clientWidth);
+    const updateSize = () => {
+      setGraphPaneSize({
+        width: node.clientWidth,
+        height: node.clientHeight,
+      });
     };
 
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [rows.length]);
+  }, [visualizationMode, propertyRows.length]);
 
   const formatPropertyValue = useCallback((property: AnimatableProperty, value: number | undefined) => {
     if (value === undefined || Number.isNaN(value)) return '';
@@ -344,7 +389,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       let changed = false;
       const nextDrafts = { ...prev };
 
-      for (const property of visibleProperties) {
+      for (const property of propertyColumnProperties) {
         if (editingValueProperty === property) continue;
         const nextValue = formatPropertyValue(property, propertyValues[property]);
         if (nextDrafts[property] !== nextValue) {
@@ -355,24 +400,24 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
       return changed ? nextDrafts : prev;
     });
-  }, [visibleProperties, propertyValues, editingValueProperty, formatPropertyValue]);
+  }, [propertyColumnProperties, propertyValues, editingValueProperty, formatPropertyValue]);
   const rowKeyframesByProperty = useMemo(() => {
     const map = new Map<AnimatableProperty, Keyframe[]>();
-    for (const row of rows) {
+    for (const row of sheetRows) {
       map.set(row.property, row.keyframes);
     }
     return map;
-  }, [rows]);
+  }, [sheetRows]);
 
   const keyframeMetaById = useMemo(() => {
     const map = new Map<string, KeyframeMeta>();
-    for (const row of rows) {
+    for (const row of sheetRows) {
       for (const keyframe of row.keyframes) {
         map.set(keyframe.id, { property: row.property, keyframe });
       }
     }
     return map;
-  }, [rows]);
+  }, [sheetRows]);
 
   const keyframeMetaByIdRef = useRef(keyframeMetaById);
   keyframeMetaByIdRef.current = keyframeMetaById;
@@ -421,20 +466,19 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
   const visibleKeyframes = useMemo(
     () =>
-      rows.flatMap((row) =>
+      sheetRows.flatMap((row) =>
         row.keyframes.map((keyframe) => ({
           property: row.property,
           keyframe,
         }))
       ),
-    [rows]
+    [sheetRows]
   );
 
   const frameRange = Math.max(1, viewport.endFrame - viewport.startFrame);
-  const timelineFrameMax = Math.max(totalFrames, DEFAULT_VISIBLE_FRAMES) * 4;
   const fallbackTimelineWidth = Math.max(width - PROPERTY_COLUMN_WIDTH, 1);
   const effectiveTimelineWidth = Math.max(
-    bodyTimelineWidth || timelineWidth || fallbackTimelineWidth,
+    timelineWidth || fallbackTimelineWidth,
     1
   );
 
@@ -496,7 +540,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   );
   const renderedKeyframeXById = useMemo(() => {
     const positions = new Map<string, number>();
-    for (const row of rows) {
+    for (const row of sheetRows) {
       for (const keyframe of row.keyframes) {
         const x = getRenderedKeyframeX(keyframe.frame);
         if (x !== null) {
@@ -505,10 +549,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       }
     }
     return positions;
-  }, [rows, getRenderedKeyframeX]);
+  }, [sheetRows, getRenderedKeyframeX]);
   const keyframePoints = useMemo(
     () =>
-      rows.flatMap((row, rowIndex) =>
+      sheetRows.flatMap((row, rowIndex) =>
         row.keyframes.flatMap((keyframe) => {
           const x = renderedKeyframeXById.get(keyframe.id);
           if (x === undefined) return [];
@@ -519,7 +563,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           }];
         })
       ),
-    [rows, renderedKeyframeXById]
+    [sheetRows, renderedKeyframeXById]
   );
   const keyframePointsRef = useRef(keyframePoints);
   keyframePointsRef.current = keyframePoints;
@@ -555,10 +599,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       if (!node) return 0;
       const rect = node.getBoundingClientRect();
       const y = clientY - rect.top + node.scrollTop;
-      const maxY = Math.max(0, rows.length * ROW_HEIGHT);
+      const maxY = Math.max(0, sheetRows.length * ROW_HEIGHT);
       return Math.max(0, Math.min(maxY, y));
     },
-    [rows.length]
+    [sheetRows.length]
   );
 
   const ticks = useMemo(() => {
@@ -629,26 +673,26 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
   const zoomAroundFrame = useCallback(
     (centerFrame: number, factor: number) => {
-      updateViewport((prev) => {
-        const prevRange = Math.max(1, prev.endFrame - prev.startFrame);
-        const nextRange = Math.max(MIN_VISIBLE_FRAMES, Math.round(prevRange * factor));
-        const ratio = (centerFrame - prev.startFrame) / prevRange;
-        let nextStart = Math.round(centerFrame - ratio * nextRange);
-        let nextEnd = nextStart + nextRange;
+        updateViewport((prev) => {
+          const prevRange = Math.max(1, prev.endFrame - prev.startFrame);
+          const nextRange = Math.max(minViewportFrames, Math.min(contentFrameMax, Math.round(prevRange * factor)));
+          const ratio = (centerFrame - prev.startFrame) / prevRange;
+          let nextStart = Math.round(centerFrame - ratio * nextRange);
+          let nextEnd = nextStart + nextRange;
 
-        if (nextStart < 0) {
-          nextEnd -= nextStart;
-          nextStart = 0;
-        }
-        if (nextEnd > timelineFrameMax) {
-          const overflow = nextEnd - timelineFrameMax;
+          if (nextStart < 0) {
+            nextEnd -= nextStart;
+            nextStart = 0;
+          }
+        if (nextEnd > contentFrameMax) {
+          const overflow = nextEnd - contentFrameMax;
           nextStart = Math.max(0, nextStart - overflow);
-          nextEnd = timelineFrameMax;
+          nextEnd = contentFrameMax;
         }
-        return { startFrame: nextStart, endFrame: nextEnd };
+        return normalizeViewport({ startFrame: nextStart, endFrame: nextEnd });
       });
     },
-    [timelineFrameMax, updateViewport]
+    [contentFrameMax, minViewportFrames, normalizeViewport, updateViewport]
   );
 
   const panFrames = useCallback(
@@ -656,15 +700,15 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       if (deltaFrames === 0) return;
       updateViewport((prev) => {
         const range = Math.max(1, prev.endFrame - prev.startFrame);
-        const maxStart = Math.max(0, timelineFrameMax - range);
+        const maxStart = Math.max(0, contentFrameMax - range);
         const nextStart = Math.max(0, Math.min(maxStart, prev.startFrame + deltaFrames));
-        return {
+        return normalizeViewport({
           startFrame: nextStart,
           endFrame: nextStart + range,
-        };
+        });
       });
     },
-    [timelineFrameMax, updateViewport]
+    [contentFrameMax, normalizeViewport, updateViewport]
   );
 
   const resetViewport = useCallback(() => {
@@ -859,20 +903,27 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [resetHeaderFrameInputs]
   );
 
+  const activateProperty = useCallback((property: AnimatableProperty) => {
+    if (visualizationMode === 'graph') {
+      onPropertyChange?.(property);
+    }
+    onActivePropertyChange?.(property);
+  }, [onActivePropertyChange, onPropertyChange, visualizationMode]);
+
   const handleRowNavigate = useCallback(
     (property: AnimatableProperty, keyframe: Keyframe | null) => {
       if (!keyframe || !onNavigateToKeyframe) return;
-      onActivePropertyChange?.(property);
+      activateProperty(property);
       onNavigateToKeyframe(keyframe.frame);
       onSelectionChange?.(new Set([keyframe.id]));
       selectionAnchorByPropertyRef.current.set(property, keyframe.id);
     },
-    [onActivePropertyChange, onNavigateToKeyframe, onSelectionChange]
+    [activateProperty, onNavigateToKeyframe, onSelectionChange]
   );
 
   const handleRowToggleKeyframe = useCallback(
     (property: AnimatableProperty, currentKeyframes: Keyframe[]) => {
-      onActivePropertyChange?.(property);
+      activateProperty(property);
       if (currentKeyframes.length > 0) {
         if (!onRemoveKeyframes) return;
         const refs = currentKeyframes.map((keyframe) => ({
@@ -898,11 +949,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       currentFrame,
       isCurrentFrameBlocked,
       itemId,
-      onActivePropertyChange,
       onAddKeyframe,
       onRemoveKeyframes,
       onSelectionChange,
       selectedKeyframeIds,
+      activateProperty,
     ]
   );
 
@@ -911,9 +962,9 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   }, []);
 
   const handleRowAutoKeyToggle = useCallback((property: AnimatableProperty) => {
-    onActivePropertyChange?.(property);
+    activateProperty(property);
     toggleAutoKeyframeEnabled(itemId, property);
-  }, [itemId, onActivePropertyChange, toggleAutoKeyframeEnabled]);
+  }, [activateProperty, itemId, toggleAutoKeyframeEnabled]);
 
   const handleRowValueCommit = useCallback(
     (property: AnimatableProperty, options?: { allowCreate?: boolean }) => {
@@ -1165,8 +1216,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   );
 
   useEffect(() => {
+    if (!onKeyframeMove) return;
+
     const handlePointerMove = (event: PointerEvent) => {
-      if (disabled || !onKeyframeMove) return;
+      if (disabled) return;
       const dragState = dragStateRef.current;
       if (!dragState) return;
       if (dragState.pointerId !== event.pointerId) return;
@@ -1391,7 +1444,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     ]
   );
 
-  const playheadLeft = frameToX(currentFrame);
+  const playheadLeft = Math.max(0, Math.min(effectiveTimelineWidth - 1, frameToX(currentFrame)));
+  const graphDisplayProperty = useMemo(
+    () => activeSelectedProperty ?? availableProperties[0] ?? null,
+    [activeSelectedProperty, availableProperties]
+  );
   const rulerTickElements = useMemo(
     () =>
       ticks.map((frame) => (
@@ -1407,153 +1464,180 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       )),
     [ticks, frameToX]
   );
-  const rowElements = useMemo(
-    () =>
-      rows.map((row) => (
-        <div key={row.property} className="grid border-b border-border/60" style={{ ...propertyGridStyle, height: ROW_HEIGHT }}>
-          <div
-            className={cn(
-              'px-2 flex items-center gap-2 bg-muted/10',
-              row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10'
-            )}
-          >
+  const renderPropertyRowContent = useCallback(
+    (row: (typeof propertyRows)[number]) => (
+      <div
+        className={cn(
+          'h-full px-1 flex items-center gap-1 bg-muted/10',
+          row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10',
+          visualizationMode === 'graph' && graphDisplayProperty === row.property && 'bg-accent/40',
+          visualizationMode === 'graph' && 'cursor-pointer'
+        )}
+        onClick={visualizationMode === 'graph' ? () => activateProperty(row.property) : undefined}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            'h-[18px] w-[18px] flex-shrink-0 p-0 text-muted-foreground hover:text-foreground',
+            autoKeyEnabledByProperty[row.property] &&
+              'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+          )}
+          onClick={() => handleRowAutoKeyToggle(row.property)}
+          disabled={disabled || !onPropertyValueCommit}
+          title={
+            autoKeyEnabledByProperty[row.property]
+              ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
+              : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+          }
+          aria-label={
+            autoKeyEnabledByProperty[row.property]
+              ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
+              : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+          }
+          aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
+        >
+          <Timer className="h-2.5 w-2.5" />
+        </Button>
+        <div className="min-w-0 flex-1 truncate text-[10px] font-medium leading-none text-foreground">
+          {PROPERTY_LABELS[row.property]}
+        </div>
+        <div className="ml-auto flex items-center gap-0.5">
+          <Input
+            type="number"
+            value={valueDrafts[row.property] ?? ''}
+            onChange={(event) => handleRowValueChange(row.property, event.target.value)}
+            onFocus={() => {
+              activateProperty(row.property);
+              setEditingValueProperty(row.property);
+            }}
+            onBlur={() => {
+              if (skipNextBlurCommitPropertyRef.current === row.property) {
+                skipNextBlurCommitPropertyRef.current = null;
+              } else {
+                handleRowValueCommit(row.property, {
+                  allowCreate: autoKeyEnabledByProperty[row.property] ?? false,
+                });
+              }
+              setEditingValueProperty((current) => (current === row.property ? null : current));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                skipNextBlurCommitPropertyRef.current = row.property;
+                handleRowValueCommit(row.property, { allowCreate: true });
+                setEditingValueProperty((current) => (current === row.property ? null : current));
+                event.currentTarget.blur();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                skipNextBlurCommitPropertyRef.current = row.property;
+                setValueDrafts((prev) => ({
+                  ...prev,
+                  [row.property]: formatPropertyValue(row.property, propertyValues[row.property]),
+                }));
+                setEditingValueProperty((current) => (current === row.property ? null : current));
+                event.currentTarget.blur();
+              }
+            }}
+            step={PROPERTY_VALUE_RANGES[row.property].decimals === 0 ? 1 : 0.1}
+            min={PROPERTY_VALUE_RANGES[row.property].min}
+            max={PROPERTY_VALUE_RANGES[row.property].max}
+            inputMode="decimal"
+            className="h-[18px] w-[58px] border-border/70 bg-background/85 px-1 text-right text-[10px] tabular-nums"
+            disabled={
+              disabled ||
+              !onPropertyValueCommit ||
+              (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
+            }
+            aria-label={`${PROPERTY_LABELS[row.property]} value at playhead`}
+          />
+          <div className="flex items-center gap-0 rounded-sm border border-border/70 bg-background/85 px-[1px]">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-[18px] w-[18px] p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
+              disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
+              title={`Previous ${PROPERTY_LABELS[row.property]} keyframe`}
+            >
+              <ChevronLeft className="h-2.5 w-2.5" />
+            </Button>
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className={cn(
-                'h-5 w-5 flex-shrink-0 p-0 text-muted-foreground hover:text-foreground',
-                autoKeyEnabledByProperty[row.property] &&
-                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+                'h-[18px] w-[18px] p-0 hover:bg-transparent',
+                row.controls.hasKeyframeAtCurrentFrame
+                  ? 'text-primary hover:text-primary'
+                  : 'text-muted-foreground hover:text-foreground',
+                isCurrentFrameBlocked &&
+                  !row.controls.hasKeyframeAtCurrentFrame &&
+                  'opacity-40 cursor-not-allowed'
               )}
-              onClick={() => handleRowAutoKeyToggle(row.property)}
-              disabled={disabled || !onPropertyValueCommit}
+              onClick={() => handleRowToggleKeyframe(row.property, row.controls.currentKeyframes)}
+              disabled={
+                disabled ||
+                (!row.controls.hasKeyframeAtCurrentFrame &&
+                  (isCurrentFrameBlocked || !onAddKeyframe))
+              }
               title={
-                autoKeyEnabledByProperty[row.property]
-                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+                row.controls.hasKeyframeAtCurrentFrame
+                  ? `Remove ${PROPERTY_LABELS[row.property]} keyframe at playhead`
+                  : `Toggle ${PROPERTY_LABELS[row.property]} keyframe at playhead`
               }
-              aria-label={
-                autoKeyEnabledByProperty[row.property]
-                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
-              }
-              aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
             >
-              <Timer className="h-3 w-3" />
-            </Button>
-            <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-              {PROPERTY_LABELS[row.property]}
-            </div>
-            <div className="flex items-center gap-1 ml-auto">
-              <Input
-                type="number"
-                value={valueDrafts[row.property] ?? ''}
-                onChange={(event) => handleRowValueChange(row.property, event.target.value)}
-                onFocus={() => {
-                  onActivePropertyChange?.(row.property);
-                  setEditingValueProperty(row.property);
-                }}
-                onBlur={() => {
-                  if (skipNextBlurCommitPropertyRef.current === row.property) {
-                    skipNextBlurCommitPropertyRef.current = null;
-                  } else {
-                    handleRowValueCommit(row.property, {
-                      allowCreate: autoKeyEnabledByProperty[row.property] ?? false,
-                    });
-                  }
-                  setEditingValueProperty((current) => (current === row.property ? null : current));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    skipNextBlurCommitPropertyRef.current = row.property;
-                    handleRowValueCommit(row.property, { allowCreate: true });
-                    setEditingValueProperty((current) => (current === row.property ? null : current));
-                    event.currentTarget.blur();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    skipNextBlurCommitPropertyRef.current = row.property;
-                    setValueDrafts((prev) => ({
-                      ...prev,
-                      [row.property]: formatPropertyValue(row.property, propertyValues[row.property]),
-                    }));
-                    setEditingValueProperty((current) => (current === row.property ? null : current));
-                    event.currentTarget.blur();
-                  }
-                }}
-                step={PROPERTY_VALUE_RANGES[row.property].decimals === 0 ? 1 : 0.1}
-                min={PROPERTY_VALUE_RANGES[row.property].min}
-                max={PROPERTY_VALUE_RANGES[row.property].max}
-                inputMode="decimal"
-                className="h-6 w-[82px] border-border/70 bg-background/85 px-1.5 text-[11px]"
-                disabled={
-                  disabled ||
-                  !onPropertyValueCommit ||
-                  (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
-                }
-                aria-label={`${PROPERTY_LABELS[row.property]} value at playhead`}
-              />
-              <div className="flex items-center gap-0.5 rounded-md border border-border/70 bg-background/85 p-0.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
-                disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
-                title={`Previous ${PROPERTY_LABELS[row.property]} keyframe`}
-              >
-                <ChevronLeft className="h-3 w-3" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
+              <span
                 className={cn(
-                  'h-5 w-5 p-0 hover:bg-transparent',
+                  'block h-2 w-2 rotate-45 border transition-colors',
                   row.controls.hasKeyframeAtCurrentFrame
-                    ? 'text-primary hover:text-primary'
-                    : 'text-muted-foreground hover:text-foreground',
-                  isCurrentFrameBlocked &&
-                    !row.controls.hasKeyframeAtCurrentFrame &&
-                    'opacity-40 cursor-not-allowed'
+                    ? 'border-primary bg-primary'
+                    : 'border-current bg-transparent'
                 )}
-                onClick={() => handleRowToggleKeyframe(row.property, row.controls.currentKeyframes)}
-                disabled={
-                  disabled ||
-                  (!row.controls.hasKeyframeAtCurrentFrame &&
-                    (isCurrentFrameBlocked || !onAddKeyframe))
-                }
-                title={
-                  row.controls.hasKeyframeAtCurrentFrame
-                    ? `Remove ${PROPERTY_LABELS[row.property]} keyframe at playhead`
-                    : `Toggle ${PROPERTY_LABELS[row.property]} keyframe at playhead`
-                }
-              >
-                <span
-                  className={cn(
-                    'block h-2.5 w-2.5 rotate-45 border transition-colors',
-                    row.controls.hasKeyframeAtCurrentFrame
-                      ? 'border-primary bg-primary'
-                      : 'border-current bg-transparent'
-                  )}
-                />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
-                disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
-                title={`Next ${PROPERTY_LABELS[row.property]} keyframe`}
-              >
-                <ChevronRight className="h-3 w-3" />
-              </Button>
-              </div>
-            </div>
+              />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-[18px] w-[18px] p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
+              disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
+              title={`Next ${PROPERTY_LABELS[row.property]} keyframe`}
+            >
+              <ChevronRight className="h-2.5 w-2.5" />
+            </Button>
           </div>
+        </div>
+      </div>
+    ),
+    [
+      activateProperty,
+      autoKeyEnabledByProperty,
+      disabled,
+      formatPropertyValue,
+      graphDisplayProperty,
+      handleRowAutoKeyToggle,
+      handleRowNavigate,
+      handleRowToggleKeyframe,
+      handleRowValueChange,
+      handleRowValueCommit,
+      isCurrentFrameBlocked,
+      onAddKeyframe,
+      onNavigateToKeyframe,
+      onPropertyValueCommit,
+      propertyValues,
+      valueDrafts,
+      visualizationMode,
+    ]
+  );
+  const rowElements = useMemo(
+    () =>
+      sheetRows.map((row) => (
+        <div key={row.property} className="grid border-b border-border/60" style={{ ...propertyGridStyle, height: ROW_HEIGHT }}>
+          {renderPropertyRowContent(row)}
           <div
             className="relative border-l border-border/60 overflow-hidden"
             onPointerDown={(event) => handleRowPointerDown(row.property, event)}
@@ -1586,12 +1670,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                   key={keyframe.id}
                   ref={(node) => setKeyframeButtonRef(keyframe.id, node)}
                   type="button"
-                  className={cn(
-                    'absolute w-3 h-3 -ml-1.5 -mt-1.5 rotate-45 border z-10',
-                    selected
-                      ? 'bg-orange-500 border-orange-50 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                      : 'bg-orange-500 border-transparent hover:bg-orange-400'
-                  )}
+                  className="group absolute z-10 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center"
                   style={{
                     left: renderedX,
                     top: '50%',
@@ -1601,42 +1680,46 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                   }
                   onClick={(event) => event.stopPropagation()}
                   aria-label={`Keyframe at frame ${keyframe.frame}`}
-                />
+                >
+                  <span
+                    className={cn(
+                      'pointer-events-none block h-2 w-2 rotate-45 border transition-colors',
+                      selected
+                        ? 'border-orange-50 bg-orange-500 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
+                        : 'border-transparent bg-orange-500 group-hover:bg-orange-400'
+                    )}
+                  />
+                </button>
               );
             })}
           </div>
         </div>
       )),
     [
-      rows,
+      sheetRows,
       propertyGridStyle,
-      disabled,
-      autoKeyEnabledByProperty,
-      formatPropertyValue,
       handleRowPointerDown,
-      handleRowAutoKeyToggle,
-      handleRowNavigate,
-      handleRowToggleKeyframe,
-      handleRowValueChange,
-      handleRowValueCommit,
-      isCurrentFrameBlocked,
-      onActivePropertyChange,
-      onAddKeyframe,
-      onNavigateToKeyframe,
-      onPropertyValueCommit,
-      propertyValues,
+      renderPropertyRowContent,
       ticks,
       frameToX,
       transitionBlockedRanges,
-      valueDrafts,
       selectedKeyframeIds,
       handleKeyframePointerDown,
       setKeyframeButtonRef,
     ]
   );
+  const propertyColumnElements = useMemo(
+    () =>
+      propertyRows.map((row) => (
+        <div key={row.property} className="border-b border-border/60" style={{ height: ROW_HEIGHT }}>
+          {renderPropertyRowContent(row)}
+        </div>
+      )),
+    [propertyRows, renderPropertyRowContent]
+  );
 
   return (
-    <div className={cn('flex flex-col gap-1 h-full overflow-hidden', className)} style={{ height, width }}>
+    <div className={cn('flex h-full flex-col gap-0.5 overflow-hidden', className)} style={{ height, width }}>
       <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
         <div className="flex items-center gap-2">
           <Select
@@ -1787,54 +1870,140 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           'border border-border rounded-md flex-1 min-h-0 overflow-hidden relative',
           disabled && 'opacity-60 pointer-events-none'
         )}
-        onWheel={handleWheel}
+        onWheel={visualizationMode === 'dopesheet' ? handleWheel : undefined}
       >
-        <div
-          data-testid="dopesheet-playhead-clip"
-          className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-          style={{ left: PROPERTY_COLUMN_WIDTH }}
-        >
-          <div
-            data-testid="dopesheet-playhead-line"
-            className="absolute top-0 bottom-0 w-px bg-primary/80"
-            style={{ left: playheadLeft }}
-          />
-        </div>
-        <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
-          <div className="px-2 flex items-center text-[11px] text-muted-foreground font-medium" style={{ height: RULER_HEIGHT }}>
-            Property
-          </div>
-          <div
-            ref={timelineRef}
-            className="relative border-l border-border cursor-ew-resize overflow-hidden"
-            style={{ height: RULER_HEIGHT }}
-            onPointerDown={handleRulerPointerDown}
-            onPointerMove={handleRulerPointerMove}
-            onPointerUp={handleRulerPointerUp}
-            onPointerCancel={handleRulerPointerUp}
-          >
-            {rulerTickElements}
-          </div>
-        </div>
-
-        <div ref={scrollAreaRef} className="overflow-auto h-[calc(100%-24px)]">
-          {rows.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              No keyframes to display
+        {visualizationMode === 'graph' ? (
+          <>
+            <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
+              <div className="px-1 flex items-center text-[10px] font-medium text-muted-foreground" style={{ height: RULER_HEIGHT }}>
+                Property
+              </div>
+              <div
+                data-testid="dopesheet-ruler"
+                ref={timelineRef}
+                className="relative border-l border-border cursor-ew-resize overflow-hidden"
+                style={{ height: RULER_HEIGHT }}
+                onPointerDown={handleRulerPointerDown}
+                onPointerMove={handleRulerPointerMove}
+                onPointerUp={handleRulerPointerUp}
+                onPointerCancel={handleRulerPointerUp}
+              >
+                {rulerTickElements}
+              </div>
             </div>
-          ) : (
-            <div ref={bodyTimelineRef} className="relative">
-              {rowElements}
-              {marqueeRect && !marqueeJustEndedRef.current && (
-                <KeyframeMarqueeOverlay
-                  rect={{
-                    ...marqueeRect,
-                    x: PROPERTY_COLUMN_WIDTH + marqueeRect.x,
-                  }}
-                />
+
+            {propertyRows.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                No keyframes to display
+              </div>
+            ) : (
+              <div className="flex min-h-0" style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}>
+                <div className="flex-shrink-0 overflow-auto" style={{ width: PROPERTY_COLUMN_WIDTH }}>
+                  {propertyColumnElements}
+                </div>
+                <div ref={graphPaneRef} className="min-w-0 flex-1 border-l border-border/60">
+                  {graphPaneSize.width > 0 && graphPaneSize.height > 0 && graphDisplayProperty ? (
+                    <ValueGraphEditor
+                      frameViewport={viewport}
+                      onFrameViewportChange={updateViewport}
+                      itemId={itemId}
+                      keyframesByProperty={keyframesByProperty}
+                      selectedProperty={graphDisplayProperty}
+                      selectedKeyframeIds={selectedKeyframeIds}
+                      currentFrame={currentFrame}
+                      totalFrames={totalFrames}
+                      width={graphPaneSize.width}
+                      height={graphPaneSize.height}
+                      onKeyframeMove={onKeyframeMove}
+                      onBezierHandleMove={onBezierHandleMove}
+                      onSelectionChange={onSelectionChange}
+                      onPropertyChange={onPropertyChange}
+                      onScrub={onScrub}
+                      onScrubEnd={onScrubEnd}
+                      onDragStart={onDragStart}
+                      onDragEnd={onDragEnd}
+                      onAddKeyframe={onAddKeyframe}
+                      onRemoveKeyframes={onRemoveKeyframes}
+                      onNavigateToKeyframe={onNavigateToKeyframe}
+                      transitionBlockedRanges={transitionBlockedRanges}
+                      snapEnabled={snapEnabled}
+                      onSnapEnabledChange={setSnapEnabled}
+                      showToolbar={false}
+                      showKeyboardHints={false}
+                      borderless
+                    />
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div
+              data-testid="dopesheet-playhead-clip"
+              className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
+              style={{ left: PROPERTY_COLUMN_WIDTH }}
+            >
+              <div
+                data-testid="dopesheet-playhead-line"
+                className="absolute top-0 bottom-0 w-px bg-primary/80"
+                style={{ left: playheadLeft }}
+              />
+            </div>
+            <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
+              <div className="px-1 flex items-center text-[10px] font-medium text-muted-foreground" style={{ height: RULER_HEIGHT }}>
+                Property
+              </div>
+              <div
+                data-testid="dopesheet-ruler"
+                ref={timelineRef}
+                className="relative border-l border-border cursor-ew-resize overflow-hidden"
+                style={{ height: RULER_HEIGHT }}
+                onPointerDown={handleRulerPointerDown}
+                onPointerMove={handleRulerPointerMove}
+                onPointerUp={handleRulerPointerUp}
+                onPointerCancel={handleRulerPointerUp}
+              >
+                {rulerTickElements}
+              </div>
+            </div>
+
+            <div ref={scrollAreaRef} className="overflow-auto" style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}>
+              {sheetRows.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                  No keyframes to display
+                </div>
+              ) : (
+                <div className="relative">
+                  {rowElements}
+                  {marqueeRect && !marqueeJustEndedRef.current && (
+                    <KeyframeMarqueeOverlay
+                      rect={{
+                        ...marqueeRect,
+                        x: PROPERTY_COLUMN_WIDTH + marqueeRect.x,
+                      }}
+                    />
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </>
+        )}
+      </div>
+      <div className="grid" style={propertyGridStyle}>
+        <div
+          data-testid="keyframe-navigator-property-column"
+          className="h-5 border-t border-r border-border/60 bg-background/80"
+        />
+        <div data-testid="keyframe-navigator-viewport-column">
+          <CompactNavigator
+            viewport={viewport}
+            currentFrame={currentFrame}
+            contentFrameMax={contentFrameMax}
+            minVisibleFrames={minViewportFrames}
+            disabled={disabled}
+            onViewportChange={updateViewport}
+          />
         </div>
       </div>
     </div>

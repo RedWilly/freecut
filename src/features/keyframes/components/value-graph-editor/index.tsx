@@ -74,6 +74,16 @@ interface ValueGraphEditorProps {
   onNavigateToKeyframe?: (frame: number) => void;
   /** Transition-blocked frame ranges (keyframes cannot be placed here) */
   transitionBlockedRanges?: BlockedFrameRange[];
+  /** Controls whether snapping is enabled */
+  snapEnabled?: boolean;
+  /** Callback when snapping changes */
+  onSnapEnabledChange?: (enabled: boolean) => void;
+  /** Whether to render the internal toolbar */
+  showToolbar?: boolean;
+  /** Whether to render the drag hint footer */
+  showKeyboardHints?: boolean;
+  /** Whether to remove the default graph border/radius */
+  borderless?: boolean;
   /** Whether the editor is disabled */
   disabled?: boolean;
   /** Additional class name */
@@ -107,6 +117,11 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   onRemoveKeyframes,
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
+  snapEnabled: controlledSnapEnabled,
+  onSnapEnabledChange,
+  showToolbar = true,
+  showKeyboardHints = true,
+  borderless = false,
   disabled = false,
   className,
 }: ValueGraphEditorProps) {
@@ -119,8 +134,8 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   
   // Calculate heights for layout
   // Toolbar: ~28px (min-h-7), gaps: ~4px (gap-1)
-  const toolbarHeight = 28;
-  const gaps = 4; // gap-1 = 4px
+  const toolbarHeight = showToolbar ? 28 : 0;
+  const gaps = showToolbar ? 4 : 0;
   const totalFixedHeight = toolbarHeight + gaps;
   const graphHeight = Math.max(60, height - totalFixedHeight);
   const graphAreaWidth = width - padding.left - padding.right;
@@ -176,7 +191,15 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   );
   
   // Snapping state
-  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [internalSnapEnabled, setInternalSnapEnabled] = useState(true);
+  const snapEnabled = controlledSnapEnabled ?? internalSnapEnabled;
+
+  const handleSnapEnabledChange = useCallback((enabled: boolean) => {
+    if (controlledSnapEnabled === undefined) {
+      setInternalSnapEnabled(enabled);
+    }
+    onSnapEnabledChange?.(enabled);
+  }, [controlledSnapEnabled, onSnapEnabledChange]);
 
   // Update viewport when keyframes or property changes
   useEffect(() => {
@@ -565,7 +588,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
 
   // Custom background click that respects scrubbing state
   const handleGraphBackgroundClick = useCallback(
-    (event: React.MouseEvent) => {
+    (event: React.MouseEvent<SVGRectElement>) => {
       // Don't deselect if we just finished scrubbing
       if (isScrrubbingRef.current) return;
       handleBackgroundClick(event);
@@ -590,9 +613,13 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   }, []);
 
   return (
-    <div className={cn('flex flex-col gap-1 h-full overflow-hidden', className)} style={{ height }}>
+    <div
+      className={cn('flex h-full flex-col overflow-hidden', showToolbar ? 'gap-1' : 'gap-0', className)}
+      style={{ height }}
+    >
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
+      {showToolbar && (
+        <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
         <div className="flex items-center gap-2">
           {/* Property selector */}
           <Select
@@ -704,7 +731,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
                   "h-7 w-7 p-0",
                   snapEnabled && "bg-primary text-primary-foreground hover:bg-primary/90"
                 )}
-                onClick={() => setSnapEnabled(!snapEnabled)}
+                onClick={() => handleSnapEnabledChange(!snapEnabled)}
                 disabled={disabled}
               >
                 <Magnet className="h-3.5 w-3.5" />
@@ -815,7 +842,8 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
             <TooltipContent side="bottom">Reset view</TooltipContent>
           </Tooltip>
         </div>
-      </div>
+        </div>
+      )}
 
       {/* Graph */}
       <svg
@@ -823,7 +851,8 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
         width={width}
         height={graphHeight}
         className={cn(
-          'border border-border rounded-md flex-shrink-0',
+          'flex-shrink-0',
+          !borderless && 'border border-border rounded-md',
           disabled && 'opacity-50 pointer-events-none'
         )}
         onPointerMove={handlePointerMove}
@@ -953,7 +982,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
       </svg>
 
       {/* Keyboard hints (shows when dragging) */}
-      {isDragging && dragState?.type === 'keyframe' && (
+      {showKeyboardHints && isDragging && dragState?.type === 'keyframe' && (
         <div className="text-xs text-muted-foreground text-center space-x-3">
           <span><kbd className="px-1 py-0.5 bg-muted rounded text-[10px]">Shift</kbd> constrain axis</span>
           <span><kbd className="px-1 py-0.5 bg-muted rounded text-[10px]">Alt</kbd> fine adjust</span>

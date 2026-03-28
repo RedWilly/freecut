@@ -12,6 +12,7 @@ export { useItemsStore } from '../stores/items-store';
 export { useKeyframesStore } from '../stores/keyframes-store';
 export { Timeline } from '../components/timeline';
 export { BentoLayoutDialog } from '../components/bento-layout-dialog';
+export { KeyframeGraphPanel } from '../components/keyframe-graph-panel';
 export { useTimelineShortcuts } from '../hooks/use-timeline-shortcuts';
 export { useTransitionBreakageNotifications } from '../hooks/use-transition-breakage-notifications';
 export { findNearestAvailableSpace } from '../utils/collision-utils';

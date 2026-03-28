@@ -78,7 +78,6 @@ export const HOTKEYS = {
   TOGGLE_KEYFRAME_EDITOR: 'mod+shift+a',
   KEYFRAME_EDITOR_GRAPH: '1',
   KEYFRAME_EDITOR_DOPESHEET: '2',
-  KEYFRAME_EDITOR_SPLIT: '3',
 
   // Source Monitor
   MARK_IN: 'i',
@@ -336,7 +335,6 @@ export const HOTKEY_DESCRIPTIONS: Record<HotkeyKey, string> = {
   TOGGLE_KEYFRAME_EDITOR: 'Toggle keyframe editor panel',
   KEYFRAME_EDITOR_GRAPH: 'Switch keyframe editor to graph view',
   KEYFRAME_EDITOR_DOPESHEET: 'Switch keyframe editor to dopesheet view',
-  KEYFRAME_EDITOR_SPLIT: 'Switch keyframe editor to split view',
 
   // Source Monitor
   MARK_IN: 'Mark In point',

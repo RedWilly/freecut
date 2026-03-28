@@ -50,9 +50,9 @@ interface TimelineHeaderProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomToFit?: () => void;
-  /** Whether the keyframe editor tab is active in the bottom editor panel */
+  /** Whether the docked keyframe editor is open */
   isKeyframePanelOpen?: boolean;
-  /** Callback to toggle/open the keyframe editor tab */
+  /** Callback to toggle/open the keyframe editor */
   onToggleKeyframePanel?: () => void;
   /** Whether the color scopes tab is active in the bottom editor panel */
   isScopesPanelOpen?: boolean;

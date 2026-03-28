@@ -94,7 +94,6 @@ export const HOTKEY_EDITOR_SECTIONS: readonly HotkeyEditorSection[] = [
       { label: 'Clear all keyframes from selected items', keys: ['CLEAR_KEYFRAMES'] },
       { label: 'Switch keyframe editor to graph view', keys: ['KEYFRAME_EDITOR_GRAPH'] },
       { label: 'Switch keyframe editor to dopesheet view', keys: ['KEYFRAME_EDITOR_DOPESHEET'] },
-      { label: 'Switch keyframe editor to split view', keys: ['KEYFRAME_EDITOR_SPLIT'] },
     ],
   },
   {

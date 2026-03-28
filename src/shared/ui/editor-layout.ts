@@ -11,9 +11,12 @@ export const EDITOR_DENSITY_PRESETS = {
     toolbarHeight: 56,
     sidebarRailWidth: 48,
     sidebarHeaderHeight: 40,
-    sidebarDefaultWidth: 320,
-    sidebarMinWidth: 320,
-    sidebarMaxWidth: 500,
+    leftSidebarDefaultWidth: 360,
+    leftSidebarMinWidth: 240,
+    leftSidebarMaxWidth: 680,
+    rightSidebarDefaultWidth: 320,
+    rightSidebarMinWidth: 320,
+    rightSidebarMaxWidth: 500,
     sidebarRevealToggleHeight: 80,
     previewPadding: 48,
     previewSplitHeaderHeight: 36,
@@ -35,9 +38,12 @@ export const EDITOR_DENSITY_PRESETS = {
     toolbarHeight: 48,
     sidebarRailWidth: 44,
     sidebarHeaderHeight: 36,
-    sidebarDefaultWidth: 288,
-    sidebarMinWidth: 280,
-    sidebarMaxWidth: 420,
+    leftSidebarDefaultWidth: 320,
+    leftSidebarMinWidth: 240,
+    leftSidebarMaxWidth: 560,
+    rightSidebarDefaultWidth: 288,
+    rightSidebarMinWidth: 280,
+    rightSidebarMaxWidth: 420,
     sidebarRevealToggleHeight: 72,
     previewPadding: 32,
     previewSplitHeaderHeight: 32,
@@ -59,6 +65,8 @@ export const EDITOR_DENSITY_PRESETS = {
 
 export type EditorDensityPresetName = keyof typeof EDITOR_DENSITY_PRESETS;
 export type EditorLayout = (typeof EDITOR_DENSITY_PRESETS)[EditorDensityPresetName];
+type LeftSidebarLayoutBounds = Pick<EditorLayout, 'leftSidebarMinWidth' | 'leftSidebarMaxWidth'>;
+type RightSidebarLayoutBounds = Pick<EditorLayout, 'rightSidebarMinWidth' | 'rightSidebarMaxWidth'>;
 
 export const DEFAULT_EDITOR_DENSITY_PRESET: EditorDensityPresetName = 'compact';
 
@@ -136,16 +144,67 @@ export function getEditorLayoutCssVars(layout = EDITOR_LAYOUT): Record<string, s
 
 export const EDITOR_LAYOUT_CSS_VARS = getEditorLayoutCssVars();
 
-export function clampEditorSidebarWidth(
-  width: number,
-  layoutOrPreset: EditorLayout | EditorDensityPresetName = EDITOR_LAYOUT
-): number {
+const LEFT_SIDEBAR_MAX_VIEWPORT_RATIO = 0.45;
+
+function clampSidebarWidth(width: number, bounds: { minWidth: number; maxWidth: number }): number {
+  return Math.min(bounds.maxWidth, Math.max(bounds.minWidth, width));
+}
+
+function getViewportWidth(): number | null {
+  if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
+    return window.innerWidth;
+  }
+
+  if (typeof document !== 'undefined') {
+    const documentWidth = document.documentElement?.clientWidth;
+    if (Number.isFinite(documentWidth) && documentWidth > 0) {
+      return documentWidth;
+    }
+  }
+
+  return null;
+}
+
+export function getLeftEditorSidebarBounds(
+  layoutOrPreset: EditorLayout | LeftSidebarLayoutBounds | EditorDensityPresetName = EDITOR_LAYOUT
+): { minWidth: number; maxWidth: number } {
+  const layout = typeof layoutOrPreset === 'string'
+    ? getEditorLayout(layoutOrPreset)
+    : layoutOrPreset;
+  const viewportWidth = getViewportWidth();
+  const viewportMaxWidth = viewportWidth === null
+    ? layout.leftSidebarMaxWidth
+    : Math.floor(viewportWidth * LEFT_SIDEBAR_MAX_VIEWPORT_RATIO);
+
+  return {
+    minWidth: layout.leftSidebarMinWidth,
+    maxWidth: Math.max(layout.leftSidebarMinWidth, viewportMaxWidth),
+  };
+}
+
+export function getRightEditorSidebarBounds(
+  layoutOrPreset: EditorLayout | RightSidebarLayoutBounds | EditorDensityPresetName = EDITOR_LAYOUT
+): { minWidth: number; maxWidth: number } {
   const layout = typeof layoutOrPreset === 'string'
     ? getEditorLayout(layoutOrPreset)
     : layoutOrPreset;
 
-  return Math.min(
-    layout.sidebarMaxWidth,
-    Math.max(layout.sidebarMinWidth, width)
-  );
+  return {
+    minWidth: layout.rightSidebarMinWidth,
+    maxWidth: layout.rightSidebarMaxWidth,
+  };
+}
+
+export function clampLeftEditorSidebarWidth(
+  width: number,
+  layoutOrPreset: EditorLayout | EditorDensityPresetName = EDITOR_LAYOUT
+): number {
+  return clampSidebarWidth(width, getLeftEditorSidebarBounds(layoutOrPreset));
+}
+
+export function clampRightEditorSidebarWidth(
+  width: number,
+  layoutOrPreset: EditorLayout | EditorDensityPresetName = EDITOR_LAYOUT
+): number {
+  return clampSidebarWidth(width, getRightEditorSidebarBounds(layoutOrPreset));
 }

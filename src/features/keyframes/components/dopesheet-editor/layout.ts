@@ -41,7 +41,11 @@ export function getFrameFromAxisX(
   }
 
   const frameRange = getFrameRange(viewport);
-  const relative = (x - KEYFRAME_EDGE_INSET) / usableWidth;
+  const clampedX = Math.max(
+    KEYFRAME_EDGE_INSET,
+    Math.min(timelineWidth - KEYFRAME_EDGE_INSET, x)
+  );
+  const relative = (clampedX - KEYFRAME_EDGE_INSET) / usableWidth;
   return Math.round(viewport.startFrame + relative * frameRange);
 }
 

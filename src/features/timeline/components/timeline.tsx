@@ -5,7 +5,6 @@ import { TimelineContent } from './timeline-content';
 import { TimelineNavigator } from './timeline-navigator';
 import { TrackHeader } from './track-header';
 import { TransitionDragTooltip } from './transition-drag-tooltip';
-import { KeyframeGraphPanel } from './keyframe-graph-panel';
 import { TrackRowFrame, TrackSectionDivider } from './track-row-frame';
 import { useTimelineTracks } from '../hooks/use-timeline-tracks';
 import { useItemsStore } from '../stores/items-store';
@@ -35,8 +34,6 @@ const logger = createLogger('Timeline');
 
 interface TimelineProps {
   duration: number; // Total timeline duration in seconds
-  /** Callback when graph panel open state changes - used by parent to resize panel */
-  onGraphPanelOpenChange?: (isOpen: boolean) => void;
 }
 
 /**
@@ -49,7 +46,7 @@ interface TimelineProps {
  *
  * Follows modular architecture with granular Zustand selectors
  */
-export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChange }: TimelineProps) {
+export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
   const hotkeys = useResolvedHotkeys();
   const editorDensity = useSettingsStore((s) => s.editorDensity);
   const editorLayout = getEditorLayout(editorDensity);
@@ -122,44 +119,21 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
   const [trackRowsViewportHeight, setTrackRowsViewportHeight] = useState(0);
   const [sectionDividerPosition, setSectionDividerPosition] = useState<number | null>(null);
 
-  // Bottom editor panel state (Keyframes / Scopes)
-  const [isEditorPanelOpen, setIsEditorPanelOpen] = useState(false);
   const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen);
   const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen);
+  const keyframeEditorOpen = useEditorStore((s) => s.keyframeEditorOpen);
+  const toggleKeyframeEditorOpen = useEditorStore((s) => s.toggleKeyframeEditorOpen);
   const setTimelineTracks = useTimelineStore((s) => s.setTracks);
-
-  const setEditorPanelOpen = useCallback(
-    (nextOpen: boolean) => {
-      setIsEditorPanelOpen((prevOpen) => {
-        if (prevOpen === nextOpen) return prevOpen;
-        onGraphPanelOpenChange?.(nextOpen);
-        return nextOpen;
-      });
-    },
-    [onGraphPanelOpenChange]
-  );
-
-  const handleToggleKeyframeTab = useCallback(() => {
-    setEditorPanelOpen(!isEditorPanelOpen);
-  }, [isEditorPanelOpen, setEditorPanelOpen]);
-
-  const handleToggleEditorPanel = useCallback(() => {
-    setEditorPanelOpen(!isEditorPanelOpen);
-  }, [isEditorPanelOpen, setEditorPanelOpen]);
-
-  const handleCloseEditorPanel = useCallback(() => {
-    setEditorPanelOpen(false);
-  }, [setEditorPanelOpen]);
 
   // Keyboard shortcut: Ctrl/Cmd+Shift+A to toggle keyframe editor
   useHotkeys(
     hotkeys.TOGGLE_KEYFRAME_EDITOR,
     (event) => {
       event.preventDefault();
-      handleToggleKeyframeTab();
+      toggleKeyframeEditorOpen();
     },
     HOTKEY_OPTIONS,
-    [handleToggleKeyframeTab]
+    [toggleKeyframeEditorOpen]
   );
 
   // State for drop indicator (updated via RAF from drag hook)
@@ -709,8 +683,8 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
           onZoomIn={zoomHandlers?.handleZoomIn}
           onZoomOut={zoomHandlers?.handleZoomOut}
           onZoomToFit={zoomHandlers?.handleZoomToFit}
-          isKeyframePanelOpen={isEditorPanelOpen}
-          onToggleKeyframePanel={handleToggleKeyframeTab}
+          isKeyframePanelOpen={keyframeEditorOpen}
+          onToggleKeyframePanel={toggleKeyframeEditorOpen}
           isScopesPanelOpen={colorScopesOpen}
           onToggleScopesPanel={toggleColorScopesOpen}
         />
@@ -820,13 +794,6 @@ export const Timeline = memo(function Timeline({ duration, onGraphPanelOpenChang
           onMetricsChange={setTimelineMetrics}
         />
       </div>
-
-      {/* Keyframe Graph Panel */}
-      <KeyframeGraphPanel
-        isOpen={isEditorPanelOpen}
-        onToggle={handleToggleEditorPanel}
-        onClose={handleCloseEditorPanel}
-      />
 
       <div className="flex flex-shrink-0 overflow-hidden">
         <div
