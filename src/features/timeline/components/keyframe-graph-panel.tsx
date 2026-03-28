@@ -1098,6 +1098,27 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     },
     [canvas, keyframesByProperty, selectedItemForEditor]
   );
+  const handleAddKeyframes = useCallback(
+    (entries: Array<{ property: AnimatableProperty; frame: number }>) => {
+      if (!selectedItemForEditor || entries.length === 0) return;
+
+      const payloads = entries.map(({ property, frame }) => {
+        const propKeyframes = keyframesByProperty[property] ?? [];
+        const baseValue = getBaseKeyframeValue(selectedItemForEditor, property, canvas);
+        const value = interpolatePropertyValue(propKeyframes, frame, baseValue);
+
+        return {
+          itemId: selectedItemForEditor.id,
+          property,
+          frame,
+          value,
+        };
+      });
+
+      timelineActions.addKeyframes(payloads);
+    },
+    [canvas, keyframesByProperty, selectedItemForEditor]
+  );
 
   const propertyValues = useMemo(() => {
     if (!selectedItemForEditor) return {};
@@ -1407,6 +1428,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onAddKeyframe={handleAddKeyframe}
+                onAddKeyframes={handleAddKeyframes}
                 onPropertyValueCommit={handlePropertyValueCommit}
                 onRemoveKeyframes={handleRemoveKeyframes}
                 onCopyKeyframes={handleCopyKeyframes}

@@ -37,7 +37,7 @@ describe('DopesheetEditor timing strip', () => {
     }
   });
 
-  it('renders the timing strip above the navigator viewport column', () => {
+  it('renders the timing strip above the navigator viewport column in graph mode', () => {
     render(
       <DopesheetEditor
         itemId="item-1"
@@ -45,6 +45,7 @@ describe('DopesheetEditor timing strip', () => {
           x: [{ id: 'kf-1', frame: 20, value: 100, easing: 'linear' }],
         }}
         selectedKeyframeIds={new Set(['kf-1'])}
+        visualizationMode="graph"
         totalFrames={100}
         width={640}
         height={240}
@@ -54,6 +55,24 @@ describe('DopesheetEditor timing strip', () => {
     expect(screen.getByTestId('keyframe-timing-strip-viewport-column')).toContainElement(
       screen.getByTestId('keyframe-timing-strip-track')
     );
+  });
+
+  it('does not render the timing strip in dopesheet mode', () => {
+    render(
+      <DopesheetEditor
+        itemId="item-1"
+        keyframesByProperty={{
+          x: [{ id: 'kf-1', frame: 20, value: 100, easing: 'linear' }],
+        }}
+        selectedKeyframeIds={new Set(['kf-1'])}
+        visualizationMode="dopesheet"
+        totalFrames={100}
+        width={640}
+        height={240}
+      />
+    );
+
+    expect(screen.queryByTestId('keyframe-timing-strip-track')).toBeNull();
   });
 
   it('slides selected keyframes without letting them cross the next keyframe', async () => {

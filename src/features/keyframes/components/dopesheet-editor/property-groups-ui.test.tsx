@@ -1,5 +1,5 @@
-import type { ComponentProps } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { useState, type ComponentProps } from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DopesheetEditor } from './index';
 
@@ -70,6 +70,26 @@ describe('DopesheetEditor property groups', () => {
     expect(onAddKeyframe).toHaveBeenCalledTimes(2);
     expect(onAddKeyframe).toHaveBeenNthCalledWith(1, 'x', 12);
     expect(onAddKeyframe).toHaveBeenNthCalledWith(2, 'y', 12);
+  });
+
+  it('batches group keyframe creation when a multi-add handler is provided', () => {
+    const onAddKeyframes = vi.fn();
+    const onAddKeyframe = vi.fn();
+
+    renderEditor({
+      keyframesByProperty: { x: [], y: [] },
+      propertyValues: { x: 100, y: 200 },
+      onAddKeyframe,
+      onAddKeyframes,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /toggle transform keyframes at playhead/i }));
+
+    expect(onAddKeyframe).not.toHaveBeenCalled();
+    expect(onAddKeyframes).toHaveBeenCalledWith([
+      { property: 'x', frame: 12 },
+      { property: 'y', frame: 12 },
+    ]);
   });
 
   it('locks a row and disables its edit controls', () => {
@@ -384,5 +404,144 @@ describe('DopesheetEditor property groups', () => {
 
     expect(onNavigateToKeyframe).toHaveBeenNthCalledWith(1, 8);
     expect(onNavigateToKeyframe).toHaveBeenNthCalledWith(2, 16);
+  });
+
+  it('selects and drags group header keyframes together in the sheet timeline', async () => {
+    const onSelectionChange = vi.fn();
+    const onKeyframeMove = vi.fn();
+
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+        y: [{ id: 'ky-1', frame: 8, value: 200, easing: 'linear' }],
+      },
+      propertyValues: { x: 100, y: 200 },
+      totalFrames: 100,
+      onSelectionChange,
+      onKeyframeMove,
+    });
+
+    const groupKeyframe = screen.getByTestId('group-keyframe-transform-8');
+
+    fireEvent.pointerDown(groupKeyframe, { button: 0, pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 140 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('group-keyframe-transform-18')).toBeTruthy();
+    });
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 140 });
+
+    expect(onSelectionChange).toHaveBeenCalledWith(new Set(['kx-1', 'ky-1']));
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'x', keyframeId: 'kx-1' },
+      18,
+      100
+    );
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'y', keyframeId: 'ky-1' },
+      18,
+      200
+    );
+  });
+
+  it('keeps the original header marker visible when dragging a child row keyframe away', async () => {
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+        y: [{ id: 'ky-1', frame: 8, value: 200, easing: 'linear' }],
+      },
+      propertyValues: { x: 100, y: 200 },
+      totalFrames: 100,
+      onKeyframeMove: vi.fn(),
+    });
+
+    const rowKeyframe = screen.getByTestId('row-keyframe-x-kx-1');
+
+    fireEvent.pointerDown(rowKeyframe, { button: 0, pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 140 });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('group-keyframe-transform-8')).toBeTruthy();
+      expect(screen.getAllByTestId(/group-keyframe-transform-/)).toHaveLength(2);
+    });
+  });
+
+  it('allows multiple master diamonds to move as one selection', () => {
+    const onKeyframeMove = vi.fn();
+
+    function ControlledSelectionEditor() {
+      const [selection, setSelection] = useState<Set<string>>(new Set());
+
+      return (
+        <DopesheetEditor
+          itemId="item-1"
+          keyframesByProperty={{
+            x: [
+              { id: 'kx-1', frame: 8, value: 100, easing: 'linear' },
+              { id: 'kx-2', frame: 16, value: 140, easing: 'linear' },
+            ],
+            y: [
+              { id: 'ky-1', frame: 8, value: 200, easing: 'linear' },
+              { id: 'ky-2', frame: 16, value: 240, easing: 'linear' },
+            ],
+          }}
+          propertyValues={{ x: 100, y: 200 }}
+          currentFrame={12}
+          totalFrames={100}
+          width={640}
+          height={240}
+          selectedKeyframeIds={selection}
+          onSelectionChange={setSelection}
+          onKeyframeMove={onKeyframeMove}
+        />
+      );
+    }
+
+    render(<ControlledSelectionEditor />);
+
+    fireEvent.pointerDown(screen.getByTestId('group-keyframe-transform-8'), {
+      button: 0,
+      pointerId: 1,
+      clientX: 100,
+    });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 100 });
+
+    fireEvent.pointerDown(screen.getByTestId('group-keyframe-transform-16'), {
+      button: 0,
+      pointerId: 2,
+      clientX: 140,
+      ctrlKey: true,
+    });
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 140 });
+
+    fireEvent.pointerDown(screen.getByTestId('group-keyframe-transform-8'), {
+      button: 0,
+      pointerId: 3,
+      clientX: 100,
+    });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 140 });
+    fireEvent.pointerUp(window, { pointerId: 3, clientX: 140 });
+
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'x', keyframeId: 'kx-1' },
+      18,
+      100
+    );
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'y', keyframeId: 'ky-1' },
+      18,
+      200
+    );
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'x', keyframeId: 'kx-2' },
+      26,
+      140
+    );
+    expect(onKeyframeMove).toHaveBeenCalledWith(
+      { itemId: 'item-1', property: 'y', keyframeId: 'ky-2' },
+      26,
+      240
+    );
   });
 });
