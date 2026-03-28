@@ -5,17 +5,32 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { ChevronLeft, ChevronRight, Maximize2, Timer, Trash2, ZoomIn, ZoomOut, Magnet } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  LineChart,
+  Lock,
+  Maximize2,
+  MoreHorizontal,
+  Timer,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Magnet,
+} from 'lucide-react';
 import { cn } from '@/shared/ui/cn';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import {
   KEYFRAME_MARQUEE_THRESHOLD,
   KeyframeMarqueeOverlay,
@@ -30,6 +45,7 @@ import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout'
 import { CompactNavigator } from './compact-navigator';
 import { normalizeKeyframeNavigatorViewport } from './compact-navigator-utils';
 import { getDopesheetRowControlState } from './row-controls';
+import { getPropertyAccordionGroups } from './property-groups';
 import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-ranges';
 import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store';
 
@@ -108,6 +124,26 @@ interface KeyframeMeta {
   keyframe: Keyframe;
 }
 
+interface DopesheetPropertyRow {
+  property: AnimatableProperty;
+  keyframes: Keyframe[];
+  controls: ReturnType<typeof getDopesheetRowControlState>;
+}
+
+interface DopesheetPropertyGroup {
+  id: string;
+  label: string;
+  rows: DopesheetPropertyRow[];
+  currentKeyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>;
+  hasKeyframeAtCurrentFrame: boolean;
+  prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null;
+  nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null;
+}
+
+type RenderedSheetEntry =
+  | { type: 'group'; group: DopesheetPropertyGroup; top: number }
+  | { type: 'row'; row: DopesheetPropertyRow; top: number };
+
 interface DragState {
   anchorKeyframeId: string;
   selectedKeyframeIds: string[];
@@ -130,9 +166,10 @@ interface MarqueeState {
   started: boolean;
 }
 
-const PROPERTY_COLUMN_WIDTH = 224;
+const PROPERTY_COLUMN_WIDTH = 248;
 const MIN_VISIBLE_FRAMES = 20;
 const SNAP_THRESHOLD_PX = 8;
+const GROUP_HEADER_HEIGHT = 22;
 const ROW_HEIGHT = 30;
 const RULER_HEIGHT = 22;
 const ZOOM_IN_FACTOR = 0.8;
@@ -141,6 +178,8 @@ const DRAG_THRESHOLD = 2;
 const MARQUEE_SCROLL_EDGE_PX = 24;
 const MARQUEE_SCROLL_MAX_SPEED = 16;
 const EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY: Partial<Record<AnimatableProperty, boolean>> = {};
+const MINI_ICON_BUTTON_CLASS = 'h-4 w-4 flex-shrink-0 rounded-sm p-0 leading-none';
+const MINI_ICON_CLASS = 'h-[8px] w-[8px]';
 
 function clampFrame(frame: number, totalFrames: number): number {
   if (totalFrames <= 0) return 0;
@@ -193,6 +232,56 @@ function arePreviewFramesEqual(
   return true;
 }
 
+function buildGroupedPropertyRows(
+  rows: DopesheetPropertyRow[],
+  currentFrame: number
+): DopesheetPropertyGroup[] {
+  const rowByProperty = new Map<AnimatableProperty, DopesheetPropertyRow>(
+    rows.map((row) => [row.property, row])
+  );
+
+  return getPropertyAccordionGroups(rows.map((row) => row.property))
+    .map((group) => {
+      const groupedRows = group.properties.flatMap((property) => {
+        const row = rowByProperty.get(property);
+        return row ? [row] : [];
+      });
+      const keyframeEntries = groupedRows
+        .flatMap((row) => row.keyframes.map((keyframe) => ({ property: row.property, keyframe })))
+        .toSorted((a, b) => a.keyframe.frame - b.keyframe.frame);
+      const currentKeyframes = keyframeEntries.filter((entry) => entry.keyframe.frame === currentFrame);
+
+      let prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null;
+      let nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null;
+
+      for (let index = keyframeEntries.length - 1; index >= 0; index -= 1) {
+        const entry = keyframeEntries[index];
+        if (entry && entry.keyframe.frame < currentFrame) {
+          prevKeyframe = entry;
+          break;
+        }
+      }
+
+      for (const entry of keyframeEntries) {
+        if (entry.keyframe.frame > currentFrame) {
+          nextKeyframe = entry;
+          break;
+        }
+      }
+
+      return {
+        id: group.id,
+        label: group.label,
+        rows: groupedRows,
+        currentKeyframes,
+        hasKeyframeAtCurrentFrame: currentKeyframes.length > 0,
+        prevKeyframe,
+        nextKeyframe,
+      };
+    })
+    .filter((group) => group.rows.length > 0);
+}
+
 export const DopesheetEditor = memo(function DopesheetEditor({
   frameViewport,
   onFrameViewportChange,
@@ -240,6 +329,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       [itemId]
     )
   );
+  const setAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.setAutoKeyframeEnabled);
   const toggleAutoKeyframeEnabled = useAutoKeyframeStore((state) => state.toggleAutoKeyframeEnabled);
   const [localFrameInputValue, setLocalFrameInputValue] = useState('');
   const [globalFrameInputValue, setGlobalFrameInputValue] = useState('');
@@ -317,23 +407,98 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     () => Object.keys(keyframesByProperty) as AnimatableProperty[],
     [keyframesByProperty]
   );
-  const activeSelectedProperty = selectedProperty && availableProperties.includes(selectedProperty)
+  const allPropertyGroups = useMemo(
+    () => getPropertyAccordionGroups(availableProperties),
+    [availableProperties]
+  );
+  const propertyGroupIdByProperty = useMemo(() => {
+    const map = new Map<AnimatableProperty, string>();
+    for (const group of allPropertyGroups) {
+      for (const property of group.properties) {
+        map.set(property, group.id);
+      }
+    }
+    return map;
+  }, [allPropertyGroups]);
+  const keyframedPropertyIds = useMemo(
+    () => new Set(
+      availableProperties.filter((property) => (keyframesByProperty[property] ?? []).length > 0)
+    ),
+    [availableProperties, keyframesByProperty]
+  );
+  const [visibleGroups, setVisibleGroups] = useState<Record<string, boolean>>({});
+  const [showKeyframedOnly, setShowKeyframedOnly] = useState(false);
+  const [lockedProperties, setLockedProperties] = useState<Partial<Record<AnimatableProperty, boolean>>>({});
+
+  useEffect(() => {
+    const groupIds = new Set(allPropertyGroups.map((group) => group.id));
+
+    setVisibleGroups((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const groupId of groupIds) {
+        if (next[groupId] === undefined) {
+          next[groupId] = true;
+          changed = true;
+        }
+      }
+
+      for (const groupId of Object.keys(next)) {
+        if (!groupIds.has(groupId)) {
+          delete next[groupId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [allPropertyGroups]);
+
+  useEffect(() => {
+    const propertyIds = new Set(availableProperties);
+
+    setLockedProperties((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const property of propertyIds) {
+        if (next[property] === undefined) {
+          next[property] = false;
+          changed = true;
+        }
+      }
+
+      for (const property of Object.keys(next) as AnimatableProperty[]) {
+        if (!propertyIds.has(property)) {
+          delete next[property];
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [availableProperties]);
+
+  const filteredProperties = useMemo(
+    () =>
+      availableProperties.filter((property) => {
+        const groupId = propertyGroupIdByProperty.get(property);
+        const groupVisible = groupId ? (visibleGroups[groupId] ?? true) : true;
+        if (!groupVisible) return false;
+        if (showKeyframedOnly && !keyframedPropertyIds.has(property)) return false;
+        return true;
+      }),
+    [availableProperties, keyframedPropertyIds, propertyGroupIdByProperty, showKeyframedOnly, visibleGroups]
+  );
+  const activeSelectedProperty = selectedProperty && filteredProperties.includes(selectedProperty)
     ? selectedProperty
     : null;
+  const visibleProperties = filteredProperties;
+  const propertyColumnProperties = filteredProperties;
+  const hasPropertyFilters = showKeyframedOnly || allPropertyGroups.some((group) => visibleGroups[group.id] === false);
 
-  const visibleProperties = useMemo(() => {
-    if (activeSelectedProperty) {
-      return availableProperties.filter((p) => p === activeSelectedProperty);
-    }
-    return availableProperties;
-  }, [availableProperties, activeSelectedProperty]);
-
-  const propertyColumnProperties = useMemo(
-    () => (visualizationMode === 'graph' ? availableProperties : visibleProperties),
-    [availableProperties, visibleProperties, visualizationMode]
-  );
-
-  const sheetRows = useMemo(
+  const sheetRows = useMemo<DopesheetPropertyRow[]>(
     () =>
       visibleProperties.map((property) => ({
         property,
@@ -346,7 +511,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [visibleProperties, keyframesByProperty, currentFrame]
   );
 
-  const propertyRows = useMemo(
+  const propertyRows = useMemo<DopesheetPropertyRow[]>(
     () =>
       propertyColumnProperties.map((property) => ({
         property,
@@ -358,6 +523,103 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       })),
     [propertyColumnProperties, keyframesByProperty, currentFrame]
   );
+  const groupedSheetRows = useMemo(
+    () => buildGroupedPropertyRows(sheetRows, currentFrame),
+    [currentFrame, sheetRows]
+  );
+  const groupedPropertyRows = useMemo(
+    () => buildGroupedPropertyRows(propertyRows, currentFrame),
+    [currentFrame, propertyRows]
+  );
+  const propertyRowByProperty = useMemo(
+    () => new Map(propertyRows.map((row) => [row.property, row])),
+    [propertyRows]
+  );
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const groupIds = new Set([
+      ...groupedSheetRows.map((group) => group.id),
+      ...groupedPropertyRows.map((group) => group.id),
+    ]);
+
+    setExpandedGroups((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const groupId of groupIds) {
+        if (next[groupId] === undefined) {
+          next[groupId] = true;
+          changed = true;
+        }
+      }
+
+      for (const groupId of Object.keys(next)) {
+        if (!groupIds.has(groupId)) {
+          delete next[groupId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [groupedPropertyRows, groupedSheetRows]);
+
+  useEffect(() => {
+    if (!activeSelectedProperty) return;
+
+    const activeGroup = [...groupedPropertyRows, ...groupedSheetRows].find((group) =>
+      group.rows.some((row) => row.property === activeSelectedProperty)
+    );
+    if (!activeGroup) return;
+
+    setExpandedGroups((prev) => {
+      if (prev[activeGroup.id] !== false) return prev;
+      return {
+        ...prev,
+        [activeGroup.id]: true,
+      };
+    });
+  }, [activeSelectedProperty, groupedPropertyRows, groupedSheetRows]);
+
+  const toggleGroup = useCallback((groupId: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupId]: !(prev[groupId] ?? true),
+    }));
+  }, []);
+  const toggleVisibleGroup = useCallback((groupId: string) => {
+    setVisibleGroups((prev) => ({
+      ...prev,
+      [groupId]: !(prev[groupId] ?? true),
+    }));
+  }, []);
+  const isPropertyLocked = useCallback(
+    (property: AnimatableProperty) => lockedProperties[property] ?? false,
+    [lockedProperties]
+  );
+  const toggleLockedProperty = useCallback((property: AnimatableProperty) => {
+    setLockedProperties((prev) => ({
+      ...prev,
+      [property]: !(prev[property] ?? false),
+    }));
+  }, []);
+  const setAllGroupsExpanded = useCallback((expanded: boolean) => {
+    setExpandedGroups(
+      Object.fromEntries(allPropertyGroups.map((group) => [group.id, expanded])) as Record<string, boolean>
+    );
+  }, [allPropertyGroups]);
+  const resetParameterView = useCallback(() => {
+    setShowKeyframedOnly(false);
+    setVisibleGroups(
+      Object.fromEntries(allPropertyGroups.map((group) => [group.id, true])) as Record<string, boolean>
+    );
+    setAllGroupsExpanded(true);
+  }, [allPropertyGroups, setAllGroupsExpanded]);
+  const showPropertyCurve = useCallback((property: AnimatableProperty) => {
+    onPropertyChange?.(property);
+    onActivePropertyChange?.(property);
+  }, [onActivePropertyChange, onPropertyChange]);
 
   useEffect(() => {
     if (visualizationMode !== 'graph') return;
@@ -550,20 +812,50 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     }
     return positions;
   }, [sheetRows, getRenderedKeyframeX]);
+  const renderedSheetEntries = useMemo(() => {
+    const entries: RenderedSheetEntry[] = [];
+    let top = 0;
+
+    for (const group of groupedSheetRows) {
+      entries.push({ type: 'group', group, top });
+      top += GROUP_HEADER_HEIGHT;
+
+      if (!(expandedGroups[group.id] ?? true)) {
+        continue;
+      }
+
+      for (const row of group.rows) {
+        entries.push({ type: 'row', row, top });
+        top += ROW_HEIGHT;
+      }
+    }
+
+    return {
+      entries,
+      contentHeight: top,
+    };
+  }, [expandedGroups, groupedSheetRows]);
+  const renderedSheetRows = useMemo(
+    () => renderedSheetEntries.entries.filter((entry) => entry.type === 'row'),
+    [renderedSheetEntries.entries]
+  );
   const keyframePoints = useMemo(
     () =>
-      sheetRows.flatMap((row, rowIndex) =>
-        row.keyframes.flatMap((keyframe) => {
+      renderedSheetRows.flatMap((entry) =>
+        isPropertyLocked(entry.row.property)
+          ? []
+          :
+        entry.row.keyframes.flatMap((keyframe) => {
           const x = renderedKeyframeXById.get(keyframe.id);
           if (x === undefined) return [];
           return [{
             keyframeId: keyframe.id,
             x,
-            y: rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2,
+            y: entry.top + ROW_HEIGHT / 2,
           }];
         })
       ),
-    [sheetRows, renderedKeyframeXById]
+    [isPropertyLocked, renderedKeyframeXById, renderedSheetRows]
   );
   const keyframePointsRef = useRef(keyframePoints);
   keyframePointsRef.current = keyframePoints;
@@ -599,10 +891,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       if (!node) return 0;
       const rect = node.getBoundingClientRect();
       const y = clientY - rect.top + node.scrollTop;
-      const maxY = Math.max(0, sheetRows.length * ROW_HEIGHT);
+      const maxY = Math.max(0, renderedSheetEntries.contentHeight);
       return Math.max(0, Math.min(maxY, y));
     },
-    [sheetRows.length]
+    [renderedSheetEntries.contentHeight]
   );
 
   const ticks = useMemo(() => {
@@ -626,6 +918,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     for (const keyframeId of selectedKeyframeIds) {
       const meta = keyframeMetaById.get(keyframeId);
       if (!meta) continue;
+      if (isPropertyLocked(meta.property)) continue;
       refs.push({
         itemId,
         property: meta.property,
@@ -633,7 +926,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       });
     }
     return refs;
-  }, [selectedKeyframeIds, keyframeMetaById, itemId]);
+  }, [selectedKeyframeIds, keyframeMetaById, isPropertyLocked, itemId]);
 
   const isCurrentFrameBlocked = useMemo(
     () => transitionBlockedRanges.some((range) => currentFrame >= range.start && currentFrame < range.end),
@@ -715,21 +1008,30 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     updateViewport(buildDefaultViewport());
   }, [buildDefaultViewport, updateViewport]);
 
-  const handlePropertySelect = useCallback(
-    (value: string) => {
-      const next = value === 'all' ? null : (value as AnimatableProperty);
-      onPropertyChange?.(next);
-      if (next) {
-        onActivePropertyChange?.(next);
-      }
-    },
-    [onActivePropertyChange, onPropertyChange]
-  );
-
   const handleRemoveKeyframes = useCallback(() => {
     if (!onRemoveKeyframes || selectedRefs.length === 0) return;
     onRemoveKeyframes(selectedRefs);
   }, [onRemoveKeyframes, selectedRefs]);
+
+  const canAddKeyframeForRow = useCallback(
+    (row: DopesheetPropertyRow) => {
+      if (disabled || !onAddKeyframe) return false;
+      if (isPropertyLocked(row.property)) return false;
+      if (row.controls.hasKeyframeAtCurrentFrame) return false;
+      if (isCurrentFrameBlocked) return false;
+      return true;
+    },
+    [disabled, isCurrentFrameBlocked, isPropertyLocked, onAddKeyframe]
+  );
+
+  const canClearRow = useCallback(
+    (row: DopesheetPropertyRow) => {
+      if (disabled || !onRemoveKeyframes) return false;
+      if (isPropertyLocked(row.property)) return false;
+      return row.keyframes.length > 0;
+    },
+    [disabled, isPropertyLocked, onRemoveKeyframes]
+  );
 
   const resetHeaderFrameInputs = useCallback(() => {
     setLocalFrameInputValue(
@@ -751,6 +1053,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       for (const keyframeId of selectedKeyframeIds) {
         const meta = keyframeMetaByIdRef.current.get(keyframeId);
         if (!meta) continue;
+        if (isPropertyLocked(meta.property)) continue;
         const initialFrame = meta.keyframe.frame;
         let nextFrame = clampFrame(initialFrame + deltaFrames, totalFrames);
         nextFrame = clampToAvoidBlockedRanges(nextFrame, initialFrame, transitionBlockedRanges);
@@ -774,6 +1077,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       onDragEnd,
       onDragStart,
       onKeyframeMove,
+      isPropertyLocked,
       selectedKeyframeIds,
       totalFrames,
       transitionBlockedRanges,
@@ -910,6 +1214,95 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     onActivePropertyChange?.(property);
   }, [onActivePropertyChange, onPropertyChange, visualizationMode]);
 
+  const removeKeyframesForRows = useCallback(
+    (rows: DopesheetPropertyRow[]) => {
+      if (!onRemoveKeyframes) return;
+
+      const refs = rows.flatMap((row) =>
+        row.keyframes.map((keyframe) => ({
+          itemId,
+          property: row.property,
+          keyframeId: keyframe.id,
+        }))
+      );
+
+      if (refs.length === 0) return;
+
+      onRemoveKeyframes(refs);
+
+      if (onSelectionChange) {
+        const removedKeyframeIds = new Set(refs.map((ref) => ref.keyframeId));
+        const nextSelection = new Set(selectedKeyframeIds);
+        for (const keyframeId of removedKeyframeIds) {
+          nextSelection.delete(keyframeId);
+        }
+        onSelectionChange(nextSelection);
+      }
+    },
+    [itemId, onRemoveKeyframes, onSelectionChange, selectedKeyframeIds]
+  );
+
+  const handleClearProperty = useCallback(
+    (property: AnimatableProperty) => {
+      const row = propertyRowByProperty.get(property);
+      if (!row || !canClearRow(row)) return;
+
+      activateProperty(property);
+      removeKeyframesForRows([row]);
+    },
+    [activateProperty, canClearRow, propertyRowByProperty, removeKeyframesForRows]
+  );
+
+  const handleAddGroupKeyframes = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      if (disabled || !onAddKeyframe) return;
+
+      for (const row of group.rows) {
+        if (!canAddKeyframeForRow(row)) continue;
+        onAddKeyframe(row.property, currentFrame);
+      }
+    },
+    [canAddKeyframeForRow, currentFrame, disabled, onAddKeyframe]
+  );
+
+  const handleClearGroup = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      removeKeyframesForRows(group.rows.filter((row) => canClearRow(row)));
+    },
+    [canClearRow, removeKeyframesForRows]
+  );
+
+  const handleGroupToggleKeyframes = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const removableCurrentKeyframes = group.currentKeyframes.filter(
+        ({ property }) => !isPropertyLocked(property)
+      );
+
+      if (removableCurrentKeyframes.length > 0) {
+        if (!onRemoveKeyframes) return;
+
+        const refs = removableCurrentKeyframes.map(({ property, keyframe }) => ({
+          itemId,
+          property,
+          keyframeId: keyframe.id,
+        }));
+        onRemoveKeyframes(refs);
+
+        if (onSelectionChange) {
+          const nextSelection = new Set(selectedKeyframeIds);
+          for (const { keyframe } of removableCurrentKeyframes) {
+            nextSelection.delete(keyframe.id);
+          }
+          onSelectionChange(nextSelection);
+        }
+        return;
+      }
+
+      handleAddGroupKeyframes(group);
+    },
+    [handleAddGroupKeyframes, isPropertyLocked, itemId, onRemoveKeyframes, onSelectionChange, selectedKeyframeIds]
+  );
+
   const handleRowNavigate = useCallback(
     (property: AnimatableProperty, keyframe: Keyframe | null) => {
       if (!keyframe || !onNavigateToKeyframe) return;
@@ -923,6 +1316,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
   const handleRowToggleKeyframe = useCallback(
     (property: AnimatableProperty, currentKeyframes: Keyframe[]) => {
+      if (isPropertyLocked(property)) return;
       activateProperty(property);
       if (currentKeyframes.length > 0) {
         if (!onRemoveKeyframes) return;
@@ -954,6 +1348,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       onSelectionChange,
       selectedKeyframeIds,
       activateProperty,
+      isPropertyLocked,
     ]
   );
 
@@ -962,12 +1357,27 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   }, []);
 
   const handleRowAutoKeyToggle = useCallback((property: AnimatableProperty) => {
+    if (isPropertyLocked(property)) return;
     activateProperty(property);
     toggleAutoKeyframeEnabled(itemId, property);
-  }, [activateProperty, itemId, toggleAutoKeyframeEnabled]);
+  }, [activateProperty, isPropertyLocked, itemId, toggleAutoKeyframeEnabled]);
+
+  const handleGroupAutoKeyToggle = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const eligibleRows = group.rows.filter((row) => !isPropertyLocked(row.property));
+      if (eligibleRows.length === 0) return;
+
+      const enableAll = !eligibleRows.every((row) => autoKeyEnabledByProperty[row.property] ?? false);
+      for (const row of eligibleRows) {
+        setAutoKeyframeEnabled(itemId, row.property, enableAll);
+      }
+    },
+    [autoKeyEnabledByProperty, isPropertyLocked, itemId, setAutoKeyframeEnabled]
+  );
 
   const handleRowValueCommit = useCallback(
     (property: AnimatableProperty, options?: { allowCreate?: boolean }) => {
+      if (isPropertyLocked(property)) return;
       const range = PROPERTY_VALUE_RANGES[property];
       const parsed = Number(valueDrafts[property]);
 
@@ -986,7 +1396,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         [property]: formatPropertyValue(property, clampedValue),
       }));
     },
-    [formatPropertyValue, onPropertyValueCommit, propertyValues, valueDrafts]
+    [formatPropertyValue, isPropertyLocked, onPropertyValueCommit, propertyValues, valueDrafts]
   );
 
   const nudgeSelectedKeyframes = useCallback(
@@ -1060,6 +1470,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       event: React.PointerEvent<HTMLButtonElement>
     ) => {
       if (disabled) return;
+      if (isPropertyLocked(property)) return;
       event.preventDefault();
       event.stopPropagation();
       onActivePropertyChange?.(property);
@@ -1134,6 +1545,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     },
     [
       disabled,
+      isPropertyLocked,
       onActivePropertyChange,
       rowKeyframesByProperty,
       scheduleDragPreviewFrames,
@@ -1186,6 +1598,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const handleRowPointerDown = useCallback(
     (property: AnimatableProperty, event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled) return;
+      if (isPropertyLocked(property)) return;
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1212,7 +1625,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [disabled, getTimelineXFromClientX, getContentYFromClientY, onActivePropertyChange, selectedKeyframeIds]
+    [disabled, getTimelineXFromClientX, getContentYFromClientY, isPropertyLocked, onActivePropertyChange, selectedKeyframeIds]
   );
 
   useEffect(() => {
@@ -1250,6 +1663,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         if (initial === undefined) continue;
         const meta = keyframeMetaByIdRef.current.get(selectedId);
         if (!meta) continue;
+        if (isPropertyLocked(meta.property)) continue;
 
         let nextFrame = clampFrame(initial + deltaFrames, totalFrames);
         nextFrame = clampToAvoidBlockedRanges(nextFrame, initial, transitionBlockedRanges);
@@ -1276,6 +1690,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             if (nextFrame === undefined) continue;
             const meta = keyframeMetaByIdRef.current.get(selectedId);
             if (!meta) continue;
+            if (isPropertyLocked(meta.property)) continue;
             onKeyframeMove(
               { itemId, property: meta.property, keyframeId: selectedId },
               nextFrame,
@@ -1303,9 +1718,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     effectiveTimelineWidth,
     frameRange,
     totalFrames,
-    itemId,
-    snapEnabled,
-    snapFrame,
+      itemId,
+      isPropertyLocked,
+      snapEnabled,
+      snapFrame,
     transitionBlockedRanges,
     scheduleDragPreviewFrames,
   ]);
@@ -1449,6 +1865,9 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     () => activeSelectedProperty ?? availableProperties[0] ?? null,
     [activeSelectedProperty, availableProperties]
   );
+  const graphDisplayPropertyLocked = graphDisplayProperty
+    ? isPropertyLocked(graphDisplayProperty)
+    : false;
   const rulerTickElements = useMemo(
     () =>
       ticks.map((frame) => (
@@ -1465,45 +1884,92 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [ticks, frameToX]
   );
   const renderPropertyRowContent = useCallback(
-    (row: (typeof propertyRows)[number]) => (
-      <div
-        className={cn(
-          'h-full px-1 flex items-center gap-1 bg-muted/10',
-          row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10',
-          visualizationMode === 'graph' && graphDisplayProperty === row.property && 'bg-accent/40',
-          visualizationMode === 'graph' && 'cursor-pointer'
-        )}
-        onClick={visualizationMode === 'graph' ? () => activateProperty(row.property) : undefined}
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            'h-[18px] w-[18px] flex-shrink-0 p-0 text-muted-foreground hover:text-foreground',
-            autoKeyEnabledByProperty[row.property] &&
-              'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+    (row: DopesheetPropertyRow, options?: { indented?: boolean }) => {
+      const rowLocked = isPropertyLocked(row.property);
+      const curveVisible = graphDisplayProperty === row.property;
+
+        return (
+          <div
+            className={cn(
+            'h-full px-1 flex items-center gap-px bg-muted/8',
+              options?.indented && 'pl-3',
+              row.controls.hasKeyframeAtCurrentFrame && 'bg-primary/10',
+              visualizationMode === 'graph' && graphDisplayProperty === row.property && 'bg-accent/40',
+            visualizationMode === 'graph' && !rowLocked && 'cursor-pointer',
+            rowLocked && 'opacity-70'
           )}
-          onClick={() => handleRowAutoKeyToggle(row.property)}
-          disabled={disabled || !onPropertyValueCommit}
-          title={
-            autoKeyEnabledByProperty[row.property]
-              ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-              : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
-          }
-          aria-label={
-            autoKeyEnabledByProperty[row.property]
-              ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
-              : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
-          }
-          aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
+          onClick={visualizationMode === 'graph' && !rowLocked ? () => activateProperty(row.property) : undefined}
         >
-          <Timer className="h-2.5 w-2.5" />
-        </Button>
-        <div className="min-w-0 flex-1 truncate text-[10px] font-medium leading-none text-foreground">
-          {PROPERTY_LABELS[row.property]}
-        </div>
-        <div className="ml-auto flex items-center gap-0.5">
+          <div className="flex items-center gap-px self-stretch">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                curveVisible && 'bg-accent text-accent-foreground hover:bg-accent/90 hover:text-accent-foreground'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                showPropertyCurve(row.property);
+              }}
+              title={`Show ${PROPERTY_LABELS[row.property]} curve`}
+              aria-label={`Show ${PROPERTY_LABELS[row.property]} curve`}
+              aria-pressed={curveVisible}
+            >
+              <LineChart className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                rowLocked && 'bg-muted text-foreground/80 hover:bg-muted hover:text-foreground/80'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleLockedProperty(row.property);
+              }}
+              title={rowLocked ? `Unlock ${PROPERTY_LABELS[row.property]} row` : `Lock ${PROPERTY_LABELS[row.property]} row`}
+              aria-label={rowLocked ? `Unlock ${PROPERTY_LABELS[row.property]} row` : `Lock ${PROPERTY_LABELS[row.property]} row`}
+              aria-pressed={rowLocked}
+            >
+              <Lock className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                autoKeyEnabledByProperty[row.property] &&
+                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+              )}
+              onClick={() => handleRowAutoKeyToggle(row.property)}
+              disabled={disabled || rowLocked || !onPropertyValueCommit}
+              title={
+                autoKeyEnabledByProperty[row.property]
+                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
+                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+              }
+              aria-label={
+                autoKeyEnabledByProperty[row.property]
+                  ? `Auto-key enabled for ${PROPERTY_LABELS[row.property]}`
+                  : `Enable auto-key for ${PROPERTY_LABELS[row.property]}`
+              }
+              aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
+            >
+              <Timer className={MINI_ICON_CLASS} />
+            </Button>
+          </div>
+          <div className="flex h-full min-w-0 flex-1 items-center truncate pl-[10px] pr-1 text-[9px] font-medium leading-none text-foreground/90">
+            {PROPERTY_LABELS[row.property]}
+          </div>
+          <div className="ml-auto flex items-center gap-0">
           <Input
             type="number"
             value={valueDrafts[row.property] ?? ''}
@@ -1544,32 +2010,34 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             min={PROPERTY_VALUE_RANGES[row.property].min}
             max={PROPERTY_VALUE_RANGES[row.property].max}
             inputMode="decimal"
-            className="h-[18px] w-[58px] border-border/70 bg-background/85 px-1 text-right text-[10px] tabular-nums"
+            className="h-[18px] w-[44px] border-border/70 bg-background/85 px-1 py-0 text-right text-[9px] leading-none tabular-nums md:text-[9px]"
             disabled={
               disabled ||
+              rowLocked ||
               !onPropertyValueCommit ||
               (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
             }
             aria-label={`${PROPERTY_LABELS[row.property]} value at playhead`}
           />
-          <div className="flex items-center gap-0 rounded-sm border border-border/70 bg-background/85 px-[1px]">
+          <div className="flex items-center gap-0 rounded-sm border border-border/70 bg-background/85 px-0">
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-[18px] w-[18px] p-0 text-muted-foreground hover:text-foreground"
+              className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
               onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
               disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
               title={`Previous ${PROPERTY_LABELS[row.property]} keyframe`}
+              aria-label={`Previous ${PROPERTY_LABELS[row.property]} keyframe`}
             >
-              <ChevronLeft className="h-2.5 w-2.5" />
+              <ChevronLeft className="h-[9px] w-[9px]" />
             </Button>
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className={cn(
-                'h-[18px] w-[18px] p-0 hover:bg-transparent',
+                'h-4 w-4 p-0 hover:bg-transparent',
                 row.controls.hasKeyframeAtCurrentFrame
                   ? 'text-primary hover:text-primary'
                   : 'text-muted-foreground hover:text-foreground',
@@ -1580,6 +2048,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               onClick={() => handleRowToggleKeyframe(row.property, row.controls.currentKeyframes)}
               disabled={
                 disabled ||
+                rowLocked ||
                 (!row.controls.hasKeyframeAtCurrentFrame &&
                   (isCurrentFrameBlocked || !onAddKeyframe))
               }
@@ -1588,10 +2057,15 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                   ? `Remove ${PROPERTY_LABELS[row.property]} keyframe at playhead`
                   : `Toggle ${PROPERTY_LABELS[row.property]} keyframe at playhead`
               }
+              aria-label={
+                row.controls.hasKeyframeAtCurrentFrame
+                  ? `Remove ${PROPERTY_LABELS[row.property]} keyframe at playhead`
+                  : `Toggle ${PROPERTY_LABELS[row.property]} keyframe at playhead`
+              }
             >
               <span
                 className={cn(
-                  'block h-2 w-2 rotate-45 border transition-colors',
+                  'block h-[7px] w-[7px] rotate-45 border transition-colors',
                   row.controls.hasKeyframeAtCurrentFrame
                     ? 'border-primary bg-primary'
                     : 'border-current bg-transparent'
@@ -1602,104 +2076,364 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-[18px] w-[18px] p-0 text-muted-foreground hover:text-foreground"
+              className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
               onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
               disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
               title={`Next ${PROPERTY_LABELS[row.property]} keyframe`}
+              aria-label={`Next ${PROPERTY_LABELS[row.property]} keyframe`}
             >
-              <ChevronRight className="h-2.5 w-2.5" />
+              <ChevronRight className="h-[9px] w-[9px]" />
             </Button>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleClearProperty(row.property);
+            }}
+            disabled={!canClearRow(row)}
+            title={`Clear ${PROPERTY_LABELS[row.property]} keyframes`}
+            aria-label={`Clear ${PROPERTY_LABELS[row.property]} keyframes`}
+          >
+            <X className="h-[9px] w-[9px]" />
+          </Button>
         </div>
-      </div>
-    ),
+        </div>
+      );
+    },
     [
       activateProperty,
+      canClearRow,
       autoKeyEnabledByProperty,
       disabled,
       formatPropertyValue,
       graphDisplayProperty,
+      handleClearProperty,
       handleRowAutoKeyToggle,
       handleRowNavigate,
       handleRowToggleKeyframe,
       handleRowValueChange,
       handleRowValueCommit,
+      isPropertyLocked,
       isCurrentFrameBlocked,
       onAddKeyframe,
       onNavigateToKeyframe,
       onPropertyValueCommit,
       propertyValues,
+      showPropertyCurve,
+      toggleLockedProperty,
       valueDrafts,
       visualizationMode,
     ]
   );
-  const rowElements = useMemo(
-    () =>
-      sheetRows.map((row) => (
-        <div key={row.property} className="grid border-b border-border/60" style={{ ...propertyGridStyle, height: ROW_HEIGHT }}>
-          {renderPropertyRowContent(row)}
-          <div
-            className="relative border-l border-border/60 overflow-hidden"
-            onPointerDown={(event) => handleRowPointerDown(row.property, event)}
+  const renderGroupHeaderContent = useCallback(
+    (group: DopesheetPropertyGroup) => {
+      const groupProperties = group.rows.map((row) => row.property);
+      const activeGroupProperty = groupProperties.find((property) => property === graphDisplayProperty)
+        ?? groupProperties[0]
+        ?? null;
+      const curveVisible = activeGroupProperty !== null && graphDisplayProperty === activeGroupProperty;
+      const allRowsLocked = group.rows.length > 0 && group.rows.every((row) => isPropertyLocked(row.property));
+      const unlockedRows = group.rows.filter((row) => !isPropertyLocked(row.property));
+      const groupAutoKeyEnabled = unlockedRows.length > 0
+        && unlockedRows.every((row) => autoKeyEnabledByProperty[row.property] ?? false);
+      const canAddAny = group.rows.some((row) => canAddKeyframeForRow(row));
+      const canClearAny = group.rows.some((row) => canClearRow(row));
+      const isOpen = expandedGroups[group.id] ?? true;
+      const unlockedCurrentKeyframes = group.currentKeyframes.filter(
+        ({ property }) => !isPropertyLocked(property)
+      );
+      const hasUnlockedCurrentKeyframes = unlockedCurrentKeyframes.length > 0;
+      const canToggleCurrentFrame = hasUnlockedCurrentKeyframes
+        ? !!onRemoveKeyframes
+        : canAddAny;
+
+      return (
+        <div className="flex h-full items-center gap-px bg-muted/40 pl-3 pr-0.5">
+          <div className="flex items-center gap-px self-stretch">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                curveVisible && 'bg-accent text-accent-foreground hover:bg-accent/90 hover:text-accent-foreground'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (activeGroupProperty) {
+                  showPropertyCurve(activeGroupProperty);
+                }
+              }}
+              disabled={!activeGroupProperty}
+              title={`Show ${group.label} curve`}
+              aria-label={`Show ${group.label} curve`}
+              aria-pressed={curveVisible}
+            >
+              <LineChart className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                allRowsLocked && 'bg-muted text-foreground/80 hover:bg-muted hover:text-foreground/80'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                setLockedProperties((prev) => ({
+                  ...prev,
+                  ...Object.fromEntries(groupProperties.map((property) => [property, !allRowsLocked])),
+                }));
+              }}
+              disabled={groupProperties.length === 0}
+              title={allRowsLocked ? `Unlock ${group.label} rows` : `Lock ${group.label} rows`}
+              aria-label={allRowsLocked ? `Unlock ${group.label} rows` : `Lock ${group.label} rows`}
+              aria-pressed={allRowsLocked}
+            >
+              <Lock className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'self-center text-muted-foreground hover:text-foreground',
+                groupAutoKeyEnabled && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleGroupAutoKeyToggle(group);
+              }}
+              disabled={disabled || unlockedRows.length === 0 || !onPropertyValueCommit}
+              title={groupAutoKeyEnabled ? `Auto-key enabled for ${group.label}` : `Enable auto-key for ${group.label}`}
+              aria-label={groupAutoKeyEnabled ? `Auto-key enabled for ${group.label}` : `Enable auto-key for ${group.label}`}
+              aria-pressed={groupAutoKeyEnabled}
+            >
+              <Timer className={MINI_ICON_CLASS} />
+            </Button>
+          </div>
+          <button
+            type="button"
+            className="group flex min-w-0 flex-1 items-center gap-px rounded-sm px-0 text-left leading-none transition-colors hover:bg-background/40"
+            onClick={() => toggleGroup(group.id)}
+            aria-expanded={isOpen}
+            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${group.label}`}
           >
-            {ticks.map((frame) => (
-              <div
-                key={frame}
-                className="absolute inset-y-0 border-l border-border/30 pointer-events-none"
-                style={{ left: frameToX(frame) }}
+            {isOpen ? (
+              <ChevronDown className={cn(MINI_ICON_CLASS, 'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80')} />
+            ) : (
+              <ChevronRight className={cn(MINI_ICON_CLASS, 'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80')} />
+            )}
+            <span className="truncate pl-px text-[9px] font-medium uppercase leading-none tracking-[0.06em] text-foreground/90">
+              {group.label}
+            </span>
+          </button>
+          <div className="ml-auto flex items-center gap-0 rounded-sm border border-border/70 bg-background/90 px-px shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleRowNavigate(group.prevKeyframe?.property ?? group.rows[0]?.property ?? 'x', group.prevKeyframe?.keyframe ?? null);
+              }}
+              disabled={disabled || group.prevKeyframe === null || !onNavigateToKeyframe}
+              title={`Previous ${group.label} keyframe`}
+              aria-label={`Previous ${group.label} keyframe`}
+            >
+              <ChevronLeft className={MINI_ICON_CLASS} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                MINI_ICON_BUTTON_CLASS,
+                'hover:bg-transparent',
+                group.hasKeyframeAtCurrentFrame
+                  ? 'text-primary hover:text-primary'
+                  : 'text-muted-foreground hover:text-foreground',
+                isCurrentFrameBlocked && !group.hasKeyframeAtCurrentFrame && 'opacity-40 cursor-not-allowed'
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleGroupToggleKeyframes(group);
+              }}
+              disabled={!canToggleCurrentFrame}
+              title={
+                hasUnlockedCurrentKeyframes
+                  ? `Remove ${group.label} keyframes at playhead`
+                  : `Toggle ${group.label} keyframes at playhead`
+              }
+              aria-label={
+                hasUnlockedCurrentKeyframes
+                  ? `Remove ${group.label} keyframes at playhead`
+                  : `Toggle ${group.label} keyframes at playhead`
+              }
+            >
+              <span
+                className={cn(
+                  'block h-[7px] w-[7px] rotate-45 border transition-colors',
+                  hasUnlockedCurrentKeyframes
+                    ? 'border-primary bg-primary'
+                    : 'border-current bg-transparent'
+                )}
               />
-            ))}
-
-            {transitionBlockedRanges.map((range, index) => (
-              <div
-                key={`${row.property}-${index}-${range.start}-${range.end}`}
-                className="absolute inset-y-0 bg-destructive/10 border-x border-destructive/20 pointer-events-none"
-                style={{
-                  left: frameToX(range.start),
-                  width: frameToX(range.end) - frameToX(range.start),
-                }}
-              />
-            ))}
-
-            {row.keyframes.map((keyframe) => {
-              const renderedX = renderedKeyframeXById.get(keyframe.id);
-              if (renderedX === undefined) return null;
-              const selected = selectedKeyframeIds.has(keyframe.id);
-              return (
-                <button
-                  key={keyframe.id}
-                  ref={(node) => setKeyframeButtonRef(keyframe.id, node)}
-                  type="button"
-                  className="group absolute z-10 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center"
-                  style={{
-                    left: renderedX,
-                    top: '50%',
-                  }}
-                  onPointerDown={(event) =>
-                    handleKeyframePointerDown(row.property, keyframe.id, event)
-                  }
-                  onClick={(event) => event.stopPropagation()}
-                  aria-label={`Keyframe at frame ${keyframe.frame}`}
-                >
-                  <span
-                    className={cn(
-                      'pointer-events-none block h-2 w-2 rotate-45 border transition-colors',
-                      selected
-                        ? 'border-orange-50 bg-orange-500 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
-                        : 'border-transparent bg-orange-500 group-hover:bg-orange-400'
-                    )}
-                  />
-                </button>
-              );
-            })}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleRowNavigate(group.nextKeyframe?.property ?? group.rows[0]?.property ?? 'x', group.nextKeyframe?.keyframe ?? null);
+              }}
+              disabled={disabled || group.nextKeyframe === null || !onNavigateToKeyframe}
+              title={`Next ${group.label} keyframe`}
+              aria-label={`Next ${group.label} keyframe`}
+            >
+              <ChevronRight className={MINI_ICON_CLASS} />
+            </Button>
+            <div className="mx-[1px] h-3 w-px bg-border/80" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleClearGroup(group);
+              }}
+              disabled={!canClearAny}
+              title={`Clear all ${group.label} keyframes`}
+              aria-label={`Clear all ${group.label} keyframes`}
+            >
+              <X className={MINI_ICON_CLASS} />
+            </Button>
           </div>
         </div>
-      )),
+      );
+    },
     [
-      sheetRows,
+      autoKeyEnabledByProperty,
+      canAddKeyframeForRow,
+      canClearRow,
+      disabled,
+      expandedGroups,
+      handleClearGroup,
+      handleGroupAutoKeyToggle,
+      handleGroupToggleKeyframes,
+      handleRowNavigate,
+      graphDisplayProperty,
+      isPropertyLocked,
+      isCurrentFrameBlocked,
+      onRemoveKeyframes,
+      onNavigateToKeyframe,
+      onPropertyValueCommit,
+      showPropertyCurve,
+      toggleGroup,
+    ]
+  );
+  const rowElements = useMemo(
+    () =>
+      renderedSheetEntries.entries.map((entry) => {
+        if (entry.type === 'group') {
+          return (
+            <div
+              key={entry.group.id}
+              className="grid w-full border-b border-border/60"
+              style={{ ...propertyGridStyle, height: GROUP_HEADER_HEIGHT }}
+            >
+              {renderGroupHeaderContent(entry.group)}
+              <div className="border-l border-border/60 bg-muted/20" />
+            </div>
+          );
+        }
+
+        const { row } = entry;
+        const rowLocked = isPropertyLocked(row.property);
+        return (
+          <div key={row.property} className="grid border-b border-border/60" style={{ ...propertyGridStyle, height: ROW_HEIGHT }}>
+            {renderPropertyRowContent(row, { indented: true })}
+            <div
+              className="relative border-l border-border/60 overflow-hidden"
+              onPointerDown={(event) => handleRowPointerDown(row.property, event)}
+            >
+              {ticks.map((frame) => (
+                <div
+                  key={frame}
+                  className="absolute inset-y-0 border-l border-border/30 pointer-events-none"
+                  style={{ left: frameToX(frame) }}
+                />
+              ))}
+
+              {transitionBlockedRanges.map((range, index) => (
+                <div
+                  key={`${row.property}-${index}-${range.start}-${range.end}`}
+                  className="absolute inset-y-0 bg-destructive/10 border-x border-destructive/20 pointer-events-none"
+                  style={{
+                    left: frameToX(range.start),
+                    width: frameToX(range.end) - frameToX(range.start),
+                  }}
+                />
+              ))}
+
+              {row.keyframes.map((keyframe) => {
+                const renderedX = renderedKeyframeXById.get(keyframe.id);
+                if (renderedX === undefined) return null;
+                const selected = selectedKeyframeIds.has(keyframe.id);
+                return (
+                  <button
+                    key={keyframe.id}
+                    ref={(node) => setKeyframeButtonRef(keyframe.id, node)}
+                    type="button"
+                    className={cn(
+                      'group absolute z-10 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center',
+                      rowLocked && 'cursor-not-allowed opacity-50'
+                    )}
+                    style={{
+                      left: renderedX,
+                      top: '50%',
+                    }}
+                    disabled={rowLocked || disabled}
+                    onPointerDown={(event) =>
+                      handleKeyframePointerDown(row.property, keyframe.id, event)
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`Keyframe at frame ${keyframe.frame}`}
+                  >
+                    <span
+                      className={cn(
+                        'pointer-events-none block h-2 w-2 rotate-45 border transition-colors',
+                        selected
+                          ? 'border-orange-50 bg-orange-500 shadow-[0_0_0_1px_rgba(249,115,22,0.45)]'
+                          : 'border-transparent bg-orange-500 group-hover:bg-orange-400'
+                      )}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }),
+    [
+      renderedSheetEntries.entries,
       propertyGridStyle,
       handleRowPointerDown,
+      renderGroupHeaderContent,
       renderPropertyRowContent,
+      isPropertyLocked,
       ticks,
       frameToX,
       transitionBlockedRanges,
@@ -1710,35 +2444,105 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   );
   const propertyColumnElements = useMemo(
     () =>
-      propertyRows.map((row) => (
-        <div key={row.property} className="border-b border-border/60" style={{ height: ROW_HEIGHT }}>
-          {renderPropertyRowContent(row)}
-        </div>
-      )),
-    [propertyRows, renderPropertyRowContent]
+      groupedPropertyRows.flatMap((group) => {
+        const groupOpen = expandedGroups[group.id] ?? true;
+        const elements: React.ReactNode[] = [
+          <div
+            key={group.id}
+            className="h-6 border-b border-border/60"
+          >
+            {renderGroupHeaderContent(group)}
+          </div>,
+        ];
+
+        if (!groupOpen) {
+          return elements;
+        }
+
+        return elements.concat(
+          group.rows.map((row) => (
+            <div key={row.property} className="border-b border-border/60" style={{ height: ROW_HEIGHT }}>
+              {renderPropertyRowContent(row, { indented: true })}
+            </div>
+          ))
+        );
+      }),
+    [expandedGroups, groupedPropertyRows, renderGroupHeaderContent, renderPropertyRowContent]
   );
+  const emptyStateMessage = hasPropertyFilters
+    ? 'No parameters match the current view'
+    : 'No keyframes to display';
 
   return (
     <div className={cn('flex h-full flex-col gap-0.5 overflow-hidden', className)} style={{ height, width }}>
       <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
         <div className="flex items-center gap-2">
-          <Select
-            value={activeSelectedProperty ?? 'all'}
-            onValueChange={handlePropertySelect}
-            disabled={disabled || availableProperties.length === 0}
-          >
-            <SelectTrigger className="w-[140px] h-7 text-xs focus:ring-0 focus:ring-offset-0">
-              <SelectValue placeholder="Select property" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">All Properties</SelectItem>
-              {availableProperties.map((property) => (
-                <SelectItem key={property} value={property} className="text-xs">
-                  {PROPERTY_LABELS[property]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">Parameters</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  disabled={disabled || availableProperties.length === 0}
+                  aria-label="Parameter display options"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[240px]">
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setShowKeyframedOnly((prev) => !prev);
+                  }}
+                >
+                  <Check className={cn('h-3.5 w-3.5', !showKeyframedOnly && 'opacity-0')} />
+                  Display Parameters with Keyframes
+                </DropdownMenuItem>
+                {allPropertyGroups.length > 0 && <DropdownMenuSeparator />}
+                {allPropertyGroups.map((group) => {
+                  const isVisible = visibleGroups[group.id] ?? true;
+                  return (
+                    <DropdownMenuItem
+                      key={group.id}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        toggleVisibleGroup(group.id);
+                      }}
+                    >
+                      <Check className={cn('h-3.5 w-3.5', !isVisible && 'opacity-0')} />
+                      {`Display ${group.label} Parameters`}
+                    </DropdownMenuItem>
+                  );
+                })}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setAllGroupsExpanded(true)}>
+                  Expand All Parameters
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setAllGroupsExpanded(false)}>
+                  Collapse All Parameters
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={resetParameterView}>
+                  Reset Parameter View
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {hasPropertyFilters && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+              Filtered
+            </span>
+          )}
+
+          {visualizationMode === 'graph' && graphDisplayProperty && (
+            <span className="text-xs text-muted-foreground">
+              Graph: {PROPERTY_LABELS[graphDisplayProperty]}{graphDisplayPropertyLocked ? ' (Locked)' : ''}
+            </span>
+          )}
 
           <span className="text-xs text-muted-foreground">
             {visibleKeyframes.length} keyframe{visibleKeyframes.length !== 1 ? 's' : ''}
@@ -1894,7 +2698,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
             {propertyRows.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No keyframes to display
+                {emptyStateMessage}
               </div>
             ) : (
               <div className="flex min-h-0" style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}>
@@ -1931,6 +2735,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                       showToolbar={false}
                       showKeyboardHints={false}
                       borderless
+                      disabled={disabled || graphDisplayPropertyLocked}
                     />
                   ) : null}
                 </div>
@@ -1971,7 +2776,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             <div ref={scrollAreaRef} className="overflow-auto" style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}>
               {sheetRows.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  No keyframes to display
+                  {emptyStateMessage}
                 </div>
               ) : (
                 <div className="relative">

@@ -1,0 +1,158 @@
+import type { ComponentProps } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { DopesheetEditor } from './index';
+
+describe('DopesheetEditor property groups', () => {
+  beforeAll(() => {
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+  });
+
+  function renderEditor(overrides: Partial<ComponentProps<typeof DopesheetEditor>> = {}) {
+    render(
+      <DopesheetEditor
+        itemId="item-1"
+        keyframesByProperty={{ x: [], volume: [] }}
+        propertyValues={{ x: 100, volume: -6 }}
+        currentFrame={12}
+        width={640}
+        height={240}
+        {...overrides}
+      />
+    );
+  }
+
+  it('renders accordion-style groups and collapses their rows', () => {
+    renderEditor();
+
+    expect(screen.getByRole('button', { name: /collapse transform/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /collapse audio/i })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: /x position value at playhead/i })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: /volume \(db\) value at playhead/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /collapse transform/i }));
+
+    expect(screen.queryByRole('spinbutton', { name: /x position value at playhead/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /expand transform/i })).toBeTruthy();
+    expect(screen.getByRole('spinbutton', { name: /volume \(db\) value at playhead/i })).toBeTruthy();
+  });
+
+  it('filters parameter groups from the menu', () => {
+    renderEditor();
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: /parameter display options/i }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByText(/display audio parameters/i));
+
+    expect(screen.getByRole('spinbutton', { name: /x position value at playhead/i, hidden: true })).toBeTruthy();
+    expect(screen.queryByRole('spinbutton', { name: /volume \(db\) value at playhead/i, hidden: true })).toBeNull();
+  });
+
+  it('adds keyframes for every property in a group', () => {
+    const onAddKeyframe = vi.fn();
+    renderEditor({
+      keyframesByProperty: { x: [], y: [] },
+      propertyValues: { x: 100, y: 200 },
+      onAddKeyframe,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /toggle transform keyframes at playhead/i }));
+
+    expect(onAddKeyframe).toHaveBeenCalledTimes(2);
+    expect(onAddKeyframe).toHaveBeenNthCalledWith(1, 'x', 12);
+    expect(onAddKeyframe).toHaveBeenNthCalledWith(2, 'y', 12);
+  });
+
+  it('locks a row and disables its edit controls', () => {
+    renderEditor({
+      keyframesByProperty: { x: [], y: [] },
+      propertyValues: { x: 100, y: 200 },
+      onAddKeyframe: vi.fn(),
+      onPropertyValueCommit: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /lock x position row/i }));
+
+    expect(screen.getByRole('button', { name: /unlock x position row/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('spinbutton', { name: /x position value at playhead/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /toggle x position keyframe at playhead/i })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: /y position value at playhead/i })).not.toBeDisabled();
+  });
+
+  it('uses the curve button to choose the graph property', () => {
+    const onPropertyChange = vi.fn();
+    renderEditor({
+      keyframesByProperty: { x: [], y: [] },
+      propertyValues: { x: 100, y: 200 },
+      visualizationMode: 'graph',
+      onPropertyChange,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /show y position curve/i }));
+
+    expect(onPropertyChange).toHaveBeenCalledWith('y');
+  });
+
+  it('shows matching header icons and supports bulk group controls', () => {
+    renderEditor({
+      keyframesByProperty: { x: [], y: [] },
+      propertyValues: { x: 100, y: 200 },
+      onPropertyValueCommit: vi.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: /show transform curve/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /lock transform rows/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /enable auto-key for transform/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /lock transform rows/i }));
+
+    expect(screen.getByRole('button', { name: /unlock transform rows/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('spinbutton', { name: /x position value at playhead/i })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: /y position value at playhead/i })).toBeDisabled();
+  });
+
+  it('clears row and group keyframes', () => {
+    const onRemoveKeyframes = vi.fn();
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+        y: [{ id: 'ky-1', frame: 16, value: 200, easing: 'linear' }],
+      },
+      propertyValues: { x: 100, y: 200 },
+      onRemoveKeyframes,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /clear x position keyframes/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clear all transform keyframes/i }));
+
+    expect(onRemoveKeyframes).toHaveBeenNthCalledWith(1, [
+      { itemId: 'item-1', property: 'x', keyframeId: 'kx-1' },
+    ]);
+    expect(onRemoveKeyframes).toHaveBeenNthCalledWith(2, [
+      { itemId: 'item-1', property: 'x', keyframeId: 'kx-1' },
+      { itemId: 'item-1', property: 'y', keyframeId: 'ky-1' },
+    ]);
+  });
+
+  it('navigates group keyframes with the header arrows', () => {
+    const onNavigateToKeyframe = vi.fn();
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+        y: [{ id: 'ky-1', frame: 16, value: 200, easing: 'linear' }],
+      },
+      propertyValues: { x: 100, y: 200 },
+      onNavigateToKeyframe,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /previous transform keyframe/i }));
+    fireEvent.click(screen.getByRole('button', { name: /next transform keyframe/i }));
+
+    expect(onNavigateToKeyframe).toHaveBeenNthCalledWith(1, 8);
+    expect(onNavigateToKeyframe).toHaveBeenNthCalledWith(2, 16);
+  });
+});
