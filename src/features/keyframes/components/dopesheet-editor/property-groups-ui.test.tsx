@@ -165,6 +165,7 @@ describe('DopesheetEditor property groups', () => {
     renderEditor();
 
     expect(screen.getAllByRole('slider')).toHaveLength(1);
+    expect(screen.queryByTitle(/snapping enabled/i)).toBeNull();
   });
 
   it('shows horizontal and vertical zoom sliders in graph mode', () => {
@@ -296,6 +297,16 @@ describe('DopesheetEditor property groups', () => {
     expect(screen.getByText(/display time ruler in seconds/i)).toBeTruthy();
     expect(screen.getByText(/display time ruler in frames/i)).toBeTruthy();
     expect(screen.getByText(/show all handles/i)).toBeTruthy();
+  });
+
+  it('shows the view options menu in sheet mode too', () => {
+    renderEditor({ visualizationMode: 'dopesheet' });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: /sheet view options/i }), { button: 0, ctrlKey: false });
+
+    expect(screen.getByText(/display time ruler in seconds/i)).toBeTruthy();
+    expect(screen.getByText(/display time ruler in frames/i)).toBeTruthy();
+    expect(screen.queryByText(/show all handles/i)).toBeNull();
   });
 
   it('renders clipboard controls in the bottom row', () => {

@@ -21,7 +21,6 @@ import {
   Timer,
   Trash2,
   X,
-  Magnet,
 } from 'lucide-react';
 import { cn } from '@/shared/ui/cn';
 import { Button } from '@/components/ui/button';
@@ -674,7 +673,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const skipNextGraphVisibilitySaveRef = useRef(false);
   const [timelineWidth, setTimelineWidth] = useState(0);
   const [graphPaneSize, setGraphPaneSize] = useState({ width: 0, height: 0 });
-  const [snapEnabled, setSnapEnabled] = useState(true);
+  const snapEnabled = true;
   const [marqueeRect, setMarqueeRect] = useState<KeyframeMarqueeRect | null>(null);
   const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({});
   const [editingValueProperty, setEditingValueProperty] = useState<AnimatableProperty | null>(null);
@@ -3465,20 +3464,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               <Trash2 className="h-3 w-3" />
             </Button>
             <div className="mx-0.5 h-3.5 w-px bg-border/80" />
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                'h-6 w-6 p-0',
-                snapEnabled && 'bg-primary text-primary-foreground hover:bg-primary/90'
-              )}
-              onClick={() => setSnapEnabled((prev) => !prev)}
-              disabled={disabled}
-              title={snapEnabled ? 'Snapping enabled' : 'Enable snapping'}
-            >
-              <Magnet className="h-3 w-3" />
-            </Button>
-            <div className="mx-0.5 h-3.5 w-px bg-border/80" />
             <MiniZoomControl
               icon={<MoveHorizontal className="h-3 w-3" />}
               label="Horizontal zoom"
@@ -3501,61 +3486,63 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               </>
             )}
           </div>
-          {visualizationMode === 'graph' && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  disabled={disabled}
-                  aria-label="Graph view options"
-                  title="Graph view options"
-                >
-                  <MoreHorizontal className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[220px]">
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setGraphRulerUnit('seconds');
-                  }}
-                >
-                  <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'seconds' && 'opacity-0')} />
-                  Display Time Ruler in Seconds
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setGraphRulerUnit('frames');
-                  }}
-                >
-                  <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'frames' && 'opacity-0')} />
-                  Display Time Ruler in Frames
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setShowAllGraphHandles((prev) => !prev);
-                  }}
-                >
-                  <Check className={cn('h-3.5 w-3.5', !showAllGraphHandles && 'opacity-0')} />
-                  Show All Handles
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setAutoZoomGraphHeight((prev) => !prev);
-                  }}
-                >
-                  <Check className={cn('h-3.5 w-3.5', !autoZoomGraphHeight && 'opacity-0')} />
-                  Auto Zoom Graph Height
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                disabled={disabled}
+                aria-label={visualizationMode === 'graph' ? 'Graph view options' : 'Sheet view options'}
+                title={visualizationMode === 'graph' ? 'Graph view options' : 'Sheet view options'}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[220px]">
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setGraphRulerUnit('seconds');
+                }}
+              >
+                <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'seconds' && 'opacity-0')} />
+                Display Time Ruler in Seconds
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setGraphRulerUnit('frames');
+                }}
+              >
+                <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'frames' && 'opacity-0')} />
+                Display Time Ruler in Frames
+              </DropdownMenuItem>
+              {visualizationMode === 'graph' && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setShowAllGraphHandles((prev) => !prev);
+                    }}
+                  >
+                    <Check className={cn('h-3.5 w-3.5', !showAllGraphHandles && 'opacity-0')} />
+                    Show All Handles
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setAutoZoomGraphHeight((prev) => !prev);
+                    }}
+                  >
+                    <Check className={cn('h-3.5 w-3.5', !autoZoomGraphHeight && 'opacity-0')} />
+                    Auto Zoom Graph Height
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -3566,6 +3553,17 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         )}
         onWheel={visualizationMode === 'dopesheet' ? handleWheel : undefined}
       >
+        <div
+          data-testid="dopesheet-playhead-clip"
+          className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
+          style={{ left: PROPERTY_COLUMN_WIDTH }}
+        >
+          <div
+            data-testid="dopesheet-playhead-line"
+            className="absolute top-0 bottom-0 w-px bg-primary/80"
+            style={{ left: playheadLeft }}
+          />
+        </div>
         {visualizationMode === 'graph' ? (
           <>
             <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
@@ -3633,7 +3631,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                       onNavigateToKeyframe={onNavigateToKeyframe}
                       transitionBlockedRanges={transitionBlockedRanges}
                       snapEnabled={snapEnabled}
-                      onSnapEnabledChange={setSnapEnabled}
                       showToolbar={false}
                       showKeyboardHints={false}
                       borderless
@@ -3651,17 +3648,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           </>
         ) : (
           <>
-            <div
-              data-testid="dopesheet-playhead-clip"
-              className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-              style={{ left: PROPERTY_COLUMN_WIDTH }}
-            >
-              <div
-                data-testid="dopesheet-playhead-line"
-                className="absolute top-0 bottom-0 w-px bg-primary/80"
-                style={{ left: playheadLeft }}
-              />
-            </div>
             <div className="grid border-b border-border bg-muted/25" style={propertyGridStyle}>
               <div className="px-1 flex items-center text-[10px] font-medium text-muted-foreground" style={{ height: RULER_HEIGHT }}>
                 Property

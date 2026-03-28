@@ -4,7 +4,7 @@
  */
 
 import { memo, useState, useCallback, useMemo, useEffect, useRef, useId } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, RotateCcw, ChevronLeft, ChevronRight, Plus, Trash2, Magnet } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/shared/ui/cn';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -85,8 +85,6 @@ interface ValueGraphEditorProps {
   transitionBlockedRanges?: BlockedFrameRange[];
   /** Controls whether snapping is enabled */
   snapEnabled?: boolean;
-  /** Callback when snapping changes */
-  onSnapEnabledChange?: (enabled: boolean) => void;
   /** Whether to render the internal toolbar */
   showToolbar?: boolean;
   /** Whether to render the drag hint footer */
@@ -141,7 +139,6 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
   snapEnabled: controlledSnapEnabled,
-  onSnapEnabledChange,
   showToolbar = true,
   showKeyboardHints = true,
   borderless = false,
@@ -250,16 +247,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     [onFrameViewportChange]
   );
   
-  // Snapping state
-  const [internalSnapEnabled, setInternalSnapEnabled] = useState(true);
-  const snapEnabled = controlledSnapEnabled ?? internalSnapEnabled;
-
-  const handleSnapEnabledChange = useCallback((enabled: boolean) => {
-    if (controlledSnapEnabled === undefined) {
-      setInternalSnapEnabled(enabled);
-    }
-    onSnapEnabledChange?.(enabled);
-  }, [controlledSnapEnabled, onSnapEnabledChange]);
+  const snapEnabled = controlledSnapEnabled ?? true;
 
   // Update viewport when keyframes or property changes
   useEffect(() => {
@@ -953,30 +941,6 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
           {/* Separator */}
           <div className="w-px h-4 bg-border mx-1" />
 
-          {/* Snapping toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-7 w-7 p-0",
-                  snapEnabled && "bg-primary text-primary-foreground hover:bg-primary/90"
-                )}
-                onClick={() => handleSnapEnabledChange(!snapEnabled)}
-                disabled={disabled}
-              >
-                <Magnet className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {snapEnabled ? 'Snapping enabled (hold Ctrl to disable temporarily)' : 'Enable snapping'}
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Separator */}
-          <div className="w-px h-4 bg-border mx-1" />
-
           {/* Precise value inputs (always reserve space to prevent layout shift) */}
           <div className="flex items-center gap-0.5">
             <span className="text-[10px] text-muted-foreground">F:</span>
@@ -1156,6 +1120,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
             onScrubStart={handlePlayheadScrubStart}
             onScrubEnd={handlePlayheadScrubEnd}
             disabled={disabled}
+            showVisuals={false}
           />
 
           {/* Bezier handles (for selected keyframes with cubic-bezier easing) */}

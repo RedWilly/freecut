@@ -206,6 +206,8 @@ interface GraphPlayheadProps {
   onScrubEnd?: () => void;
   /** Whether scrubbing is disabled */
   disabled?: boolean;
+  /** Whether to render the visible playhead line/marker */
+  showVisuals?: boolean;
 }
 
 /**
@@ -222,6 +224,7 @@ export const GraphPlayhead = memo(function GraphPlayhead({
   onScrubStart,
   onScrubEnd,
   disabled = false,
+  showVisuals = true,
 }: GraphPlayheadProps) {
   const { startFrame, endFrame, width, height } = viewport;
 
@@ -313,38 +316,39 @@ export const GraphPlayhead = memo(function GraphPlayhead({
           style={{ cursor: 'ew-resize' }}
         />
       )}
-      {/* Visible playhead line */}
-      <line
-        x1={x}
-        y1={graphTop}
-        x2={x}
-        y2={graphTop + graphHeight}
-        stroke="#ef4444"
-        strokeWidth={2}
-        strokeOpacity={0.9}
-        onPointerDown={isInteractive ? handlePointerDown : undefined}
-        style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
-      />
-      {/* Playhead top marker (draggable handle) */}
-      <path
-        d={`M ${x - 6} ${graphTop} L ${x + 6} ${graphTop} L ${x} ${graphTop + 8} Z`}
-        fill="#ef4444"
-        onPointerDown={isInteractive ? handlePointerDown : undefined}
-        style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
-      />
-      {/* Frame number label */}
-      <text
-        x={x}
-        y={graphTop - 4}
-        textAnchor="middle"
-        fill="#ef4444"
-        fontSize={9}
-        fontFamily="monospace"
-        fontWeight="bold"
-        style={{ pointerEvents: 'none' }}
-      >
-        {totalFrames ? `F${Math.round(frame)}/${totalFrames - 1}` : `F${Math.round(frame)}`}
-      </text>
+      {showVisuals && (
+        <>
+          <line
+            x1={x}
+            y1={graphTop}
+            x2={x}
+            y2={graphTop + graphHeight}
+            stroke="#ef4444"
+            strokeWidth={2}
+            strokeOpacity={0.9}
+            onPointerDown={isInteractive ? handlePointerDown : undefined}
+            style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
+          />
+          <path
+            d={`M ${x - 6} ${graphTop} L ${x + 6} ${graphTop} L ${x} ${graphTop + 8} Z`}
+            fill="#ef4444"
+            onPointerDown={isInteractive ? handlePointerDown : undefined}
+            style={{ cursor: isInteractive ? 'ew-resize' : 'default' }}
+          />
+          <text
+            x={x}
+            y={graphTop - 4}
+            textAnchor="middle"
+            fill="#ef4444"
+            fontSize={9}
+            fontFamily="monospace"
+            fontWeight="bold"
+            style={{ pointerEvents: 'none' }}
+          >
+            {totalFrames ? `F${Math.round(frame)}/${totalFrames - 1}` : `F${Math.round(frame)}`}
+          </text>
+        </>
+      )}
     </g>
   );
 });

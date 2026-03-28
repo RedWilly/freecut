@@ -6,6 +6,7 @@ describe('DopesheetEditor playhead overlay', () => {
   beforeAll(() => {
     class ResizeObserverMock {
       observe() {}
+      unobserve() {}
       disconnect() {}
     }
 
@@ -47,6 +48,7 @@ describe('DopesheetEditor playhead overlay', () => {
     );
 
     expect(screen.getByTestId('dopesheet-ruler')).toHaveClass('cursor-ew-resize');
+    expect(screen.getByTestId('dopesheet-playhead-line')).toBeInTheDocument();
   });
 
   it('keeps the navigator in the right viewport column', () => {
