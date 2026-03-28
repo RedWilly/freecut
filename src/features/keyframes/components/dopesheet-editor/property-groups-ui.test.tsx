@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DopesheetEditor } from './index';
 
 describe('DopesheetEditor property groups', () => {
@@ -11,6 +11,10 @@ describe('DopesheetEditor property groups', () => {
     }
 
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
   });
 
   function renderEditor(overrides: Partial<ComponentProps<typeof DopesheetEditor>> = {}) {
@@ -118,6 +122,42 @@ describe('DopesheetEditor property groups', () => {
     fireEvent.click(screen.getByText('X Position'));
 
     expect(yToggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('restores graph visibility toggles after remount', () => {
+    const props = {
+      itemId: 'item-persisted-visibility',
+      keyframesByProperty: { x: [], y: [], rotation: [] },
+      propertyValues: { x: 100, y: 200, rotation: 15 },
+      visualizationMode: 'graph' as const,
+    };
+
+    const { unmount } = render(
+      <DopesheetEditor
+        currentFrame={12}
+        width={640}
+        height={240}
+        {...props}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /show y position curve/i }));
+    fireEvent.click(screen.getByRole('button', { name: /show rotation curve/i }));
+
+    unmount();
+
+    render(
+      <DopesheetEditor
+        currentFrame={12}
+        width={640}
+        height={240}
+        {...props}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /show x position curve/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /show y position curve/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /show rotation curve/i })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows interpolation icon controls only in graph view', () => {

@@ -211,6 +211,7 @@ const MARQUEE_SCROLL_MAX_SPEED = 16;
 const EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY: Partial<Record<AnimatableProperty, boolean>> = {};
 const MINI_ICON_BUTTON_CLASS = 'h-4 w-4 flex-shrink-0 rounded-sm p-0 leading-none';
 const MINI_ICON_CLASS = 'h-[8px] w-[8px]';
+const GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY = 'timeline:keyframeGraphVisibleProperties';
 
 function InterpolationTypeIcon({ type }: { type: EasingType }) {
   const iconProps = {
@@ -452,6 +453,50 @@ function getDefaultGraphVisibleProperties(
   return firstProperty ? new Set([firstProperty]) : new Set();
 }
 
+function loadGraphVisibleProperties(
+  itemId: string,
+  properties: AnimatableProperty[],
+  selectedProperty: AnimatableProperty | null | undefined
+): Set<AnimatableProperty> {
+  const fallback = getDefaultGraphVisibleProperties(properties, selectedProperty);
+
+  try {
+    const raw = localStorage.getItem(`${GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY}:${itemId}`);
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return fallback;
+    }
+
+    const normalized = parsed.filter(
+      (property): property is AnimatableProperty =>
+        typeof property === 'string' && properties.includes(property as AnimatableProperty)
+    );
+
+    if (parsed.length === 0) {
+      return new Set();
+    }
+
+    return normalized.length > 0 ? new Set(normalized) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveGraphVisibleProperties(itemId: string, properties: Set<AnimatableProperty>) {
+  try {
+    localStorage.setItem(
+      `${GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY}:${itemId}`,
+      JSON.stringify([...properties])
+    );
+  } catch {
+    // ignore localStorage write errors
+  }
+}
+
 export const DopesheetEditor = memo(function DopesheetEditor({
   frameViewport,
   onFrameViewportChange,
@@ -498,6 +543,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const graphPaneRef = useRef<HTMLDivElement>(null);
   const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const selectedPropertyRef = useRef<AnimatableProperty | null>(selectedProperty);
+  const skipNextGraphVisibilitySaveRef = useRef(false);
   const [timelineWidth, setTimelineWidth] = useState(0);
   const [graphPaneSize, setGraphPaneSize] = useState({ width: 0, height: 0 });
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -616,12 +662,15 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const [graphRulerUnit, setGraphRulerUnit] = useState<'frames' | 'seconds'>('frames');
   const [showAllGraphHandles, setShowAllGraphHandles] = useState(false);
   const [graphVisibleProperties, setGraphVisibleProperties] = useState<Set<AnimatableProperty>>(() =>
-    getDefaultGraphVisibleProperties(availableProperties, selectedProperty)
+    loadGraphVisibleProperties(itemId, availableProperties, selectedProperty)
   );
 
-  // Reset visible curves when clip selection changes
+  // Restore visible curves when clip selection or available properties change
   useEffect(() => {
-    setGraphVisibleProperties(getDefaultGraphVisibleProperties(availableProperties, selectedPropertyRef.current));
+    skipNextGraphVisibilitySaveRef.current = true;
+    setGraphVisibleProperties(
+      loadGraphVisibleProperties(itemId, availableProperties, selectedPropertyRef.current)
+    );
   }, [itemId, availableProperties]);
 
   useEffect(() => {
@@ -629,12 +678,13 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   }, [selectedProperty]);
 
   useEffect(() => {
-    if (visualizationMode === 'graph') {
+    if (skipNextGraphVisibilitySaveRef.current) {
+      skipNextGraphVisibilitySaveRef.current = false;
       return;
     }
 
-    setGraphVisibleProperties(getDefaultGraphVisibleProperties(availableProperties, selectedProperty));
-  }, [availableProperties, selectedProperty, visualizationMode]);
+    saveGraphVisibleProperties(itemId, graphVisibleProperties);
+  }, [graphVisibleProperties, itemId]);
 
   useEffect(() => {
     const groupIds = new Set(allPropertyGroups.map((group) => group.id));
@@ -2314,9 +2364,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           frame: keyframe.frame,
           selected: selectedKeyframeIds.has(keyframe.id),
           draggable: selectedRefIds.includes(keyframe.id),
-          label: selectedRefIds.includes(keyframe.id)
-            ? `Slide selected keyframe at frame ${keyframe.frame}`
-            : `Select keyframe at frame ${keyframe.frame}`,
         }));
       }
 
@@ -2327,7 +2374,6 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           frame: keyframe.frame,
           selected: true,
           draggable: !isPropertyLocked(property),
-          label: `Slide selected keyframe at frame ${keyframe.frame}`,
         }));
     },
     [activeSelectedProperty, isPropertyLocked, keyframesByProperty, selectedKeyframeIds, selectedRefIds, visibleKeyframes, visualizationMode]

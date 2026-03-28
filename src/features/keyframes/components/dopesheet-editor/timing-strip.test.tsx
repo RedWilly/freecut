@@ -74,6 +74,9 @@ describe('DopesheetEditor timing strip', () => {
 
     fireEvent.pointerDown(marker, { button: 0, pointerId: 1, clientX: 100 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 420 });
+
+    expect(screen.getByTestId('keyframe-timing-strip-tooltip-kf-1')).toHaveTextContent('29');
+
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 420 });
 
     expect(onDragStart).toHaveBeenCalledTimes(1);

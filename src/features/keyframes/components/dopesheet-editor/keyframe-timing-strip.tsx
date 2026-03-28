@@ -14,7 +14,6 @@ interface KeyframeTimingStripMarker {
   frame: number;
   selected: boolean;
   draggable: boolean;
-  label: string;
 }
 
 interface KeyframeTimingStripProps {
@@ -34,6 +33,18 @@ interface DragState {
   startClientX: number;
   started: boolean;
   selectedIds: string[];
+}
+
+function getMarkerLabel(marker: KeyframeTimingStripMarker, frame: number): string {
+  if (marker.selected && marker.draggable) {
+    return `Slide selected keyframe at frame ${frame}`;
+  }
+
+  if (marker.selected) {
+    return `Selected keyframe at frame ${frame}`;
+  }
+
+  return `Select keyframe at frame ${frame}`;
 }
 
 function getMarkerLeft(
@@ -189,6 +200,7 @@ export function KeyframeTimingStrip({
 
         {renderedMarkers.map((marker) => {
           const left = getMarkerLeft(marker.frame, metrics);
+          const label = getMarkerLabel(marker, marker.frame);
           const markerStyle = {
             left,
             top: '50%',
@@ -212,11 +224,32 @@ export function KeyframeTimingStrip({
               )}
               style={markerStyle}
               onPointerDown={handleMarkerPointerDown(marker.id, marker.selected)}
-              title={marker.label}
-              aria-label={marker.label}
+              title={label}
+              aria-label={label}
             >
-              <span className="sr-only">{marker.label}</span>
+              <span className="sr-only">{label}</span>
             </button>
+          );
+        })}
+        {renderedMarkers.map((marker) => {
+          if (previewFrames?.[marker.id] === undefined) {
+            return null;
+          }
+
+          const left = getMarkerLeft(marker.frame, metrics);
+
+          return (
+            <div
+              key={`tooltip-${marker.id}`}
+              data-testid={`keyframe-timing-strip-tooltip-${marker.id}`}
+              className="pointer-events-none absolute -translate-x-1/2 rounded border border-border/80 bg-background/95 px-1 py-0.5 text-[10px] leading-none text-foreground shadow-sm"
+              style={{
+                left,
+                top: -16,
+              }}
+            >
+              {marker.frame}
+            </div>
           );
         })}
       </div>
