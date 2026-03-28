@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Film,
   Layers,
+  LineChart,
   Type,
   Square,
   Circle,
@@ -65,6 +66,27 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const setActiveTab = useEditorStore((s) => s.setActiveTab);
   const sidebarWidth = useEditorStore((s) => s.sidebarWidth);
   const setSidebarWidth = useEditorStore((s) => s.setSidebarWidth);
+
+  // Auto-expand sidebar to 35% viewport when keyframe editor opens
+  const prevKeyframeOpenRef = useRef(keyframeEditorOpen);
+  const savedWidthBeforeExpandRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const wasOpen = prevKeyframeOpenRef.current;
+    prevKeyframeOpenRef.current = keyframeEditorOpen;
+
+    if (keyframeEditorOpen && !wasOpen) {
+      const targetWidth = Math.floor(window.innerWidth * 0.35);
+      const clamped = clampLeftEditorSidebarWidth(targetWidth, editorLayout);
+      if (clamped > sidebarWidth) {
+        savedWidthBeforeExpandRef.current = sidebarWidth;
+        setSidebarWidth(clamped);
+      }
+    } else if (!keyframeEditorOpen && wasOpen && savedWidthBeforeExpandRef.current !== null) {
+      setSidebarWidth(savedWidthBeforeExpandRef.current);
+      savedWidthBeforeExpandRef.current = null;
+    }
+  }, [keyframeEditorOpen, editorLayout, sidebarWidth, setSidebarWidth]);
 
   // Resize handle logic
   const isResizingRef = useRef(false);
@@ -389,6 +411,24 @@ export const MediaSidebar = memo(function MediaSidebar() {
               <Icon className="w-4 h-4" />
             </button>
           ))}
+
+          <div className="w-6 border-t border-border mx-auto my-0.5" />
+
+          <button
+            onClick={toggleKeyframeEditorOpen}
+            className={`
+              w-9 h-9 rounded-lg flex items-center justify-center transition-all
+              ${keyframeEditorOpen
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+              }
+            `}
+            data-tooltip={keyframeEditorOpen ? 'Hide Keyframe Editor' : 'Keyframe Editor'}
+            data-tooltip-side="right"
+            aria-label={keyframeEditorOpen ? 'Hide keyframe editor' : 'Show keyframe editor'}
+          >
+            <LineChart className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -402,7 +442,14 @@ export const MediaSidebar = memo(function MediaSidebar() {
         {/* Use Activity for React 19 performance optimization - defers updates when hidden */}
         <Activity mode={leftSidebarOpen ? 'visible' : 'hidden'}>
           <div className="h-full min-h-0 flex flex-col" style={{ width: sidebarWidth }}>
-          {/* Panel Header */}
+          <KeyframeGraphPanel
+            isOpen={keyframeEditorOpen}
+            onToggle={toggleKeyframeEditorOpen}
+            onClose={() => setKeyframeEditorOpen(false)}
+            placement="top"
+          />
+
+          {/* Panel Header — sits with the tab content, below the keyframe editor */}
           <div
             className="flex items-center px-3 border-b border-border flex-shrink-0"
             style={{ height: EDITOR_LAYOUT_CSS_VALUES.sidebarHeaderHeight }}
@@ -411,13 +458,6 @@ export const MediaSidebar = memo(function MediaSidebar() {
               {categories.find((c) => c.id === activeTab)?.label}
             </span>
           </div>
-
-          <KeyframeGraphPanel
-            isOpen={keyframeEditorOpen}
-            onToggle={toggleKeyframeEditorOpen}
-            onClose={() => setKeyframeEditorOpen(false)}
-            placement="top"
-          />
 
           {/* Media Tab - Full Media Library */}
           <div className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'media' ? 'block' : 'hidden'}`}>

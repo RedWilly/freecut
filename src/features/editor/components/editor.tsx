@@ -264,51 +264,54 @@ export const Editor = memo(function Editor({ projectId, project }: EditorProps) 
           />
         </InteractionLockRegion>
 
-        {/* Resizable Layout: Main Content + Timeline */}
-        <ResizablePanelGroup direction="vertical" className="flex-1">
-          {/* Main Content Area */}
-          <ResizablePanel
-            defaultSize={100 - editorLayout.timelineDefaultSize}
-            minSize={100 - editorLayout.timelineMaxSize}
-            maxSize={100 - editorLayout.timelineMinSize}
-          >
-            <div className="h-full flex overflow-hidden relative">
-              {/* Left Sidebar - Media Library */}
-              <InteractionLockRegion locked={isMaskEditingActive}>
+        {/* Main Layout: Full-height sidebar + vertical split */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Sidebar - Media Library (full height) */}
+          <InteractionLockRegion locked={isMaskEditingActive}>
+            <ErrorBoundary level="feature">
+              <MediaSidebar />
+            </ErrorBoundary>
+          </InteractionLockRegion>
+
+          {/* Right side: Preview/Properties + Timeline */}
+          <ResizablePanelGroup direction="vertical" className="flex-1 min-w-0">
+            {/* Top - Preview + Properties */}
+            <ResizablePanel
+              defaultSize={100 - editorLayout.timelineDefaultSize}
+              minSize={100 - editorLayout.timelineMaxSize}
+              maxSize={100 - editorLayout.timelineMinSize}
+            >
+              <div className="h-full flex overflow-hidden relative">
+                {/* Center - Preview */}
                 <ErrorBoundary level="feature">
-                  <MediaSidebar />
+                  <PreviewArea project={project} />
+                </ErrorBoundary>
+
+                {/* Right Sidebar - Properties */}
+                <InteractionLockRegion locked={isMaskEditingActive}>
+                  <ErrorBoundary level="feature">
+                    <PropertiesSidebar />
+                  </ErrorBoundary>
+                </InteractionLockRegion>
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle withHandle className={isMaskEditingActive ? 'pointer-events-none opacity-60' : undefined} />
+
+            {/* Bottom - Timeline */}
+            <ResizablePanel
+              defaultSize={editorLayout.timelineDefaultSize}
+              minSize={editorLayout.timelineMinSize}
+              maxSize={editorLayout.timelineMaxSize}
+            >
+              <InteractionLockRegion locked={isMaskEditingActive} className="h-full">
+                <ErrorBoundary level="feature">
+                  <Timeline duration={timelineDuration} />
                 </ErrorBoundary>
               </InteractionLockRegion>
-
-              {/* Center - Preview */}
-              <ErrorBoundary level="feature">
-                <PreviewArea project={project} />
-              </ErrorBoundary>
-
-              {/* Right Sidebar - Properties */}
-              <InteractionLockRegion locked={isMaskEditingActive}>
-                <ErrorBoundary level="feature">
-                  <PropertiesSidebar />
-                </ErrorBoundary>
-              </InteractionLockRegion>
-            </div>
-          </ResizablePanel>
-
-          <ResizableHandle withHandle className={isMaskEditingActive ? 'pointer-events-none opacity-60' : undefined} />
-
-          {/* Bottom - Timeline */}
-          <ResizablePanel
-            defaultSize={editorLayout.timelineDefaultSize}
-            minSize={editorLayout.timelineMinSize}
-            maxSize={editorLayout.timelineMaxSize}
-          >
-            <InteractionLockRegion locked={isMaskEditingActive} className="h-full">
-              <ErrorBoundary level="feature">
-                <Timeline duration={timelineDuration} />
-              </ErrorBoundary>
-            </InteractionLockRegion>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
 
       <Suspense fallback={null}>
         {/* Export Dialog */}

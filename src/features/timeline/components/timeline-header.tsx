@@ -24,7 +24,6 @@ import {
   Redo2,
   Flag,
   FlagOff,
-  LineChart,
   Activity,
   Link2,
 } from 'lucide-react';
@@ -50,10 +49,6 @@ interface TimelineHeaderProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomToFit?: () => void;
-  /** Whether the docked keyframe editor is open */
-  isKeyframePanelOpen?: boolean;
-  /** Callback to toggle/open the keyframe editor */
-  onToggleKeyframePanel?: () => void;
   /** Whether the color scopes tab is active in the bottom editor panel */
   isScopesPanelOpen?: boolean;
   /** Callback to toggle/open the color scopes tab */
@@ -89,8 +84,6 @@ export const TimelineHeader = memo(function TimelineHeader({
   onZoomIn,
   onZoomOut,
   onZoomToFit,
-  isKeyframePanelOpen,
-  onToggleKeyframePanel,
   isScopesPanelOpen,
   onToggleScopesPanel,
 }: TimelineHeaderProps) {
@@ -496,19 +489,6 @@ export const TimelineHeader = memo(function TimelineHeader({
         <Separator orientation="vertical" className="h-5 mx-1.5" />
 
         {/* Editor Panel Toggles */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`h-7 w-7 ${
-            isKeyframePanelOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
-          }`}
-          onClick={onToggleKeyframePanel}
-          aria-label={isKeyframePanelOpen ? 'Hide keyframe editor' : 'Show keyframe editor'}
-          data-tooltip={isKeyframePanelOpen ? 'Hide Keyframe Editor' : 'Show Keyframe Editor'}
-        >
-          <LineChart className="w-3.5 h-3.5" />
-        </Button>
-
         <Button
           variant="ghost"
           size="icon"

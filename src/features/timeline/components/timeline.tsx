@@ -121,7 +121,6 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
 
   const colorScopesOpen = useEditorStore((s) => s.colorScopesOpen);
   const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen);
-  const keyframeEditorOpen = useEditorStore((s) => s.keyframeEditorOpen);
   const toggleKeyframeEditorOpen = useEditorStore((s) => s.toggleKeyframeEditorOpen);
   const setTimelineTracks = useTimelineStore((s) => s.setTracks);
 
@@ -683,8 +682,6 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
           onZoomIn={zoomHandlers?.handleZoomIn}
           onZoomOut={zoomHandlers?.handleZoomOut}
           onZoomToFit={zoomHandlers?.handleZoomToFit}
-          isKeyframePanelOpen={keyframeEditorOpen}
-          onToggleKeyframePanel={toggleKeyframeEditorOpen}
           isScopesPanelOpen={colorScopesOpen}
           onToggleScopesPanel={toggleColorScopesOpen}
         />

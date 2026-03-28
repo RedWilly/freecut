@@ -67,14 +67,17 @@ const GRAPH_PANEL_HEADER_HEIGHT = 32;
 /** Height of the resize handle in pixels */
 const RESIZE_HANDLE_HEIGHT = 6;
 
-/** Default height of the graph content area in pixels */
-const GRAPH_PANEL_CONTENT_HEIGHT = 200;
+/** Default ratio of parent height for the graph content area */
+const DEFAULT_PARENT_RATIO = 0.6;
 
 /** Minimum content height */
 const MIN_CONTENT_HEIGHT = 100;
 
-/** Maximum content height */
-const MAX_CONTENT_HEIGHT = 500;
+/** Fallback maximum content height when parent size is unknown */
+const MAX_CONTENT_HEIGHT_FALLBACK = 500;
+
+/** Maximum ratio the panel can occupy of its parent container */
+const MAX_PARENT_RATIO = 0.8;
 
 interface KeyframeGraphPanelProps {
   /** Whether the panel is open */
@@ -224,10 +227,28 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   const hotkeys = useResolvedHotkeys();
   // Ref to measure container width
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [parentHeight, setParentHeight] = useState(0);
+  const hasInitialSized = useRef(false);
 
   // Track content height (user can resize)
-  const [contentHeight, setContentHeight] = useState(GRAPH_PANEL_CONTENT_HEIGHT);
+  const [contentHeight, setContentHeight] = useState(MIN_CONTENT_HEIGHT);
+
+  // Dynamic max: 80% of parent minus the header and handle chrome
+  const chrome = GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT;
+  const maxContentHeight = parentHeight > 0
+    ? Math.max(MIN_CONTENT_HEIGHT, Math.floor(parentHeight * MAX_PARENT_RATIO) - chrome)
+    : MAX_CONTENT_HEIGHT_FALLBACK;
+
+  // Set default height to 60% of parent on first measurement
+  useEffect(() => {
+    if (parentHeight > 0 && !hasInitialSized.current) {
+      hasInitialSized.current = true;
+      const defaultHeight = Math.floor(parentHeight * DEFAULT_PARENT_RATIO) - chrome;
+      setContentHeight(Math.max(MIN_CONTENT_HEIGHT, Math.min(maxContentHeight, defaultHeight)));
+    }
+  }, [parentHeight, chrome, maxContentHeight]);
 
   // Resize state
   const [isResizing, setIsResizing] = useState(false);
@@ -255,6 +276,19 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     };
   }, [isOpen]); // Re-measure when panel opens
 
+  // Measure parent height so the panel can cap at MAX_PARENT_RATIO
+  useEffect(() => {
+    const panel = panelRef.current;
+    const parent = panel?.parentElement;
+    if (!parent) return;
+
+    const update = () => setParentHeight(parent.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [isOpen]);
+
   // Handle resize drag
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -273,7 +307,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         ? e.clientY - resizeStartY.current
         : resizeStartY.current - e.clientY;
       const newHeight = Math.min(
-        MAX_CONTENT_HEIGHT,
+        maxContentHeight,
         Math.max(MIN_CONTENT_HEIGHT, resizeStartHeight.current + deltaY)
       );
       setContentHeight(newHeight);
@@ -293,7 +327,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, placement]);
+  }, [isResizing, placement, maxContentHeight]);
 
   // Selected items
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
@@ -1139,10 +1173,13 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     [selectedItemForEditor]
   );
 
+  // Clamp content height when max shrinks (e.g. parent resized smaller)
+  const clampedContentHeight = Math.min(contentHeight, maxContentHeight);
+
   // Calculate total panel height for proper flex sizing
   // When closed, show just the header; when open, show header + resize handle + content
   const panelHeight = isOpen
-    ? GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT + contentHeight
+    ? GRAPH_PANEL_HEADER_HEIGHT + RESIZE_HANDLE_HEIGHT + clampedContentHeight
     : GRAPH_PANEL_HEADER_HEIGHT;
 
   const editorWidth = Math.max(0, containerWidth - 16);
@@ -1151,7 +1188,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   const showAdvancedControls = showBezierControls || showSpringControls;
   const editorHeight = Math.max(
     0,
-    contentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0)
+    clampedContentHeight - 16 - advancedControlsHeight - (showAdvancedControls ? 8 : 0)
   );
   // Only render the docked editor when explicitly opened from the toolbar/hotkey.
   // Selecting a clip should not surface the docked panel by itself.
@@ -1174,6 +1211,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
 
   return (
     <div
+      ref={panelRef}
       className={cn(
         'flex-shrink-0 bg-background overflow-hidden',
         placement === 'top' ? 'border-b border-border' : 'border-t border-border',
@@ -1315,7 +1353,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
 
       {/* Keyframe editor content */}
       {isOpen && (
-        <div ref={containerRef} className="p-2" style={{ height: contentHeight }}>
+        <div ref={containerRef} className="p-2" style={{ height: clampedContentHeight }}>
           {showAdvancedControls && (
             <div
               ref={advancedControlsRef}
