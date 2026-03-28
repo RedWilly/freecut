@@ -13,10 +13,16 @@ interface GraphGridProps {
   padding: { top: number; right: number; bottom: number; left: number };
   /** Show axis labels */
   showLabels?: boolean;
+  /** Show X-axis (time) labels — set false when an external ruler provides them */
+  showXLabels?: boolean;
   /** Major grid line interval for X (frames) */
   xMajorInterval?: number;
   /** Major grid line interval for Y (value) */
   yMajorInterval?: number;
+  /** How to display the time ruler */
+  rulerUnit?: 'frames' | 'seconds';
+  /** FPS used when the ruler is shown in seconds */
+  fps?: number;
 }
 
 /**
@@ -27,8 +33,11 @@ export const GraphGrid = memo(function GraphGrid({
   viewport,
   padding,
   showLabels = true,
+  showXLabels = true,
   xMajorInterval: xMajorProp,
   yMajorInterval: yMajorProp,
+  rulerUnit = 'frames',
+  fps = 30,
 }: GraphGridProps) {
   const { width, height, startFrame, endFrame, minValue, maxValue } = viewport;
 
@@ -168,8 +177,8 @@ export const GraphGrid = memo(function GraphGrid({
         />
       )}
 
-      {/* X axis labels (frames) */}
-      {showLabels &&
+      {/* X axis labels (hidden when external ruler provides them) */}
+      {showLabels && showXLabels &&
         xLines
           .filter((l) => l.isMajor)
           .map(({ x, frame }) => (
@@ -183,23 +192,23 @@ export const GraphGrid = memo(function GraphGrid({
               fontSize={9}
               fontFamily="monospace"
             >
-              F{Math.round(frame)}
+              {formatFrameLabel(frame, rulerUnit, fps)}
             </text>
           ))}
 
-      {/* Y axis labels (values) */}
+      {/* Y axis labels (values) — rendered inside the graph area */}
       {showLabels &&
         yLines
           .filter((l) => l.isMajor)
           .map(({ y, value }) => (
             <text
               key={`y-label-${value}`}
-              x={padding.left - 4}
-              y={y}
-              textAnchor="end"
-              dominantBaseline="middle"
+              x={graphLeft + 4}
+              y={y - 4}
+              textAnchor="start"
+              dominantBaseline="auto"
               fill="currentColor"
-              fillOpacity={0.6}
+              fillOpacity={0.4}
               fontSize={9}
               fontFamily="monospace"
             >
@@ -222,6 +231,21 @@ export const GraphGrid = memo(function GraphGrid({
     </g>
   );
 });
+
+function formatFrameLabel(frame: number, rulerUnit: 'frames' | 'seconds', fps: number): string {
+  if (rulerUnit === 'frames' || fps <= 0) {
+    return String(Math.round(frame));
+  }
+
+  const seconds = frame / fps;
+  if (seconds >= 60) {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds - minutes * 60;
+    return `${minutes}:${remainder.toFixed(1).padStart(4, '0')}`;
+  }
+
+  return `${seconds.toFixed(seconds < 10 ? 2 : 1)}s`;
+}
 
 /**
  * Format a value for display (handles decimals nicely).

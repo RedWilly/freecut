@@ -104,9 +104,9 @@ export interface GraphPadding {
  */
 export const DEFAULT_GRAPH_PADDING: GraphPadding = {
   top: 20,
-  right: 20,
+  right: 10,
   bottom: 40,
-  left: 50,
+  left: 10,
 };
 
 export { PROPERTY_VALUE_RANGES };

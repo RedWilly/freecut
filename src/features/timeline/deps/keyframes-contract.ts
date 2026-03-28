@@ -7,6 +7,7 @@ export type { AutoKeyframeOperation } from '@/features/keyframes/utils/auto-keyf
 export { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
 export { interpolatePropertyValue } from '@/features/keyframes/utils/interpolation';
 export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties';
+export { getBezierPresetForEasing } from '@/features/keyframes/utils/easing-presets';
 export {
   isFrameInTransitionRegion,
   getTransitionBlockedRanges,

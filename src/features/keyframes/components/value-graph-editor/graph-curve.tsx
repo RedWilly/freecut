@@ -90,9 +90,11 @@ const GraphCurve = memo(function GraphCurve({
 export const GraphCurves = memo(function GraphCurves({
   points,
   selectedKeyframeIds,
+  previewBezierConfigs,
 }: {
   points: GraphKeyframePoint[];
   selectedKeyframeIds?: Set<string>;
+  previewBezierConfigs?: Record<string, { x1: number; y1: number; x2: number; y2: number }> | null;
 }) {
   // Sort points by frame (toSorted for immutability)
   const sortedPoints = useMemo(
@@ -117,7 +119,11 @@ export const GraphCurves = memo(function GraphCurves({
             key={`${startPoint.keyframe.id}-${endPoint.keyframe.id}`}
             startPoint={startPoint}
             endPoint={endPoint}
-            easingConfig={startPoint.keyframe.easingConfig || { type: startPoint.keyframe.easing }}
+            easingConfig={
+              previewBezierConfigs?.[startPoint.keyframe.id]
+                ? { type: 'cubic-bezier' as const, bezier: previewBezierConfigs[startPoint.keyframe.id] }
+                : (startPoint.keyframe.easingConfig || { type: startPoint.keyframe.easing })
+            }
             isSelected={isSelected}
           />
         );

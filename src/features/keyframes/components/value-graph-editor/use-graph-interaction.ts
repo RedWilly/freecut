@@ -13,6 +13,7 @@ import type {
   GraphBezierHandle,
 } from './types';
 import type { KeyframeRef, BezierControlPoints } from '@/types/keyframe';
+import { getBezierPresetForEasing } from '@/features/keyframes/utils/easing-presets';
 import { updateBezierFromHandle } from './bezier-utils';
 import type { BlockedFrameRange } from '../../utils/transition-region';
 import {
@@ -43,6 +44,26 @@ interface DragStartState {
   }>;
 }
 
+/** Info about the adjacent segment for mid-point tangent mirroring */
+interface AdjacentSegmentInfo {
+  /** Keyframe ID that owns the adjacent bezier config */
+  keyframeId: string;
+  /** Item ID */
+  itemId: string;
+  /** Property */
+  property: GraphKeyframePoint['property'];
+  /** Which bezier component to update on the adjacent segment */
+  handleType: 'in' | 'out';
+  /** Start point of the adjacent segment (in screen coords) */
+  startPoint: GraphKeyframePoint;
+  /** End point of the adjacent segment (in screen coords) */
+  endPoint: GraphKeyframePoint;
+  /** Initial bezier config of the adjacent keyframe */
+  initialBezier: BezierControlPoints;
+  /** Initial distance from mid-point to opposite handle */
+  initialLength: number;
+}
+
 /** Bezier drag start state */
 interface BezierDragStartState {
   mouseX: number;
@@ -53,6 +74,10 @@ interface BezierDragStartState {
   startPoint: GraphKeyframePoint;
   endPoint: GraphKeyframePoint;
   initialBezier: BezierControlPoints;
+  /** Adjacent segment info for mid-point tangent mirroring (null if endpoint) */
+  adjacent: AdjacentSegmentInfo | null;
+  /** The mid-point position (screen coords) — anchor of the dragged handle */
+  midPoint: { x: number; y: number };
 }
 
 type MarqueeMode = 'replace' | 'add' | 'toggle';
@@ -139,6 +164,8 @@ interface UseGraphInteractionReturn {
   previewValues: Record<string, { frame: number; value: number }> | null;
   /** Currently dragging handle info */
   draggingHandle: { keyframeId: string; type: 'in' | 'out' } | null;
+  /** Preview bezier configs during handle drag (avoids store updates until pointer up) */
+  previewBezierConfigs: Record<string, BezierControlPoints> | null;
   /** Current constraint axis when Shift is held ('x' = frame only, 'y' = value only, null = no constraint) */
   constraintAxis: 'x' | 'y' | null;
   /** Handle keyframe pointer down */
@@ -195,6 +222,7 @@ export function useGraphInteraction({
   const [isPendingDrag, setIsPendingDrag] = useState(false);
   const [previewValues, setPreviewValues] = useState<Record<string, { frame: number; value: number }> | null>(null);
   const [draggingHandle, setDraggingHandle] = useState<{ keyframeId: string; type: 'in' | 'out' } | null>(null);
+  const [previewBezierConfigs, setPreviewBezierConfigs] = useState<Record<string, BezierControlPoints> | null>(null);
   const [constraintAxis, setConstraintAxis] = useState<'x' | 'y' | null>(null);
   const [marqueeRect, setMarqueeRect] = useState<KeyframeMarqueeRect | null>(null);
 
@@ -212,6 +240,10 @@ export function useGraphInteraction({
   useEffect(() => {
     previewValuesRef.current = previewValues;
   }, [previewValues]);
+  const previewBezierConfigsRef = useRef<Record<string, BezierControlPoints> | null>(null);
+  useEffect(() => {
+    previewBezierConfigsRef.current = previewBezierConfigs;
+  }, [previewBezierConfigs]);
 
   // Ref for latest callbacks to avoid stale closures
   const callbacksRef = useRef({ onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onDragStart, onDragEnd });
@@ -221,6 +253,7 @@ export function useGraphInteraction({
 
   // Track whether we've called onDragStart for the current drag operation
   const dragStartCalledRef = useRef(false);
+
 
   // Memoized graph dimensions
   const graphDimensions = useMemo(() => {
@@ -628,7 +661,7 @@ export function useGraphInteraction({
       const point = points.find((p) => p.keyframe.id === handle.keyframeId);
       if (!point) return;
 
-      const bezier = point.keyframe.easingConfig?.bezier;
+      const bezier = point.keyframe.easingConfig?.bezier ?? getBezierPresetForEasing(point.keyframe.easing);
       if (!bezier) return;
 
       // Find start and end points for this segment
@@ -646,6 +679,64 @@ export function useGraphInteraction({
         svgRef.current = svg as SVGSVGElement;
       }
 
+      // Determine mid-point and adjacent segment for tangent mirroring
+      let adjacent: AdjacentSegmentInfo | null = null;
+      let midPoint: { x: number; y: number };
+
+      if (handle.type === 'out') {
+        // Anchor (mid-point) is startPoint; adjacent is the previous segment ending at startPoint
+        midPoint = { x: startPoint!.x, y: startPoint!.y };
+        const prevPoint = pointIndex > 0 ? sortedPoints[pointIndex - 1] : undefined;
+        if (prevPoint) {
+          const adjBezier = prevPoint.keyframe.easingConfig?.bezier ?? getBezierPresetForEasing(prevPoint.keyframe.easing);
+          if (adjBezier) {
+            // Opposite handle is the 'in' handle of prev segment (x2, y2), anchored at startPoint
+            const segW = startPoint!.x - prevPoint.x;
+            const segH = startPoint!.y - prevPoint.y;
+            const oppX = prevPoint.x + adjBezier.x2 * segW;
+            const oppY = prevPoint.y + adjBezier.y2 * segH;
+            const dx = oppX - midPoint.x;
+            const dy = oppY - midPoint.y;
+            adjacent = {
+              keyframeId: prevPoint.keyframe.id,
+              itemId: prevPoint.itemId,
+              property: prevPoint.property,
+              handleType: 'in',
+              startPoint: prevPoint,
+              endPoint: startPoint!,
+              initialBezier: { ...adjBezier },
+              initialLength: Math.hypot(dx, dy),
+            };
+          }
+        }
+      } else {
+        // handle.type === 'in': anchor (mid-point) is endPoint; adjacent is the next segment starting at endPoint
+        midPoint = { x: endPoint!.x, y: endPoint!.y };
+        const nextNextPoint = pointIndex + 2 < sortedPoints.length ? sortedPoints[pointIndex + 2] : undefined;
+        if (nextNextPoint) {
+          const adjBezier = endPoint!.keyframe.easingConfig?.bezier ?? getBezierPresetForEasing(endPoint!.keyframe.easing);
+          if (adjBezier) {
+            // Opposite handle is the 'out' handle of next segment (x1, y1), anchored at endPoint
+            const segW = nextNextPoint.x - endPoint!.x;
+            const segH = nextNextPoint.y - endPoint!.y;
+            const oppX = endPoint!.x + adjBezier.x1 * segW;
+            const oppY = endPoint!.y + adjBezier.y1 * segH;
+            const dx = oppX - midPoint.x;
+            const dy = oppY - midPoint.y;
+            adjacent = {
+              keyframeId: endPoint!.keyframe.id,
+              itemId: endPoint!.itemId,
+              property: endPoint!.property,
+              handleType: 'out',
+              startPoint: endPoint!,
+              endPoint: nextNextPoint,
+              initialBezier: { ...adjBezier },
+              initialLength: Math.hypot(dx, dy),
+            };
+          }
+        }
+      }
+
       bezierDragStartRef.current = {
         mouseX: event.clientX,
         mouseY: event.clientY,
@@ -655,6 +746,8 @@ export function useGraphInteraction({
         startPoint: startPoint!,
         endPoint: endPoint!,
         initialBezier: { ...bezier },
+        adjacent,
+        midPoint,
       };
 
       // Call onDragStart for bezier handle drag (no threshold, starts immediately)
@@ -839,9 +932,9 @@ export function useGraphInteraction({
         return;
       }
 
-      // Handle bezier handle dragging
+      // Handle bezier handle dragging — use local preview, commit on pointer up
       if (bezierDragStartRef.current && dragState?.type === 'bezier-handle') {
-        const { boundingRect, startPoint, endPoint, handle, initialBezier } = bezierDragStartRef.current;
+        const { boundingRect, startPoint, endPoint, handle, initialBezier, adjacent, midPoint } = bezierDragStartRef.current;
 
         const mouseX = event.clientX - boundingRect.left;
         const mouseY = event.clientY - boundingRect.top;
@@ -852,25 +945,74 @@ export function useGraphInteraction({
 
         if (segmentWidth === 0) return;
 
-        const newX = (mouseX - startPoint.x) / segmentWidth;
-        const newY = segmentHeight === 0 ? 0.5 : (mouseY - startPoint.y) / segmentHeight;
+        let newX = (mouseX - startPoint.x) / segmentWidth;
+        let newY = segmentHeight === 0 ? 0.5 : (mouseY - startPoint.y) / segmentHeight;
 
-        // Update the appropriate control point
+        // Shift = constrain to initial direction (scale length only)
+        if (event.shiftKey) {
+          const initX = handle.type === 'out' ? initialBezier.x1 : initialBezier.x2;
+          const initY = handle.type === 'out' ? initialBezier.y1 : initialBezier.y2;
+          // Anchor in segment-relative coords: 'out' anchored at (0,0), 'in' anchored at (1,1)
+          const anchorX = handle.type === 'out' ? 0 : 1;
+          const anchorY = handle.type === 'out' ? 0 : 1;
+          const dirX = initX - anchorX;
+          const dirY = initY - anchorY;
+          const dirLen = Math.hypot(dirX, dirY);
+          if (dirLen > 0) {
+            // Project mouse onto the initial direction line
+            const toMouseX = newX - anchorX;
+            const toMouseY = newY - anchorY;
+            const dot = (toMouseX * dirX + toMouseY * dirY) / (dirLen * dirLen);
+            newX = anchorX + dirX * dot;
+            newY = anchorY + dirY * dot;
+          }
+        }
+
+        const clampedNewX = Math.max(0, Math.min(1, newX));
+
+        // Compute preview bezier for the dragged handle
         const newBezier = updateBezierFromHandle(
           initialBezier,
           handle.type,
-          Math.max(0, Math.min(1, newX)),
-          newY // Allow Y outside 0-1 for overshoot
+          clampedNewX,
+          newY
         );
 
-        callbacksRef.current.onBezierHandleMove?.(
-          {
-            itemId: startPoint.itemId,
-            property: startPoint.property,
-            keyframeId: handle.keyframeId,
-          },
-          newBezier
-        );
+        const nextPreview: Record<string, BezierControlPoints> = {
+          [handle.keyframeId]: newBezier,
+        };
+
+        // Compute mirrored bezier for mid-point tangent continuity
+        if (adjacent && adjacent.initialLength > 0) {
+          const handleAbsX = startPoint.x + clampedNewX * segmentWidth;
+          const handleAbsY = startPoint.y + newY * segmentHeight;
+
+          const dx = handleAbsX - midPoint.x;
+          const dy = handleAbsY - midPoint.y;
+          const len = Math.hypot(dx, dy);
+
+          if (len > 0) {
+            const mirrorX = midPoint.x - (dx / len) * adjacent.initialLength;
+            const mirrorY = midPoint.y - (dy / len) * adjacent.initialLength;
+
+            const adjSegW = adjacent.endPoint.x - adjacent.startPoint.x;
+            const adjSegH = adjacent.endPoint.y - adjacent.startPoint.y;
+
+            if (adjSegW !== 0) {
+              const adjRelX = (mirrorX - adjacent.startPoint.x) / adjSegW;
+              const adjRelY = adjSegH === 0 ? 0.5 : (mirrorY - adjacent.startPoint.y) / adjSegH;
+
+              nextPreview[adjacent.keyframeId] = updateBezierFromHandle(
+                adjacent.initialBezier,
+                adjacent.handleType,
+                Math.max(0, Math.min(1, adjRelX)),
+                adjRelY
+              );
+            }
+          }
+        }
+
+        setPreviewBezierConfigs(nextPreview);
       }
     },
     [disabled, dragState, isDragging, viewport, padding, maxFrame, clampMinValue, clampMaxValue, graphDimensions, snapEnabled, snapFrameTargets, snapValueTargets, snapThresholds, snapToTargets, clampToAvoidBlockedRanges]
@@ -907,6 +1049,40 @@ export function useGraphInteraction({
         }
       }
 
+      // Commit bezier handle preview on pointer up
+      if (dragState?.type === 'bezier-handle' && bezierDragStartRef.current && previewBezierConfigsRef.current) {
+        const { handle, startPoint, adjacent } = bezierDragStartRef.current;
+        const previews = previewBezierConfigsRef.current;
+
+        // Commit the primary handle
+        const primaryBezier = previews[handle.keyframeId];
+        if (primaryBezier) {
+          callbacksRef.current.onBezierHandleMove?.(
+            {
+              itemId: startPoint.itemId,
+              property: startPoint.property,
+              keyframeId: handle.keyframeId,
+            },
+            primaryBezier
+          );
+        }
+
+        // Commit the mirrored adjacent handle
+        if (adjacent) {
+          const adjBezier = previews[adjacent.keyframeId];
+          if (adjBezier) {
+            callbacksRef.current.onBezierHandleMove?.(
+              {
+                itemId: adjacent.itemId,
+                property: adjacent.property,
+                keyframeId: adjacent.keyframeId,
+              },
+              adjBezier
+            );
+          }
+        }
+      }
+
       // Call onDragEnd if we actually started a drag operation
       if (dragStartCalledRef.current) {
         dragStartCalledRef.current = false;
@@ -921,6 +1097,7 @@ export function useGraphInteraction({
       setIsDragging(false);
       setIsPendingDrag(false);
       setPreviewValues(null);
+      setPreviewBezierConfigs(null);
       setDraggingHandle(null);
       setConstraintAxis(null);
     },
@@ -977,11 +1154,10 @@ export function useGraphInteraction({
   // Handle background click (deselect)
   const handleBackgroundClick = useCallback(
     (event: React.MouseEvent<SVGElement>) => {
+      void event;
       if (disabled) return;
       if (marqueeJustEndedRef.current) return;
-      if (event.target === event.currentTarget) {
-        callbacksRef.current.onSelectionChange?.(new Set());
-      }
+      callbacksRef.current.onSelectionChange?.(new Set());
     },
     [disabled]
   );
@@ -1036,6 +1212,7 @@ export function useGraphInteraction({
     isDragging,
     previewValues,
     draggingHandle,
+    previewBezierConfigs,
     constraintAxis,
     handleKeyframePointerDown,
     handleKeyframeClick,

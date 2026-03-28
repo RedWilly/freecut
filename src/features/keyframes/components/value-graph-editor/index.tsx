@@ -46,6 +46,8 @@ interface ValueGraphEditorProps {
   currentFrame?: number;
   /** Total duration in frames */
   totalFrames?: number;
+  /** Timeline FPS for time ruler formatting */
+  fps?: number;
   /** Width of the editor */
   width?: number;
   /** Height of the editor */
@@ -84,6 +86,12 @@ interface ValueGraphEditorProps {
   showKeyboardHints?: boolean;
   /** Whether to remove the default graph border/radius */
   borderless?: boolean;
+  /** Whether handles for all visible segments should be shown */
+  showAllHandles?: boolean;
+  /** How to render the time ruler */
+  rulerUnit?: 'frames' | 'seconds';
+  /** Hide X-axis labels when an external ruler provides them */
+  hideXLabels?: boolean;
   /** Whether the editor is disabled */
   disabled?: boolean;
   /** Additional class name */
@@ -103,6 +111,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   selectedKeyframeIds = new Set(),
   currentFrame = 0,
   totalFrames = 300,
+  fps = 30,
   width = 600,
   height = 300,
   onKeyframeMove,
@@ -122,10 +131,18 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   showToolbar = true,
   showKeyboardHints = true,
   borderless = false,
+  showAllHandles = false,
+  rulerUnit = 'frames',
+  hideXLabels = false,
   disabled = false,
   className,
 }: ValueGraphEditorProps) {
-  const padding = DEFAULT_GRAPH_PADDING;
+  const padding = useMemo(
+    () => hideXLabels
+      ? { ...DEFAULT_GRAPH_PADDING, bottom: 8 }
+      : DEFAULT_GRAPH_PADDING,
+    [hideXLabels]
+  );
   const svgRef = useRef<SVGSVGElement>(null);
   const graphClipPathId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   
@@ -300,6 +317,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     isDragging,
     previewValues,
     draggingHandle,
+    previewBezierConfigs,
     constraintAxis,
     handleKeyframePointerDown,
     handleKeyframeClick,
@@ -586,12 +604,16 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     }, 100);
   }, [onScrubEnd]);
 
-  // Custom background click that respects scrubbing state
-  const handleGraphBackgroundClick = useCallback(
-    (event: React.MouseEvent<SVGRectElement>) => {
-      // Don't deselect if we just finished scrubbing
+  const handleGraphCanvasClick = useCallback(
+    (event: React.MouseEvent<SVGSVGElement>) => {
       if (isScrrubbingRef.current) return;
-      handleBackgroundClick(event);
+
+      const target = event.target as Element | null;
+      if (target?.closest('.graph-keyframe, .bezier-handle, .graph-playhead')) {
+        return;
+      }
+
+      handleBackgroundClick(event as unknown as React.MouseEvent<SVGElement>);
     },
     [handleBackgroundClick]
   );
@@ -859,6 +881,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
         onWheel={handleWheel}
+        onClick={handleGraphCanvasClick}
         style={{ 
           touchAction: 'none',
           cursor: isDragging && dragState?.type === 'keyframe' ? 'pointer' : undefined,
@@ -877,7 +900,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
         </defs>
 
         {/* Grid background */}
-        <GraphGrid viewport={viewport} padding={padding} />
+        <GraphGrid viewport={viewport} padding={padding} rulerUnit={rulerUnit} fps={fps} showXLabels={!hideXLabels} />
 
         {/* Dedicated hit target for empty graph-space interactions */}
         <rect
@@ -888,7 +911,6 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
           rx={4}
           fill="transparent"
           onPointerDown={handleBackgroundPointerDown}
-          onClick={handleGraphBackgroundClick}
         />
 
         <g clipPath={`url(#${graphClipPathId})`}>
@@ -905,7 +927,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
           <GraphExtensionLines points={pointsWithDragState} viewport={viewport} padding={padding} />
 
           {/* Interpolation curves */}
-          <GraphCurves points={pointsWithDragState} selectedKeyframeIds={selectedKeyframeIds} />
+          <GraphCurves points={pointsWithDragState} selectedKeyframeIds={selectedKeyframeIds} previewBezierConfigs={previewBezierConfigs} />
 
           {/* Playhead (rendered before keyframes so keyframes get click priority) */}
           <GraphPlayhead 
@@ -925,6 +947,8 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
             selectedKeyframeIds={selectedKeyframeIds}
             onHandlePointerDown={handleBezierPointerDown}
             draggingHandle={draggingHandle}
+            previewBezierConfigs={previewBezierConfigs}
+            showAllHandles={showAllHandles}
             disabled={disabled}
           />
 

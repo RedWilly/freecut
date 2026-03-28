@@ -7,7 +7,7 @@
 
 import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { ChevronUp, ChevronDown, ClipboardPaste, Copy, Scissors, X } from 'lucide-react';
+import { ChevronUp, ChevronDown, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/shared/ui/cn';
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import {
   DopesheetEditor,
+  getBezierPresetForEasing,
   getTransitionBlockedRanges,
   interpolatePropertyValue,
   getAnimatablePropertiesForItem,
@@ -95,10 +96,8 @@ const KEYFRAME_EDITOR_MODE_STORAGE_KEY = 'timeline:keyframeEditorMode';
 const EASING_OPTIONS: Array<{ value: EasingType; label: string }> = [
   { value: 'linear', label: 'Linear' },
   { value: 'ease-in', label: 'Ease In' },
-  { value: 'ease-out', label: 'Ease Out' },
   { value: 'ease-in-out', label: 'Ease In-Out' },
-  { value: 'cubic-bezier', label: 'Bezier' },
-  { value: 'spring', label: 'Spring' },
+  { value: 'ease-out', label: 'Ease Out' },
 ];
 const BEZIER_PRESETS = [
   { value: 'soft', label: 'Soft', points: { x1: 0.42, y1: 0, x2: 0.58, y2: 1 } },
@@ -148,6 +147,14 @@ function buildEasingConfig(
   easing: EasingType,
   existingConfig?: EasingConfig
 ): EasingConfig | undefined {
+  const presetBezier = getBezierPresetForEasing(easing);
+  if (presetBezier) {
+    return {
+      type: 'cubic-bezier',
+      bezier: presetBezier,
+    };
+  }
+
   if (easing === 'cubic-bezier') {
     return {
       type: 'cubic-bezier',
@@ -647,15 +654,26 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
 
   const handleBezierHandleMove = useCallback(
     (ref: KeyframeRef, bezier: BezierControlPoints) => {
+      const existingKeyframe = selectedItemKeyframes?.properties
+        .find((property) => property.property === ref.property)
+        ?.keyframes.find((keyframe) => keyframe.id === ref.keyframeId);
+      const nextEasing = existingKeyframe?.easing;
+
       _updateKeyframe(ref.itemId, ref.property, ref.keyframeId, {
-        easing: 'cubic-bezier',
+        easing:
+          nextEasing === 'ease-in' ||
+          nextEasing === 'ease-out' ||
+          nextEasing === 'ease-in-out' ||
+          nextEasing === 'linear'
+            ? nextEasing
+            : 'cubic-bezier',
         easingConfig: {
           type: 'cubic-bezier',
           bezier,
         },
       });
     },
-    [_updateKeyframe]
+    [_updateKeyframe, selectedItemKeyframes]
   );
 
   // Handle selection change in graph editor
@@ -1268,76 +1286,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           >
             Sheet
           </Button>
-          <div className="w-px h-4 bg-border/70 mx-1" />
-          <Select
-            value={selectedEditorEasing}
-            onValueChange={handleSelectedKeyframeEasingChange}
-            disabled={selectedEditorKeyframes.length === 0}
-          >
-            <SelectTrigger
-              className="h-5 w-[110px] px-1.5 text-[10px] focus:ring-0 focus:ring-offset-0"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label="Selected keyframe interpolation"
-            >
-              <SelectValue
-                placeholder={
-                  selectedEditorKeyframes.length === 0 ? 'Interpolation' : 'Mixed easing'
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {EASING_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value} className="text-xs">
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCopyKeyframes();
-            }}
-            disabled={selectedEditorKeyframes.length === 0}
-            title="Copy selected keyframes"
-          >
-            <Copy className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCutKeyframes();
-            }}
-            disabled={selectedEditorKeyframes.length === 0}
-            title="Cut selected keyframes"
-          >
-            <Scissors className="w-3 h-3" />
-          </Button>
-          <Button
-            variant={isKeyframeClipboardCut ? 'secondary' : 'ghost'}
-            size="icon"
-            className="h-5 w-5 p-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePasteKeyframes();
-            }}
-            disabled={!selectedItemForEditor || !keyframeClipboard}
-            title={isKeyframeClipboardCut ? 'Move keyframes from clipboard' : 'Paste keyframes'}
-          >
-            <ClipboardPaste className="w-3 h-3" />
-          </Button>
-          {isKeyframeClipboardCut && keyframeClipboard && (
-            <span className="text-[10px] font-medium text-amber-500">
-              Cut
-            </span>
-          )}
           <Button
             variant="ghost"
             size="icon"
@@ -1462,6 +1410,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 currentFrame={relativeFrame}
                 globalFrame={currentFrame}
                 totalFrames={selectedItemForEditor.durationInFrames}
+                fps={canvas.fps}
                 width={editorWidth}
                 height={editorHeight}
                 onKeyframeMove={handleKeyframeMove}
@@ -1476,6 +1425,15 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 onAddKeyframe={handleAddKeyframe}
                 onPropertyValueCommit={handlePropertyValueCommit}
                 onRemoveKeyframes={handleRemoveKeyframes}
+                onCopyKeyframes={handleCopyKeyframes}
+                onCutKeyframes={handleCutKeyframes}
+                onPasteKeyframes={handlePasteKeyframes}
+                hasKeyframeClipboard={Boolean(keyframeClipboard?.keyframes.length)}
+                isKeyframeClipboardCut={isKeyframeClipboardCut}
+                selectedInterpolation={selectedEditorEasing}
+                interpolationOptions={EASING_OPTIONS}
+                onInterpolationChange={handleSelectedKeyframeEasingChange}
+                interpolationDisabled={selectedEditorKeyframes.length === 0}
                 onNavigateToKeyframe={handleNavigateToKeyframe}
                 transitionBlockedRanges={transitionBlockedRanges}
                 visualizationMode={editorMode === 'graph' ? 'graph' : 'dopesheet'}

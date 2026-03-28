@@ -6,6 +6,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import {
+  ClipboardPaste,
+  Copy,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -14,6 +16,7 @@ import {
   Lock,
   Maximize2,
   MoreHorizontal,
+  Scissors,
   Timer,
   Trash2,
   X,
@@ -37,7 +40,13 @@ import {
   type KeyframeMarqueeRect,
 } from '../keyframe-marquee';
 import { ValueGraphEditor } from '../value-graph-editor';
-import type { AnimatableProperty, BezierControlPoints, Keyframe, KeyframeRef } from '@/types/keyframe';
+import type {
+  AnimatableProperty,
+  BezierControlPoints,
+  EasingType,
+  Keyframe,
+  KeyframeRef,
+} from '@/types/keyframe';
 import { PROPERTY_LABELS } from '@/types/keyframe';
 import type { BlockedFrameRange } from '../../utils/transition-region';
 import { HOTKEY_OPTIONS } from '@/config/hotkeys';
@@ -68,6 +77,8 @@ interface DopesheetEditorProps {
   globalFrame?: number | null;
   /** Total duration in frames */
   totalFrames?: number;
+  /** Timeline FPS used for ruler display */
+  fps?: number;
   /** Width of the editor */
   width?: number;
   /** Height of the editor */
@@ -102,6 +113,24 @@ interface DopesheetEditorProps {
   ) => void;
   /** Callback to remove selected keyframes */
   onRemoveKeyframes?: (refs: KeyframeRef[]) => void;
+  /** Copy selected keyframes */
+  onCopyKeyframes?: () => void;
+  /** Cut selected keyframes */
+  onCutKeyframes?: () => void;
+  /** Paste keyframes from clipboard */
+  onPasteKeyframes?: () => void;
+  /** Whether clipboard currently contains keyframes */
+  hasKeyframeClipboard?: boolean;
+  /** Whether clipboard represents a cut operation */
+  isKeyframeClipboardCut?: boolean;
+  /** Selected interpolation/easing for the current editor selection */
+  selectedInterpolation?: EasingType;
+  /** Available interpolation options */
+  interpolationOptions?: ReadonlyArray<{ value: EasingType; label: string }>;
+  /** Callback when the selection interpolation changes */
+  onInterpolationChange?: (easing: EasingType) => void;
+  /** Disable interpolation control */
+  interpolationDisabled?: boolean;
   /** Callback to navigate to a keyframe */
   onNavigateToKeyframe?: (frame: number) => void;
   /** Transition-blocked frame ranges (keyframes cannot be placed here) */
@@ -180,6 +209,82 @@ const MARQUEE_SCROLL_MAX_SPEED = 16;
 const EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY: Partial<Record<AnimatableProperty, boolean>> = {};
 const MINI_ICON_BUTTON_CLASS = 'h-4 w-4 flex-shrink-0 rounded-sm p-0 leading-none';
 const MINI_ICON_CLASS = 'h-[8px] w-[8px]';
+
+function InterpolationTypeIcon({ type }: { type: EasingType }) {
+  const commonProps = {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.25,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+
+  const endpoints = (
+    <>
+      <circle cx="3" cy="12.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="3.5" r="1" fill="currentColor" stroke="none" />
+    </>
+  );
+
+  if (type === 'linear') {
+    return (
+      <svg aria-hidden="true" {...commonProps}>
+        <path d="M3.6 11.9L12.4 4.1" />
+        {endpoints}
+      </svg>
+    );
+  }
+
+  if (type === 'ease-in') {
+    return (
+      <svg aria-hidden="true" {...commonProps}>
+        <path d="M3 12.5C6.2 12.5 8.3 11.9 13 3.5" />
+        {endpoints}
+      </svg>
+    );
+  }
+
+  if (type === 'ease-out') {
+    return (
+      <svg aria-hidden="true" {...commonProps}>
+        <path d="M3 12.5C7.7 4.1 9.8 3.5 13 3.5" />
+        {endpoints}
+      </svg>
+    );
+  }
+
+  if (type === 'ease-in-out') {
+    return (
+      <svg aria-hidden="true" {...commonProps}>
+        <path d="M3 12.5C5.4 12.5 6.2 11.6 8 8C9.8 4.4 10.6 3.5 13 3.5" />
+        {endpoints}
+      </svg>
+    );
+  }
+
+  if (type === 'cubic-bezier') {
+    return (
+      <svg aria-hidden="true" {...commonProps}>
+        <path d="M3 12.5C5 12.5 5.8 6 9.6 6C11.2 6 11.8 4.4 13 3.5" />
+        <path d="M3 12.5L5 10.4" opacity="0.6" />
+        <path d="M9.6 6L12 4.1" opacity="0.6" />
+        <circle cx="5" cy="10.4" r="0.9" fill="currentColor" stroke="none" opacity="0.8" />
+        <circle cx="9.6" cy="6" r="0.9" fill="currentColor" stroke="none" opacity="0.8" />
+        {endpoints}
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" {...commonProps}>
+      <path d="M3 12.5C4.6 12.5 5.3 8.6 7.1 8.6C9.2 8.6 9 2.2 11.2 2.2C12 2.2 12.5 2.9 13 3.5" />
+      {endpoints}
+    </svg>
+  );
+}
 
 function clampFrame(frame: number, totalFrames: number): number {
   if (totalFrames <= 0) return 0;
@@ -292,6 +397,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   currentFrame = 0,
   globalFrame = null,
   totalFrames = 300,
+  fps = 30,
   width = 600,
   height = 260,
   onKeyframeMove,
@@ -307,6 +413,15 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   propertyValues = {},
   onPropertyValueCommit,
   onRemoveKeyframes,
+  onCopyKeyframes,
+  onCutKeyframes,
+  onPasteKeyframes,
+  hasKeyframeClipboard = false,
+  isKeyframeClipboardCut = false,
+  selectedInterpolation,
+  interpolationOptions = [],
+  onInterpolationChange,
+  interpolationDisabled = false,
   onNavigateToKeyframe,
   transitionBlockedRanges = [],
   disabled = false,
@@ -429,6 +544,8 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const [visibleGroups, setVisibleGroups] = useState<Record<string, boolean>>({});
   const [showKeyframedOnly, setShowKeyframedOnly] = useState(false);
   const [lockedProperties, setLockedProperties] = useState<Partial<Record<AnimatableProperty, boolean>>>({});
+  const [graphRulerUnit, setGraphRulerUnit] = useState<'frames' | 'seconds'>('frames');
+  const [showAllGraphHandles, setShowAllGraphHandles] = useState(false);
 
   useEffect(() => {
     const groupIds = new Set(allPropertyGroups.map((group) => group.id));
@@ -1911,6 +2028,22 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const graphDisplayPropertyLocked = graphDisplayProperty
     ? isPropertyLocked(graphDisplayProperty)
     : false;
+  const formatRulerTick = useCallback(
+    (frame: number): string => {
+      if (visualizationMode !== 'graph' || graphRulerUnit === 'frames' || !fps || fps <= 0) {
+        return String(frame);
+      }
+      const seconds = frame / fps;
+      if (seconds >= 60) {
+        const minutes = Math.floor(seconds / 60);
+        const remainder = seconds - minutes * 60;
+        return `${minutes}:${remainder.toFixed(1).padStart(4, '0')}`;
+      }
+      return `${seconds.toFixed(seconds < 10 ? 2 : 1)}s`;
+    },
+    [visualizationMode, graphRulerUnit, fps]
+  );
+
   const rulerTickElements = useMemo(
     () =>
       ticks.map((frame) => (
@@ -1920,11 +2053,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           style={{ left: frameToX(frame) }}
         >
           <span className="absolute top-0.5 left-1 text-[10px] text-muted-foreground">
-            {frame}
+            {formatRulerTick(frame)}
           </span>
         </div>
       )),
-    [ticks, frameToX]
+    [ticks, frameToX, formatRulerTick]
   );
   const renderPropertyRowContent = useCallback(
     (row: DopesheetPropertyRow, options?: { indented?: boolean }) => {
@@ -2657,62 +2790,180 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-            onClick={handleRemoveKeyframes}
-            disabled={disabled || selectedRefs.length === 0 || !onRemoveKeyframes}
-            title="Remove selected keyframes"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 w-7 p-0',
-              snapEnabled && 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-            onClick={() => setSnapEnabled((prev) => !prev)}
-            disabled={disabled}
-            title={snapEnabled ? 'Snapping enabled' : 'Enable snapping'}
-          >
-            <Magnet className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => zoomAroundFrame(currentFrame, ZOOM_OUT_FACTOR)}
-            disabled={disabled}
-            title="Zoom out"
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => zoomAroundFrame(currentFrame, ZOOM_IN_FACTOR)}
-            disabled={disabled}
-            title="Zoom in"
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={resetViewport}
-            disabled={disabled}
-            title="Fit to clip"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
+        <div className="flex items-center gap-1.5">
+          {visualizationMode === 'graph' && interpolationOptions.length > 0 && (
+            <div
+              className="flex items-center gap-0.5 rounded-md border border-border/80 bg-muted/20 px-0.5 py-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+              aria-label="Interpolation controls"
+            >
+              {interpolationOptions.map((option) => {
+                const isActive = selectedInterpolation === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-6 w-6 p-0 text-muted-foreground/80 hover:bg-background/60 hover:text-foreground',
+                      isActive && 'bg-background text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-background hover:text-foreground'
+                    )}
+                    onClick={() => onInterpolationChange?.(option.value)}
+                    disabled={disabled || interpolationDisabled || !onInterpolationChange}
+                    title={option.label}
+                    aria-label={`Set interpolation to ${option.label}`}
+                    aria-pressed={isActive}
+                  >
+                    <InterpolationTypeIcon type={option.value} />
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+          {(onCopyKeyframes || onCutKeyframes || onPasteKeyframes) && (
+            <div className="flex items-center gap-0.5 rounded-md border border-border/70 bg-background/85 px-0.5 py-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={onCopyKeyframes}
+                disabled={disabled || selectedRefs.length === 0 || !onCopyKeyframes}
+                title="Copy selected keyframes"
+                aria-label="Copy selected keyframes"
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={onCutKeyframes}
+                disabled={disabled || selectedRefs.length === 0 || !onCutKeyframes}
+                title="Cut selected keyframes"
+                aria-label="Cut selected keyframes"
+              >
+                <Scissors className="h-3 w-3" />
+              </Button>
+              <Button
+                variant={isKeyframeClipboardCut ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={onPasteKeyframes}
+                disabled={disabled || !hasKeyframeClipboard || !onPasteKeyframes}
+                title={isKeyframeClipboardCut ? 'Move keyframes from clipboard' : 'Paste keyframes'}
+                aria-label={isKeyframeClipboardCut ? 'Move keyframes from clipboard' : 'Paste keyframes'}
+              >
+                <ClipboardPaste className="h-3 w-3" />
+              </Button>
+              {isKeyframeClipboardCut && hasKeyframeClipboard && (
+                <span className="pl-0.5 text-[10px] font-medium text-amber-500">
+                  Cut
+                </span>
+              )}
+            </div>
+          )}
+          <div className="flex items-center rounded-md border border-border/70 bg-background/85 px-0.5 py-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+              onClick={handleRemoveKeyframes}
+              disabled={disabled || selectedRefs.length === 0 || !onRemoveKeyframes}
+              title="Remove selected keyframes"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+            <div className="mx-0.5 h-3.5 w-px bg-border/80" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                'h-6 w-6 p-0',
+                snapEnabled && 'bg-primary text-primary-foreground hover:bg-primary/90'
+              )}
+              onClick={() => setSnapEnabled((prev) => !prev)}
+              disabled={disabled}
+              title={snapEnabled ? 'Snapping enabled' : 'Enable snapping'}
+            >
+              <Magnet className="h-3 w-3" />
+            </Button>
+            <div className="mx-0.5 h-3.5 w-px bg-border/80" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => zoomAroundFrame(currentFrame, ZOOM_OUT_FACTOR)}
+              disabled={disabled}
+              title="Zoom out"
+            >
+              <ZoomOut className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => zoomAroundFrame(currentFrame, ZOOM_IN_FACTOR)}
+              disabled={disabled}
+              title="Zoom in"
+            >
+              <ZoomIn className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={resetViewport}
+              disabled={disabled}
+              title="Fit to clip"
+            >
+              <Maximize2 className="h-3 w-3" />
+            </Button>
+          </div>
+          {visualizationMode === 'graph' && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  disabled={disabled}
+                  aria-label="Graph view options"
+                  title="Graph view options"
+                >
+                  <MoreHorizontal className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[220px]">
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setGraphRulerUnit('seconds');
+                  }}
+                >
+                  <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'seconds' && 'opacity-0')} />
+                  Display Time Ruler in Seconds
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setGraphRulerUnit('frames');
+                  }}
+                >
+                  <Check className={cn('h-3.5 w-3.5', graphRulerUnit !== 'frames' && 'opacity-0')} />
+                  Display Time Ruler in Frames
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setShowAllGraphHandles((prev) => !prev);
+                  }}
+                >
+                  <Check className={cn('h-3.5 w-3.5', !showAllGraphHandles && 'opacity-0')} />
+                  Show All Handles
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -2763,6 +3014,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                       selectedKeyframeIds={selectedKeyframeIds}
                       currentFrame={currentFrame}
                       totalFrames={totalFrames}
+                      fps={fps}
                       width={graphPaneSize.width}
                       height={graphPaneSize.height}
                       onKeyframeMove={onKeyframeMove}
@@ -2782,6 +3034,9 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                       showToolbar={false}
                       showKeyboardHints={false}
                       borderless
+                      showAllHandles={showAllGraphHandles}
+                      rulerUnit={graphRulerUnit}
+                      hideXLabels
                       disabled={disabled || graphDisplayPropertyLocked}
                     />
                   ) : null}

@@ -97,6 +97,112 @@ describe('DopesheetEditor property groups', () => {
     expect(onPropertyChange).toHaveBeenCalledWith('y');
   });
 
+  it('shows interpolation icon controls only in graph view', () => {
+    const interpolationOptions = [
+      { value: 'linear' as const, label: 'Linear' },
+      { value: 'ease-in' as const, label: 'Ease In' },
+    ];
+    const onInterpolationChange = vi.fn();
+
+    const { rerender } = render(
+      <DopesheetEditor
+        itemId="item-1"
+        keyframesByProperty={{ x: [] }}
+        propertyValues={{ x: 100 }}
+        currentFrame={12}
+        width={640}
+        height={240}
+        visualizationMode="graph"
+        selectedInterpolation="linear"
+        interpolationOptions={interpolationOptions}
+        onInterpolationChange={onInterpolationChange}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /set interpolation to linear/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /set interpolation to ease in/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /set interpolation to ease in/i }));
+    expect(onInterpolationChange).toHaveBeenCalledWith('ease-in');
+
+    rerender(
+      <DopesheetEditor
+        itemId="item-1"
+        keyframesByProperty={{ x: [] }}
+        propertyValues={{ x: 100 }}
+        currentFrame={12}
+        width={640}
+        height={240}
+        visualizationMode="dopesheet"
+        selectedInterpolation="linear"
+        interpolationOptions={interpolationOptions}
+        onInterpolationChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /set interpolation to linear/i })).toBeNull();
+  });
+
+  it('shows graph options for ruler units and handle visibility', () => {
+    render(
+      <DopesheetEditor
+        itemId="item-1"
+        keyframesByProperty={{
+          x: [
+            {
+              id: 'kf-1',
+              frame: 0,
+              value: 100,
+              easing: 'ease-in',
+              easingConfig: {
+                type: 'cubic-bezier',
+                bezier: { x1: 0.42, y1: 0, x2: 1, y2: 1 },
+              },
+            },
+            {
+              id: 'kf-2',
+              frame: 30,
+              value: 200,
+              easing: 'linear',
+            },
+          ],
+        }}
+        propertyValues={{ x: 100 }}
+        currentFrame={12}
+        totalFrames={60}
+        fps={30}
+        width={640}
+        height={240}
+        visualizationMode="graph"
+        selectedProperty="x"
+        selectedKeyframeIds={new Set(['kf-1'])}
+      />
+    );
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: /graph view options/i }), { button: 0, ctrlKey: false });
+    expect(screen.getByText(/display time ruler in seconds/i)).toBeTruthy();
+    expect(screen.getByText(/display time ruler in frames/i)).toBeTruthy();
+    expect(screen.getByText(/show all handles/i)).toBeTruthy();
+  });
+
+  it('renders clipboard controls in the bottom row', () => {
+    renderEditor({
+      keyframesByProperty: { x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }] },
+      propertyValues: { x: 100 },
+      selectedKeyframeIds: new Set(['kx-1']),
+      onCopyKeyframes: vi.fn(),
+      onCutKeyframes: vi.fn(),
+      onPasteKeyframes: vi.fn(),
+      hasKeyframeClipboard: true,
+      isKeyframeClipboardCut: true,
+    });
+
+    expect(screen.getByRole('button', { name: /copy selected keyframes/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /cut selected keyframes/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /move keyframes from clipboard/i })).toBeTruthy();
+    expect(screen.getByText('Cut')).toBeTruthy();
+  });
+
   it('shows matching header icons and supports bulk group controls', () => {
     renderEditor({
       keyframesByProperty: { x: [], y: [] },
