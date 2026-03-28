@@ -57,6 +57,8 @@ interface ValueGraphEditorProps {
   height?: number;
   /** Callback when keyframe is moved */
   onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void;
+  /** Callback when keyframes are duplicated to explicit targets */
+  onDuplicateKeyframes?: (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => void;
   /** Optional frame preview override for external X-axis scrubbing */
   previewFramesById?: Record<string, number> | null;
   /** Optional frame-delta constraint for horizontal drags */
@@ -125,6 +127,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   width = 600,
   height = 300,
   onKeyframeMove,
+  onDuplicateKeyframes,
   previewFramesById = null,
   constrainFrameDelta,
   onBezierHandleMove,
@@ -466,6 +469,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     onSelectionChange,
     onBackgroundClick: () => onPropertyChange?.(null),
     onKeyframeMove,
+    onDuplicateKeyframes,
     constrainFrameDelta,
     onBezierHandleMove,
     onDragStart,

@@ -99,9 +99,11 @@ function TestGraph() {
 function DragGraph({
   initialSelection = new Set<string>(['kf-1', 'kf-2']),
   onKeyframeMove = vi.fn(),
+  onDuplicateKeyframes,
 }: {
   initialSelection?: Set<string>;
   onKeyframeMove?: (ref: KeyframeRef, frame: number, value: number) => void;
+  onDuplicateKeyframes?: (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => void;
 }) {
   const [selection, setSelection] = useState<Set<string>>(new Set(initialSelection));
   const points = useMemo(
@@ -125,6 +127,7 @@ function DragGraph({
     selectedKeyframeIds: selection,
     onSelectionChange: setSelection,
     onKeyframeMove,
+    onDuplicateKeyframes,
   });
 
   return (
@@ -430,6 +433,45 @@ describe('useGraphInteraction marquee selection', () => {
     });
 
     expect(screen.getByTestId('sensitivity-preview-values')).toHaveTextContent('106');
+  });
+
+  it('duplicates dragged graph keyframes when alt is held', () => {
+    const onDuplicateKeyframes = vi.fn();
+    const onKeyframeMove = vi.fn();
+
+    render(
+      <DragGraph
+        initialSelection={new Set(['kf-1'])}
+        onKeyframeMove={onKeyframeMove}
+        onDuplicateKeyframes={onDuplicateKeyframes}
+      />
+    );
+
+    const svg = screen.getByTestId('drag-graph') as unknown as SVGSVGElement;
+    installSvgDomMocks(svg);
+
+    fireEvent.pointerDown(screen.getByTestId('point-kf-1'), {
+      button: 0,
+      clientX: 120,
+      clientY: 150,
+      pointerId: 9,
+      altKey: true,
+    });
+    fireEvent.pointerMove(svg, {
+      clientX: 180,
+      clientY: 150,
+      pointerId: 9,
+      altKey: true,
+    });
+    fireEvent.pointerUp(svg, {
+      clientX: 180,
+      clientY: 150,
+      pointerId: 9,
+      altKey: true,
+    });
+
+    expect(onKeyframeMove).not.toHaveBeenCalled();
+    expect(onDuplicateKeyframes).toHaveBeenCalled();
   });
 
   it('keeps the keyframe cluster in view when zooming with graph controls', () => {

@@ -544,4 +544,37 @@ describe('DopesheetEditor property groups', () => {
       240
     );
   });
+
+  it('duplicates selected row keyframes with alt-drag instead of moving them', () => {
+    const onDuplicateKeyframes = vi.fn();
+    const onKeyframeMove = vi.fn();
+
+    renderEditor({
+      keyframesByProperty: {
+        x: [{ id: 'kx-1', frame: 8, value: 100, easing: 'linear' }],
+      },
+      propertyValues: { x: 100 },
+      totalFrames: 100,
+      onKeyframeMove,
+      onDuplicateKeyframes,
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('row-keyframe-x-kx-1'), {
+      button: 0,
+      pointerId: 1,
+      clientX: 100,
+      altKey: true,
+    });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 140, altKey: true });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 140, altKey: true });
+
+    expect(onKeyframeMove).not.toHaveBeenCalled();
+    expect(onDuplicateKeyframes).toHaveBeenCalledWith([
+      {
+        ref: { itemId: 'item-1', property: 'x', keyframeId: 'kx-1' },
+        frame: 18,
+        value: 100,
+      },
+    ]);
+  });
 });

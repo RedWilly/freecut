@@ -47,6 +47,7 @@ interface DragStartState {
     minValue: number;
     maxValue: number;
   }>;
+  duplicateOnCommit: boolean;
 }
 
 /** Info about the adjacent segment for mid-point tangent mirroring */
@@ -144,6 +145,8 @@ interface UseGraphInteractionOptions {
   onBackgroundClick?: () => void;
   /** Callback when keyframe is moved */
   onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void;
+  /** Callback when keyframes are duplicated to explicit targets */
+  onDuplicateKeyframes?: (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => void;
   /** Optional frame-delta constraint for horizontal drags */
   constrainFrameDelta?: (deltaFrames: number, draggedKeyframeIds: string[]) => number;
   /** Callback when bezier handle is moved */
@@ -220,6 +223,7 @@ export function useGraphInteraction({
   onSelectionChange,
   onBackgroundClick,
   onKeyframeMove,
+  onDuplicateKeyframes,
   constrainFrameDelta,
   onBezierHandleMove,
   onDragStart,
@@ -259,10 +263,10 @@ export function useGraphInteraction({
   }, [previewBezierConfigs]);
 
   // Ref for latest callbacks to avoid stale closures
-  const callbacksRef = useRef({ onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd });
+  const callbacksRef = useRef({ onKeyframeMove, onDuplicateKeyframes, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd });
   useEffect(() => {
-    callbacksRef.current = { onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd };
-  }, [onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd]);
+    callbacksRef.current = { onKeyframeMove, onDuplicateKeyframes, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd };
+  }, [onKeyframeMove, onDuplicateKeyframes, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd]);
 
   // Track whether we've called onDragStart for the current drag operation
   const dragStartCalledRef = useRef(false);
@@ -628,6 +632,7 @@ export function useGraphInteraction({
         pointerId: event.pointerId,
         point,
         initialKeyframeStates,
+        duplicateOnCommit: !!onDuplicateKeyframes && event.altKey,
       };
 
       setIsPendingDrag(true);
@@ -863,7 +868,7 @@ export function useGraphInteraction({
         if (!isDragging && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
           setIsDragging(true);
           // Call onDragStart when we first exceed threshold
-          if (!dragStartCalledRef.current) {
+          if (!dragStartCalledRef.current && !dragStartRef.current.duplicateOnCommit) {
             dragStartCalledRef.current = true;
             callbacksRef.current.onDragStart?.();
           }
@@ -878,7 +883,7 @@ export function useGraphInteraction({
         let valueDelta = -(dy / graphHeight) * valueRange;
 
         // Alt = fine adjustment (half speed)
-        if (event.altKey) {
+        if (event.altKey && !dragStartRef.current.duplicateOnCommit) {
           frameDelta *= 0.5;
           valueDelta *= 0.5;
         }
@@ -1052,18 +1057,42 @@ export function useGraphInteraction({
       // Selection was already handled in pointerDown, no additional action needed
 
       if (dragState?.type === 'keyframe' && dragStartRef.current && previewValuesRef.current) {
-        for (const [keyframeId, initialState] of dragStartRef.current.initialKeyframeStates) {
-          const previewValue = previewValuesRef.current[keyframeId];
-          if (!previewValue) continue;
-          callbacksRef.current.onKeyframeMove?.(
-            {
-              itemId: initialState.itemId,
-              property: initialState.property,
-              keyframeId,
-            },
-            previewValue.frame,
-            previewValue.value
-          );
+        if (dragStartRef.current.duplicateOnCommit) {
+          const entries = Array.from(dragStartRef.current.initialKeyframeStates.entries())
+            .flatMap(([keyframeId, initialState]) => {
+              const previewValue = previewValuesRef.current?.[keyframeId];
+              if (!previewValue) {
+                return [];
+              }
+
+              return [{
+                ref: {
+                  itemId: initialState.itemId,
+                  property: initialState.property,
+                  keyframeId,
+                },
+                frame: previewValue.frame,
+                value: previewValue.value,
+              }];
+            });
+
+          if (entries.length > 0) {
+            callbacksRef.current.onDuplicateKeyframes?.(entries);
+          }
+        } else {
+          for (const [keyframeId, initialState] of dragStartRef.current.initialKeyframeStates) {
+            const previewValue = previewValuesRef.current[keyframeId];
+            if (!previewValue) continue;
+            callbacksRef.current.onKeyframeMove?.(
+              {
+                itemId: initialState.itemId,
+                property: initialState.property,
+                keyframeId,
+              },
+              previewValue.frame,
+              previewValue.value
+            );
+          }
         }
       }
 

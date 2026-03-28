@@ -6,6 +6,7 @@ import type {
   Keyframe,
 } from '@/types/keyframe';
 import { useKeyframesStore } from './keyframes-store';
+import { removeKeyframes } from './actions/keyframe-actions';
 
 /**
  * Keyframe selection state - tracks selected keyframes and clipboard.
@@ -228,8 +229,11 @@ export const useKeyframeSelectionStore = create<
   // Cut selected keyframes (copy + mark for deletion)
   cutSelectedKeyframes: () => {
     const state = get();
+    if (state.selectedKeyframes.length === 0) return;
+
     state.copySelectedKeyframes();
-    set({ isCut: true });
+    removeKeyframes(state.selectedKeyframes);
+    set({ selectedKeyframes: [], isCut: true });
   },
 
   // Clear clipboard

@@ -888,11 +888,10 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       easing: EasingType;
       easingConfig?: EasingConfig;
     }> = [];
-    const movedSourceRefs: KeyframeRef[] = [];
     let skippedUnsupported = 0;
     let skippedBlocked = 0;
 
-    keyframeClipboard.keyframes.forEach((keyframe, index) => {
+    keyframeClipboard.keyframes.forEach((keyframe) => {
       if (!availableProperties.includes(keyframe.property)) {
         skippedUnsupported += 1;
         return;
@@ -916,14 +915,22 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         easing: keyframe.easing,
         easingConfig: keyframe.easingConfig,
       });
-
-      if (isKeyframeClipboardCut) {
-        const sourceRef = keyframeClipboard.sourceRefs[index];
-        if (sourceRef) {
-          movedSourceRefs.push(sourceRef);
-        }
-      }
     });
+
+    if (isKeyframeClipboardCut && (skippedUnsupported > 0 || skippedBlocked > 0)) {
+      const reasons: string[] = [];
+      if (skippedUnsupported > 0) {
+        reasons.push(`${skippedUnsupported} unsupported by the selected clip`);
+      }
+      if (skippedBlocked > 0) {
+        reasons.push(`${skippedBlocked} blocked by transition regions`);
+      }
+
+      toast.warning('Unable to paste cut keyframes here', {
+        description: `${reasons.join('. ')}. The cut keyframes stay in the clipboard.`,
+      });
+      return;
+    }
 
     if (payloads.length === 0) {
       const reasons: string[] = [];
@@ -942,10 +949,6 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         description: reasons.join('. '),
       });
       return;
-    }
-
-    if (isKeyframeClipboardCut && movedSourceRefs.length > 0) {
-      timelineActions.removeKeyframes(movedSourceRefs);
     }
 
     const insertedIds = timelineActions.addKeyframes(payloads);
@@ -1118,6 +1121,43 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       timelineActions.addKeyframes(payloads);
     },
     [canvas, keyframesByProperty, selectedItemForEditor]
+  );
+  const handleDuplicateKeyframes = useCallback(
+    (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => {
+      if (!selectedItemForEditor || entries.length === 0) return;
+
+      const payloads = entries.flatMap(({ ref, frame, value }) => {
+        const sourceKeyframe = keyframesByProperty[ref.property]?.find(
+          (keyframe) => keyframe.id === ref.keyframeId
+        );
+        if (!sourceKeyframe) {
+          return [];
+        }
+
+        return [{
+          itemId: selectedItemForEditor.id,
+          property: ref.property,
+          frame,
+          value,
+          easing: sourceKeyframe.easing,
+          easingConfig: sourceKeyframe.easingConfig,
+        }];
+      });
+
+      if (payloads.length === 0) return;
+
+      const insertedIds = timelineActions.addKeyframes(payloads);
+      const insertedRefs = insertedIds.map((keyframeId, index) => ({
+        itemId: selectedItemForEditor.id,
+        property: payloads[index]!.property,
+        keyframeId,
+      }));
+
+      if (insertedRefs.length > 0) {
+        selectKeyframes(insertedRefs);
+      }
+    },
+    [keyframesByProperty, selectKeyframes, selectedItemForEditor]
   );
 
   const propertyValues = useMemo(() => {
@@ -1429,6 +1469,7 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
                 onDragEnd={handleDragEnd}
                 onAddKeyframe={handleAddKeyframe}
                 onAddKeyframes={handleAddKeyframes}
+                onDuplicateKeyframes={handleDuplicateKeyframes}
                 onPropertyValueCommit={handlePropertyValueCommit}
                 onRemoveKeyframes={handleRemoveKeyframes}
                 onCopyKeyframes={handleCopyKeyframes}

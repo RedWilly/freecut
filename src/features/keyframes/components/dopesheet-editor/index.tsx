@@ -107,6 +107,8 @@ interface DopesheetEditorProps {
   onAddKeyframe?: (property: AnimatableProperty, frame: number) => void;
   /** Callback to add multiple keyframes in a single batch */
   onAddKeyframes?: (entries: Array<{ property: AnimatableProperty; frame: number }>) => void;
+  /** Callback to duplicate keyframes to explicit target frames */
+  onDuplicateKeyframes?: (entries: Array<{ ref: KeyframeRef; frame: number; value: number }>) => void;
   /** Current property values at the playhead */
   propertyValues?: Partial<Record<AnimatableProperty, number>>;
   /** Callback to commit a property value at the playhead */
@@ -188,6 +190,7 @@ interface DragState {
   startClientX: number;
   pointerId: number;
   started: boolean;
+  duplicateOnCommit: boolean;
 }
 
 type MarqueeMode = 'replace' | 'add' | 'toggle';
@@ -677,6 +680,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   onDragEnd,
   onAddKeyframe,
   onAddKeyframes,
+  onDuplicateKeyframes,
   propertyValues = {},
   onPropertyValueCommit,
   onRemoveKeyframes,
@@ -721,6 +725,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const skipNextHeaderFrameBlurRef = useRef<'local' | 'global' | null>(null);
   const appliedDragPreviewFramesRef = useRef<Record<string, number> | null>(null);
   const [sheetPreviewFrames, setSheetPreviewFrames] = useState<Record<string, number> | null>(null);
+  const [sheetPreviewDuplicateKeyframeIds, setSheetPreviewDuplicateKeyframeIds] = useState<string[] | null>(null);
   const [timingStripPreviewFrames, setTimingStripPreviewFrames] = useState<Record<string, number> | null>(null);
   const timingStripPreviewFramesRef = useRef<Record<string, number> | null>(null);
   const timingStripDraggedIdsRef = useRef<string[]>([]);
@@ -1300,14 +1305,24 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         return;
       }
 
+      const duplicatePreviewIds = dragStateRef.current?.duplicateOnCommit && nextPreviewFrames
+        ? dragStateRef.current.selectedKeyframeIds
+        : null;
+
       flushSync(() => {
         setSheetPreviewFrames(nextPreviewFrames);
+        setSheetPreviewDuplicateKeyframeIds(duplicatePreviewIds);
       });
 
       const keyframeIds = new Set([
         ...Object.keys(previousPreviewFrames ?? {}),
         ...Object.keys(nextPreviewFrames ?? {}),
       ]);
+
+      if (duplicatePreviewIds) {
+        appliedDragPreviewFramesRef.current = nextPreviewFrames;
+        return;
+      }
 
       for (const keyframeId of keyframeIds) {
         const button = keyframeButtonRefs.current.get(keyframeId);
@@ -1697,6 +1712,40 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       return hasChanges;
     },
     [isPropertyLocked, itemId, onKeyframeMove]
+  );
+  const duplicateSelectionFramePreview = useCallback(
+    (selectionIds: Iterable<string>, previewFrames: Record<string, number> | null) => {
+      if (!onDuplicateKeyframes || !previewFrames) {
+        return false;
+      }
+
+      const entries: Array<{ ref: KeyframeRef; frame: number; value: number }> = [];
+      for (const keyframeId of selectionIds) {
+        const nextFrame = previewFrames[keyframeId];
+        if (nextFrame === undefined) {
+          continue;
+        }
+
+        const meta = keyframeMetaByIdRef.current.get(keyframeId);
+        if (!meta || isPropertyLocked(meta.property)) {
+          continue;
+        }
+
+        entries.push({
+          ref: { itemId, property: meta.property, keyframeId },
+          frame: nextFrame,
+          value: meta.keyframe.value,
+        });
+      }
+
+      if (entries.length === 0) {
+        return false;
+      }
+
+      onDuplicateKeyframes(entries);
+      return true;
+    },
+    [isPropertyLocked, itemId, onDuplicateKeyframes]
   );
 
   const canAddKeyframeForRow = useCallback(
@@ -2263,6 +2312,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         startClientX: event.clientX,
         pointerId: event.pointerId,
         started: false,
+        duplicateOnCommit: !!onDuplicateKeyframes && event.altKey,
       };
       scheduleDragPreviewFrames(null);
 
@@ -2271,6 +2321,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [
       disabled,
       isPropertyLocked,
+      onDuplicateKeyframes,
       onActivePropertyChange,
       rowKeyframesByProperty,
       scheduleDragPreviewFrames,
@@ -2343,6 +2394,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         startClientX: event.clientX,
         pointerId: event.pointerId,
         started: false,
+        duplicateOnCommit: !!onDuplicateKeyframes && event.altKey,
       };
       scheduleDragPreviewFrames(null);
 
@@ -2351,6 +2403,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
     [
       disabled,
       isPropertyLocked,
+      onDuplicateKeyframes,
       onActivePropertyChange,
       onSelectionChange,
       scheduleDragPreviewFrames,
@@ -2363,6 +2416,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         return group.frameGroups;
       }
 
+      const duplicatePreviewIdSet = sheetPreviewDuplicateKeyframeIds
+        ? new Set(sheetPreviewDuplicateKeyframeIds)
+        : null;
+
       const previewEntries = group.rows
         .flatMap((row) =>
           row.keyframes.map((keyframe) => ({
@@ -2371,7 +2428,23 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             frame: sheetPreviewFrames[keyframe.id] ?? keyframe.frame,
           }))
         )
+        .filter((entry) => !duplicatePreviewIdSet || duplicatePreviewIdSet.has(entry.keyframe.id))
         .toSorted((a, b) => a.frame - b.frame);
+
+      if (duplicatePreviewIdSet) {
+        return previewEntries.reduce<DopesheetPropertyGroup['frameGroups']>((groups, entry) => {
+          const lastGroup = groups.at(-1);
+          if (lastGroup && lastGroup.frame === entry.frame) {
+            lastGroup.keyframes.push({ property: entry.property, keyframe: entry.keyframe });
+          } else {
+            groups.push({
+              frame: entry.frame,
+              keyframes: [{ property: entry.property, keyframe: entry.keyframe }],
+            });
+          }
+          return groups;
+        }, []);
+      }
 
       return previewEntries.reduce<DopesheetPropertyGroup['frameGroups']>((groups, entry) => {
         const lastGroup = groups.at(-1);
@@ -2386,7 +2459,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         return groups;
       }, []);
     },
-    [sheetPreviewFrames]
+    [sheetPreviewDuplicateKeyframeIds, sheetPreviewFrames]
   );
 
   const updateSelectionFromMarquee = useCallback(
@@ -2473,7 +2546,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   );
 
   useEffect(() => {
-    if (!onKeyframeMove) return;
+    if (!onKeyframeMove && !onDuplicateKeyframes) return;
 
     const handlePointerMove = (event: PointerEvent) => {
       if (disabled) return;
@@ -2484,7 +2557,9 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       const deltaX = event.clientX - dragState.startClientX;
       if (!dragState.started && Math.abs(deltaX) > DRAG_THRESHOLD) {
         dragState.started = true;
-        onDragStart?.();
+        if (!dragState.duplicateOnCommit) {
+          onDragStart?.();
+        }
       }
 
       if (!dragState.started) return;
@@ -2511,8 +2586,12 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
       if (dragState.started) {
         const previewFrames = appliedDragPreviewFramesRef.current;
-        commitSelectionFramePreview(dragState.selectedKeyframeIds, previewFrames);
-        onDragEnd?.();
+        if (dragState.duplicateOnCommit) {
+          duplicateSelectionFramePreview(dragState.selectedKeyframeIds, previewFrames);
+        } else {
+          commitSelectionFramePreview(dragState.selectedKeyframeIds, previewFrames);
+          onDragEnd?.();
+        }
       }
       dragStateRef.current = null;
       scheduleDragPreviewFrames(null);
@@ -2528,7 +2607,9 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       disabled,
       buildSelectionFramePreview,
       commitSelectionFramePreview,
+      duplicateSelectionFramePreview,
       onKeyframeMove,
+      onDuplicateKeyframes,
       onDragStart,
       onDragEnd,
       effectiveTimelineWidth,
@@ -3305,7 +3386,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                   />
                 ))}
 
-                {getDisplayedGroupFrameGroups(entry.group).map((frameGroup) => {
+                {(sheetPreviewDuplicateKeyframeIds ? entry.group.frameGroups : getDisplayedGroupFrameGroups(entry.group)).map((frameGroup) => {
                   const renderedX = getRenderedKeyframeX(frameGroup.frame);
                   if (renderedX === null) {
                     return null;
@@ -3343,6 +3424,22 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                         )}
                       />
                     </button>
+                  );
+                })}
+                {sheetPreviewDuplicateKeyframeIds && getDisplayedGroupFrameGroups(entry.group).map((frameGroup) => {
+                  const renderedX = getRenderedKeyframeX(frameGroup.frame);
+                  if (renderedX === null) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      key={`preview-${entry.group.id}-${frameGroup.frame}`}
+                      className="absolute z-20 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center pointer-events-none"
+                      style={{ left: renderedX, top: '50%' }}
+                    >
+                      <span className="block h-2 w-2 rotate-45 border border-primary/70 bg-primary/70 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]" />
+                    </div>
                   );
                 })}
               </div>
@@ -3411,8 +3508,34 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                           : 'border-transparent bg-orange-500 group-hover:bg-orange-400'
                       )}
                     />
-                  </button>
-                );
+                    </button>
+                  );
+                })}
+              {sheetPreviewDuplicateKeyframeIds?.flatMap((keyframeId) => {
+                const meta = keyframeMetaByIdRef.current.get(keyframeId);
+                if (!meta || meta.property !== row.property) {
+                  return [];
+                }
+
+                const previewFrame = sheetPreviewFrames?.[keyframeId];
+                if (previewFrame === undefined) {
+                  return [];
+                }
+
+                const renderedX = getRenderedKeyframeX(previewFrame);
+                if (renderedX === null) {
+                  return [];
+                }
+
+                return [
+                  <div
+                    key={`preview-${row.property}-${keyframeId}`}
+                    className="absolute z-20 flex h-3 w-3 -ml-1.5 -mt-1.5 items-center justify-center pointer-events-none"
+                    style={{ left: renderedX, top: '50%' }}
+                  >
+                    <span className="block h-2 w-2 rotate-45 border border-primary/70 bg-primary/70 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]" />
+                  </div>,
+                ];
               })}
             </div>
           </div>
@@ -3433,6 +3556,8 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       frameToX,
       transitionBlockedRanges,
       selectedKeyframeIds,
+      sheetPreviewDuplicateKeyframeIds,
+      sheetPreviewFrames,
       handleKeyframePointerDown,
       setKeyframeButtonRef,
     ]
