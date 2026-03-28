@@ -71,10 +71,11 @@ const GraphKeyframe = memo(function GraphKeyframe({
   );
 
   const halfSize = size / 2;
+  const showDragPreview = point.isDragging || previewValue !== null;
 
   // Use preview values when dragging, otherwise use current keyframe values
-  const displayFrame = point.isDragging && previewValue ? previewValue.frame : point.keyframe.frame;
-  const displayValue = point.isDragging && previewValue ? previewValue.value : point.keyframe.value;
+  const displayFrame = previewValue ? previewValue.frame : point.keyframe.frame;
+  const displayValue = previewValue ? previewValue.value : point.keyframe.value;
 
   const cursorStyle = disabled ? 'default' : 'pointer';
 
@@ -117,15 +118,15 @@ const GraphKeyframe = memo(function GraphKeyframe({
           L ${point.x - halfSize} ${point.y}
           Z
         `}
-        fill={point.isDragging ? '#3b82f6' : point.isSelected ? '#3b82f6' : '#f97316'}
+        fill={showDragPreview ? '#3b82f6' : point.isSelected ? '#3b82f6' : '#f97316'}
         stroke="#1a1a1a"
         strokeWidth={2}
         style={{ pointerEvents: 'none' }}
       />
 
       {/* Value tooltip when dragging - shows TARGET values */}
-      {point.isDragging && (
-        <g style={{ pointerEvents: 'none' }}>
+      {showDragPreview && (
+        <g data-testid={`graph-keyframe-tooltip-${point.keyframe.id}`} style={{ pointerEvents: 'none' }}>
           <rect
             x={point.x + 12}
             y={point.y - 24}

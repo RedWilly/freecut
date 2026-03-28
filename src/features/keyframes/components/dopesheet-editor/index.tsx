@@ -2363,7 +2363,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           id: keyframe.id,
           frame: keyframe.frame,
           selected: selectedKeyframeIds.has(keyframe.id),
-          draggable: selectedRefIds.includes(keyframe.id),
+          draggable: !!onKeyframeMove && selectedRefIds.includes(keyframe.id),
         }));
       }
 
@@ -2373,10 +2373,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           id: keyframe.id,
           frame: keyframe.frame,
           selected: true,
-          draggable: !isPropertyLocked(property),
+          draggable: !!onKeyframeMove && !isPropertyLocked(property),
         }));
     },
-    [activeSelectedProperty, isPropertyLocked, keyframesByProperty, selectedKeyframeIds, selectedRefIds, visibleKeyframes, visualizationMode]
+    [activeSelectedProperty, isPropertyLocked, keyframesByProperty, onKeyframeMove, selectedKeyframeIds, selectedRefIds, visibleKeyframes, visualizationMode]
   );
   const constrainGraphFrameDelta = useCallback(
     (deltaFrames: number, draggedKeyframeIds: string[]) =>
@@ -3511,7 +3511,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             contentFrameMax={contentFrameMax}
             markers={timingStripMarkers}
             previewFrames={timingStripPreviewFrames}
-            disabled={disabled || !onKeyframeMove || timingStripMarkers.length === 0}
+            disabled={disabled || timingStripMarkers.length === 0}
             onSelectionChange={handleTimingStripSelectionChange}
             onSlideStart={handleTimingStripSlideStart}
             onSlideChange={handleTimingStripSlideChange}

@@ -8,6 +8,7 @@ import {
 } from './compact-navigator-utils';
 
 const DRAG_THRESHOLD_PX = 2;
+type MarqueeMode = 'replace' | 'add' | 'toggle';
 
 interface KeyframeTimingStripMarker {
   id: string;
@@ -33,6 +34,15 @@ interface DragState {
   startClientX: number;
   started: boolean;
   selectedIds: string[];
+}
+
+interface MarqueeState {
+  pointerId: number;
+  startClientX: number;
+  currentClientX: number;
+  started: boolean;
+  mode: MarqueeMode;
+  baseSelection: Set<string>;
 }
 
 function getMarkerLabel(marker: KeyframeTimingStripMarker, frame: number): string {
@@ -74,7 +84,9 @@ export function KeyframeTimingStrip({
 }: KeyframeTimingStripProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const marqueeStateRef = useRef<MarqueeState | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
+  const [marqueeRange, setMarqueeRange] = useState<{ left: number; width: number } | null>(null);
 
   const metrics = getKeyframeNavigatorThumbMetrics({
     viewport,
@@ -90,6 +102,56 @@ export function KeyframeTimingStrip({
         frame: previewFrames?.[marker.id] ?? marker.frame,
       })),
     [markers, previewFrames]
+  );
+  const getMarqueeModeFromPointerEvent = useCallback(
+    (event: Pick<React.PointerEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>): MarqueeMode =>
+      event.shiftKey ? 'add' : (event.ctrlKey || event.metaKey) ? 'toggle' : 'replace',
+    []
+  );
+  const updateMarqueeSelection = useCallback(
+    (state: MarqueeState) => {
+      const track = trackRef.current;
+      if (!track) {
+        return;
+      }
+
+      const rect = track.getBoundingClientRect();
+      const startX = state.startClientX - rect.left;
+      const currentX = state.currentClientX - rect.left;
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const hitIds = new Set(
+        renderedMarkers
+          .filter((marker) => {
+            const left = getMarkerLeft(marker.frame, metrics);
+            return left >= minX && left <= maxX;
+          })
+          .map((marker) => marker.id)
+      );
+
+      let nextSelection = new Set<string>();
+      if (state.mode === 'replace') {
+        nextSelection = hitIds;
+      } else if (state.mode === 'add') {
+        nextSelection = new Set([...state.baseSelection, ...hitIds]);
+      } else {
+        nextSelection = new Set(state.baseSelection);
+        for (const id of hitIds) {
+          if (nextSelection.has(id)) {
+            nextSelection.delete(id);
+          } else {
+            nextSelection.add(id);
+          }
+        }
+      }
+
+      onSelectionChange?.(nextSelection);
+      setMarqueeRange({
+        left: Math.max(0, minX),
+        width: Math.max(1, maxX - minX),
+      });
+    },
+    [metrics, onSelectionChange, renderedMarkers]
   );
 
   const handleMarkerPointerDown = useCallback(
@@ -114,6 +176,25 @@ export function KeyframeTimingStrip({
       };
     },
     [disabled, markers, onSelectionChange]
+  );
+  const handleTrackPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (disabled || event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      marqueeStateRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        currentClientX: event.clientX,
+        started: false,
+        mode: getMarqueeModeFromPointerEvent(event),
+        baseSelection: new Set(markers.filter((marker) => marker.selected).map((marker) => marker.id)),
+      };
+      setMarqueeRange(null);
+    },
+    [disabled, getMarqueeModeFromPointerEvent, markers]
   );
 
   useEffect(() => {
@@ -140,35 +221,61 @@ export function KeyframeTimingStrip({
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const dragState = dragStateRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId || metrics.usableTrackWidth <= 0) {
+      if (dragState && dragState.pointerId === event.pointerId && metrics.usableTrackWidth > 0) {
+        const deltaX = event.clientX - dragState.startClientX;
+        if (!dragState.started && Math.abs(deltaX) > DRAG_THRESHOLD_PX) {
+          dragState.started = true;
+          onSlideStart?.(dragState.selectedIds);
+        }
+
+        if (!dragState.started) {
+          return;
+        }
+
+        const maxFrame = Math.max(1, metrics.contentFrameMax - 1);
+        const deltaFrames = Math.round((deltaX / metrics.usableTrackWidth) * maxFrame);
+        onSlideChange?.(deltaFrames, dragState.selectedIds);
         return;
       }
 
-      const deltaX = event.clientX - dragState.startClientX;
-      if (!dragState.started && Math.abs(deltaX) > DRAG_THRESHOLD_PX) {
-        dragState.started = true;
-        onSlideStart?.(dragState.selectedIds);
-      }
-
-      if (!dragState.started) {
+      const marqueeState = marqueeStateRef.current;
+      if (!marqueeState || marqueeState.pointerId !== event.pointerId) {
         return;
       }
 
-      const maxFrame = Math.max(1, metrics.contentFrameMax - 1);
-      const deltaFrames = Math.round((deltaX / metrics.usableTrackWidth) * maxFrame);
-      onSlideChange?.(deltaFrames, dragState.selectedIds);
+      marqueeState.currentClientX = event.clientX;
+      if (!marqueeState.started && Math.abs(event.clientX - marqueeState.startClientX) > DRAG_THRESHOLD_PX) {
+        marqueeState.started = true;
+      }
+
+      if (!marqueeState.started) {
+        return;
+      }
+
+      updateMarqueeSelection(marqueeState);
     };
 
     const handlePointerUp = (event: PointerEvent) => {
       const dragState = dragStateRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) {
+      if (dragState && dragState.pointerId === event.pointerId) {
+        dragStateRef.current = null;
+        if (dragState.started) {
+          onSlideEnd?.(dragState.selectedIds);
+        }
         return;
       }
 
-      dragStateRef.current = null;
-      if (dragState.started) {
-        onSlideEnd?.(dragState.selectedIds);
+      const marqueeState = marqueeStateRef.current;
+      if (!marqueeState || marqueeState.pointerId !== event.pointerId) {
+        return;
       }
+
+      if (!marqueeState.started && marqueeState.mode === 'replace') {
+        onSelectionChange?.(new Set());
+      }
+
+      marqueeStateRef.current = null;
+      setMarqueeRange(null);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -189,6 +296,7 @@ export function KeyframeTimingStrip({
           'relative h-full rounded-sm bg-secondary/35',
           disabled && 'opacity-50'
         )}
+        onPointerDown={handleTrackPointerDown}
       >
         <div
           className="pointer-events-none absolute inset-y-[1px] rounded-sm bg-muted-foreground/10"
@@ -197,6 +305,15 @@ export function KeyframeTimingStrip({
             width: metrics.thumbWidth,
           }}
         />
+        {marqueeRange ? (
+          <div
+            className="pointer-events-none absolute inset-y-0 rounded-sm bg-primary/20"
+            style={{
+              left: marqueeRange.left,
+              width: marqueeRange.width,
+            }}
+          />
+        ) : null}
 
         {renderedMarkers.map((marker) => {
           const left = getMarkerLeft(marker.frame, metrics);
@@ -229,27 +346,6 @@ export function KeyframeTimingStrip({
             >
               <span className="sr-only">{label}</span>
             </button>
-          );
-        })}
-        {renderedMarkers.map((marker) => {
-          if (previewFrames?.[marker.id] === undefined) {
-            return null;
-          }
-
-          const left = getMarkerLeft(marker.frame, metrics);
-
-          return (
-            <div
-              key={`tooltip-${marker.id}`}
-              data-testid={`keyframe-timing-strip-tooltip-${marker.id}`}
-              className="pointer-events-none absolute -translate-x-1/2 rounded border border-border/80 bg-background/95 px-1 py-0.5 text-[10px] leading-none text-foreground shadow-sm"
-              style={{
-                left,
-                top: -16,
-              }}
-            >
-              {marker.frame}
-            </div>
           );
         })}
       </div>

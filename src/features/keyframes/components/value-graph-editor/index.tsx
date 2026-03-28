@@ -466,6 +466,29 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     () => pointsWithDragState.filter((point) => point.property === displayProperty),
     [displayProperty, pointsWithDragState]
   );
+  const combinedPreviewValues = useMemo(() => {
+    if (!previewFramesById) {
+      return previewValues;
+    }
+
+    const mergedPreviewValues = previewValues ? { ...previewValues } : {};
+    let hasPreviewValue = previewValues !== null;
+
+    for (const point of interactivePoints) {
+      const previewFrame = previewFramesById[point.keyframe.id];
+      if (previewFrame === undefined) {
+        continue;
+      }
+
+      mergedPreviewValues[point.keyframe.id] = {
+        frame: previewFrame,
+        value: previewValues?.[point.keyframe.id]?.value ?? point.keyframe.value,
+      };
+      hasPreviewValue = true;
+    }
+
+    return hasPreviewValue ? mergedPreviewValues : null;
+  }, [interactivePoints, previewFramesById, previewValues]);
   const overlayPointSetsWithDragState = useMemo(() => {
     const pointById = new Map(pointsWithDragState.map((point) => [point.keyframe.id, point]));
     return overlayPointSets.map((overlaySet) => ({
@@ -1064,7 +1087,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
           {/* Keyframe points (rendered last for highest click priority) */}
           <GraphKeyframes
             points={pointsWithDragState}
-            previewValuesById={previewValues}
+            previewValuesById={combinedPreviewValues}
             onPointerDown={handleVisibleKeyframePointerDown}
             onClick={handleVisibleKeyframeClick}
             rulerUnit={rulerUnit}
