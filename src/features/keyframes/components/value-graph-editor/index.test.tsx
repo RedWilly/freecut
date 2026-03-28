@@ -228,6 +228,72 @@ describe('ValueGraphEditor clipping', () => {
     expect(onPropertyChange).toHaveBeenCalledWith('y');
   });
 
+  it('deselects the active curve when clicking empty graph space', () => {
+    const onPropertyChange = vi.fn();
+    const { container } = render(
+      <TooltipProvider>
+        <ValueGraphEditor
+          itemId="item-1"
+          keyframesByProperty={{
+            x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
+            y: [{ id: 'kf-y', frame: 30, value: 200, easing: 'linear' }],
+          }}
+          selectedProperty="x"
+          overlayProperties={['x', 'y']}
+          width={480}
+          height={260}
+          totalFrames={60}
+          showToolbar={false}
+          onPropertyChange={onPropertyChange}
+        />
+      </TooltipProvider>
+    );
+
+    fireEvent.click(container.querySelector('svg')!);
+
+    expect(onPropertyChange).toHaveBeenCalledWith(null);
+  });
+
+  it('keeps visible curves rendered after the active curve is cleared', () => {
+    const { container, rerender } = render(
+      <TooltipProvider>
+        <ValueGraphEditor
+          itemId="item-1"
+          keyframesByProperty={{
+            x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
+            y: [{ id: 'kf-y', frame: 30, value: 200, easing: 'linear' }],
+          }}
+          selectedProperty="x"
+          overlayProperties={['x', 'y']}
+          width={480}
+          height={260}
+          totalFrames={60}
+          showToolbar={false}
+        />
+      </TooltipProvider>
+    );
+
+    rerender(
+      <TooltipProvider>
+        <ValueGraphEditor
+          itemId="item-1"
+          keyframesByProperty={{
+            x: [{ id: 'kf-x', frame: 0, value: 100, easing: 'linear' }],
+            y: [{ id: 'kf-y', frame: 30, value: 200, easing: 'linear' }],
+          }}
+          selectedProperty={null}
+          overlayProperties={['x', 'y']}
+          width={480}
+          height={260}
+          totalFrames={60}
+          showToolbar={false}
+        />
+      </TooltipProvider>
+    );
+
+    expect(container.querySelectorAll('.graph-keyframe')).toHaveLength(2);
+  });
+
   it('renders a single visible handle for one-handle easing presets', () => {
     const { container } = render(
       <TooltipProvider>

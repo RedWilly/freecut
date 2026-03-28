@@ -2252,11 +2252,10 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const graphDisplayProperty = useMemo(
     () => {
       if (graphVisibleProperties.size === 0) return null;
-      // Primary is the active selected property if it's visible, else first visible
       if (activeSelectedProperty && graphVisibleProperties.has(activeSelectedProperty)) {
         return activeSelectedProperty;
       }
-      return [...graphVisibleProperties][0] ?? null;
+      return null;
     },
     [activeSelectedProperty, graphVisibleProperties]
   );
@@ -3354,7 +3353,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
                   onPointerDownCapture={focusGraphPane}
                   onKeyDown={handleGraphPaneKeyDown}
                 >
-                  {graphPaneSize.width > 0 && graphPaneSize.height > 0 && graphDisplayProperty ? (
+                  {graphPaneSize.width > 0 && graphPaneSize.height > 0 && graphVisibleProperties.size > 0 ? (
                     <ValueGraphEditor
                       frameViewport={viewport}
                       onFrameViewportChange={updateViewport}

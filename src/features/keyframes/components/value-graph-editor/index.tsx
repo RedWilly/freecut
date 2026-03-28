@@ -172,11 +172,18 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     () => Object.keys(keyframesByProperty) as AnimatableProperty[],
     [keyframesByProperty]
   );
+  const visibleProperties = useMemo(
+    () => (overlayProperties && overlayProperties.length > 0
+      ? overlayProperties.filter((property) => availableProperties.includes(property))
+      : availableProperties),
+    [availableProperties, overlayProperties]
+  );
 
-  // Determine which property to show
-  const displayProperty = selectedProperty && availableProperties.includes(selectedProperty)
+  // Determine which property is active vs just visible
+  const displayProperty = selectedProperty && visibleProperties.includes(selectedProperty)
     ? selectedProperty
-    : availableProperties[0] || null;
+    : null;
+  const viewportProperty = displayProperty ?? visibleProperties[0] ?? null;
 
   // Get keyframes for the selected property
   const keyframes = useMemo(
@@ -185,7 +192,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
   );
 
   // Get property value range for fixed viewport bounds
-  const propertyRange = displayProperty ? PROPERTY_VALUE_RANGES[displayProperty] : null;
+  const propertyRange = viewportProperty ? PROPERTY_VALUE_RANGES[viewportProperty] : null;
 
   // Calculate viewport with fixed bounds based on property range and clip duration
   const calculateFittedViewport = useCallback((): GraphViewport => {
@@ -382,6 +389,7 @@ export const ValueGraphEditor = memo(function ValueGraphEditor({
     maxValue: displayProperty ? PROPERTY_VALUE_RANGES[displayProperty]?.max : undefined,
     onViewportChange: updateViewport,
     onSelectionChange,
+    onBackgroundClick: () => onPropertyChange?.(null),
     onKeyframeMove,
     constrainFrameDelta,
     onBezierHandleMove,

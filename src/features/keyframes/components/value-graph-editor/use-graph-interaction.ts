@@ -138,6 +138,8 @@ interface UseGraphInteractionOptions {
   onViewportChange?: (viewport: GraphViewport) => void;
   /** Callback when keyframe selection changes */
   onSelectionChange?: (keyframeIds: Set<string>) => void;
+  /** Callback when clicking empty graph space */
+  onBackgroundClick?: () => void;
   /** Callback when keyframe is moved */
   onKeyframeMove?: (ref: KeyframeRef, newFrame: number, newValue: number) => void;
   /** Optional frame-delta constraint for horizontal drags */
@@ -214,6 +216,7 @@ export function useGraphInteraction({
   maxValue: clampMaxValue,
   onViewportChange,
   onSelectionChange,
+  onBackgroundClick,
   onKeyframeMove,
   constrainFrameDelta,
   onBezierHandleMove,
@@ -254,10 +257,10 @@ export function useGraphInteraction({
   }, [previewBezierConfigs]);
 
   // Ref for latest callbacks to avoid stale closures
-  const callbacksRef = useRef({ onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onDragStart, onDragEnd });
+  const callbacksRef = useRef({ onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd });
   useEffect(() => {
-    callbacksRef.current = { onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onDragStart, onDragEnd };
-  }, [onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onDragStart, onDragEnd]);
+    callbacksRef.current = { onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd };
+  }, [onKeyframeMove, onBezierHandleMove, onSelectionChange, onViewportChange, onBackgroundClick, onDragStart, onDragEnd]);
 
   // Track whether we've called onDragStart for the current drag operation
   const dragStartCalledRef = useRef(false);
@@ -1181,6 +1184,7 @@ export function useGraphInteraction({
       // that happen right after a keyframe/handle interaction
       if (Date.now() - lastInteractionTimeRef.current < 300) return;
       callbacksRef.current.onSelectionChange?.(new Set());
+      callbacksRef.current.onBackgroundClick?.();
     },
     [disabled]
   );
