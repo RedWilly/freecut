@@ -124,4 +124,136 @@ describe('AudioMixerView', () => {
     const committedVolume = handleTrackVolumeChange.mock.calls[0]?.[1];
     expect(committedVolume).toBeGreaterThan(-10);
   });
+
+  it('keeps empty channel meters flat while dragging the fader', () => {
+    const props = {
+      tracks: [
+        {
+          id: 'track-1',
+          name: 'A2',
+          kind: 'audio' as const,
+          muted: false,
+          solo: false,
+          volume: 0,
+          itemIds: [],
+        },
+      ],
+      perTrackLevels: new Map(),
+      masterEstimate: {
+        left: 0,
+        right: 0,
+        unresolvedSourceCount: 0,
+        resolvedSourceCount: 0,
+      },
+      isPlaying: true,
+      onTrackVolumeChange: () => undefined,
+      onTrackMuteToggle: () => undefined,
+      onTrackSoloToggle: () => undefined,
+    };
+
+    const { container, rerender } = render(<AudioMixerView {...props} />);
+
+    const faderRoot = container.querySelector('[data-track-id="track-1"][data-fader-root="true"]') as HTMLDivElement | null;
+    expect(faderRoot).not.toBeNull();
+    expect(container.querySelector('[data-track-id="track-1"][data-track-channel="left"]')).toHaveStyle({ height: '0%' });
+
+    Object.defineProperty(faderRoot!, 'getBoundingClientRect', {
+      value: () => ({
+        x: 0,
+        y: 20,
+        top: 20,
+        bottom: 220,
+        left: 0,
+        right: 20,
+        width: 20,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(faderRoot!, 'setPointerCapture', {
+      value: vi.fn(),
+      configurable: true,
+    });
+    Object.defineProperty(faderRoot!, 'releasePointerCapture', {
+      value: vi.fn(),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(faderRoot!, { pointerId: 1, clientY: 53.5 });
+    fireEvent.pointerMove(faderRoot!, { pointerId: 1, clientY: 20 });
+
+    rerender(<AudioMixerView {...props} />);
+
+    expect(container.querySelector('[data-track-id="track-1"][data-track-channel="left"]')).toHaveStyle({ height: '0%' });
+    expect(container.querySelector('[data-track-id="track-1"][data-track-channel="right"]')).toHaveStyle({ height: '0%' });
+  });
+
+  it('keeps zero-level meter entries flat while dragging during playback', () => {
+    const props = {
+      tracks: [
+        {
+          id: 'track-1',
+          name: 'A2',
+          kind: 'audio' as const,
+          muted: false,
+          solo: false,
+          volume: 0,
+          itemIds: ['item-1'],
+        },
+      ],
+      perTrackLevels: new Map([
+        ['track-1', {
+          left: 0,
+          right: 0,
+          unresolvedSourceCount: 0,
+          resolvedSourceCount: 0,
+        }],
+      ]),
+      masterEstimate: {
+        left: 0,
+        right: 0,
+        unresolvedSourceCount: 0,
+        resolvedSourceCount: 0,
+      },
+      isPlaying: true,
+      onTrackVolumeChange: () => undefined,
+      onTrackMuteToggle: () => undefined,
+      onTrackSoloToggle: () => undefined,
+    };
+
+    const { container, rerender } = render(<AudioMixerView {...props} />);
+
+    const faderRoot = container.querySelector('[data-track-id="track-1"][data-fader-root="true"]') as HTMLDivElement | null;
+    expect(faderRoot).not.toBeNull();
+
+    Object.defineProperty(faderRoot!, 'getBoundingClientRect', {
+      value: () => ({
+        x: 0,
+        y: 20,
+        top: 20,
+        bottom: 220,
+        left: 0,
+        right: 20,
+        width: 20,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(faderRoot!, 'setPointerCapture', {
+      value: vi.fn(),
+      configurable: true,
+    });
+    Object.defineProperty(faderRoot!, 'releasePointerCapture', {
+      value: vi.fn(),
+      configurable: true,
+    });
+
+    fireEvent.pointerDown(faderRoot!, { pointerId: 1, clientY: 53.5 });
+    fireEvent.pointerMove(faderRoot!, { pointerId: 1, clientY: 20 });
+
+    rerender(<AudioMixerView {...props} />);
+
+    expect(container.querySelector('[data-track-id="track-1"][data-track-channel="left"]')).toHaveStyle({ height: '0%' });
+    expect(container.querySelector('[data-track-id="track-1"][data-track-channel="right"]')).toHaveStyle({ height: '0%' });
+  });
 });

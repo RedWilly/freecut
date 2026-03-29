@@ -311,9 +311,10 @@ const ChannelStrip = memo(function ChannelStrip({
       isPlaying,
     })
     : 0;
+  const canVisualizeMeterOffset = fallbackPercent > 0 || !!(level && (level.left > 0 || level.right > 0));
   // Apply fader drag offset to meter levels.
   // linearLevelToPercent is linear in dB (range=60), so dB offset → percent offset.
-  const meterOffset = (meterDbOffsetRef.current / 60) * 100;
+  const meterOffset = canVisualizeMeterOffset ? (meterDbOffsetRef.current / 60) * 100 : 0;
   const leftPercent = isPlaying ? Math.max(0, Math.min(100, Math.max(level ? linearLevelToPercent(level.left) : 0, fallbackPercent) + meterOffset)) : 0;
   const rightPercent = isPlaying ? Math.max(0, Math.min(100, Math.max(level ? linearLevelToPercent(level.right) : 0, fallbackPercent) + meterOffset)) : 0;
   const showScanningFallback = fallbackPercent > 0;
@@ -450,18 +451,16 @@ const BusMeter = memo(function BusMeter({ masterEstimate, isPlaying }: BusMeterP
       <div className="h-[18px] shrink-0" />
 
       {/* Stereo meter bars */}
-      <div ref={containerRef} className="flex-1 min-h-0 flex gap-0.5 py-1">
-        <div className="relative w-[5px] rounded-sm border border-border/70 bg-[#111318] shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]">
-          <div className="absolute inset-[1px] overflow-hidden rounded-[1px] bg-[#060708]">
+      <div ref={containerRef} className="flex-1 min-h-0 flex items-stretch justify-center py-1">
+        <div className="flex gap-px w-[8px] shrink-0">
+          <div className="relative flex-1 rounded-[1px] bg-[#060708] overflow-hidden">
             <div
               data-bus-channel="left"
               className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#1be255] via-[#f5e146] to-[#ff6633] ${showScanningFallback ? 'opacity-60' : ''}`}
               style={{ height: '0%', transition: 'height 100ms ease-out' }}
             />
           </div>
-        </div>
-        <div className="relative w-[5px] rounded-sm border border-border/70 bg-[#111318] shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]">
-          <div className="absolute inset-[1px] overflow-hidden rounded-[1px] bg-[#060708]">
+          <div className="relative flex-1 rounded-[1px] bg-[#060708] overflow-hidden">
             <div
               data-bus-channel="right"
               className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#1be255] via-[#f5e146] to-[#ff6633] ${showScanningFallback ? 'opacity-60' : ''}`}
@@ -472,9 +471,9 @@ const BusMeter = memo(function BusMeter({ masterEstimate, isPlaying }: BusMeterP
       </div>
 
       {/* L/R labels */}
-      <div className="flex gap-0.5 text-[7px] font-mono text-muted-foreground/50 pb-0.5">
-        <span className="w-[5px] text-center">L</span>
-        <span className="w-[5px] text-center">R</span>
+      <div className="flex gap-px w-[8px] text-[7px] font-mono text-muted-foreground/50 pb-0.5">
+        <span className="flex-1 text-center">L</span>
+        <span className="flex-1 text-center">R</span>
       </div>
     </div>
   );
@@ -533,10 +532,10 @@ export const AudioMixerView = memo(function AudioMixerView({
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between border-b border-border bg-secondary/20 px-3"
+        className="flex min-w-0 items-center justify-between gap-2 border-b border-border bg-secondary/20 px-2"
         style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineTracksHeaderHeight }}
       >
-        <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
+        <span className="min-w-0 text-xs text-muted-foreground font-mono uppercase tracking-[0.18em]">
           Mixer
         </span>
         {headerExtra ?? (

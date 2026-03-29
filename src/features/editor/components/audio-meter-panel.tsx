@@ -439,7 +439,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50 transition-colors"
+          className="h-5 w-5 shrink-0 flex items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50 transition-colors"
           aria-label="Panel mode"
         >
           <MoreHorizontal size={14} />
@@ -488,10 +488,10 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       aria-label="Audio meter"
     >
       <div
-        className="flex items-center justify-between border-b border-border bg-secondary/20 px-3"
+        className="flex min-w-0 items-center justify-between gap-2 border-b border-border bg-secondary/20 px-2"
         style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineTracksHeaderHeight }}
       >
-        <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
+        <span className="min-w-0 text-xs text-muted-foreground font-mono uppercase tracking-[0.18em]">
           Meters
         </span>
         {modeDropdown}
