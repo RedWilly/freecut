@@ -1,5 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTimelineStore, useItemsStore, useCompositionsStore, importWaveformCache } from '@/features/editor/deps/timeline-store';
+import {
+  useTimelineStore,
+  useItemsStore,
+  useCompositionsStore,
+  useTimelineCommandStore,
+  captureSnapshot,
+  importWaveformCache,
+} from '@/features/editor/deps/timeline-store';
 import { importMediaLibraryService } from '@/features/editor/deps/media-library';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
@@ -68,6 +75,7 @@ const EMPTY_PER_TRACK_LEVELS = new Map<string, AudioMeterEstimate>();
 
 export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const [panelMode, setPanelMode] = useState<PanelMode>('meter');
+  const [trackSnapshotVersion, setTrackSnapshotVersion] = useState(0);
 
   const tracks = useTimelineStore((s) => s.tracks);
   const transitions = useTimelineStore((s) => s.transitions);
@@ -102,7 +110,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
         ...track,
         items: itemsByTrackId[track.id] ?? [],
       }));
-  }, [itemsByTrackId, tracks]);
+  }, [itemsByTrackId, trackSnapshotVersion, tracks]);
   const combinedCompositionsById = useMemo<AudioMeterCompositionLookup>(() => {
     const next: AudioMeterCompositionLookup = {};
 
@@ -356,20 +364,45 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     });
   }, [combinedTracks, mixerSourceTracks, panelMode, playbackGain, sources, waveformsByMediaId]);
 
-  // Proper store update for undo/redo support.
-  // Live gains stay active to keep audio correct during the composition re-render.
-  // Audio components auto-clear live gains via useEffect when they receive the updated volume prop.
+  // Commit track volume in place to avoid preview playback stalls during active playback.
+  // Undo remains correct because we add an explicit pre-mutation snapshot entry.
+  // Local version state forces the mixer UI to pick up the mutated track value.
   const handleTrackVolumeChange = useCallback((trackId: string, volumeDb: number) => {
     if (!Number.isFinite(volumeDb)) return;
     const currentTracks = useItemsStore.getState().tracks;
-    useItemsStore.getState().setTracks(
-      currentTracks.map((track) =>
-        track.id === trackId
-          ? { ...track, volume: volumeDb }
-          : Number.isFinite(track.volume) ? track : { ...track, volume: 0 }
-      ),
-    );
+    const targetTrack = currentTracks.find((track) => track.id === trackId);
+    if (!targetTrack) return;
+    const beforeSnapshot = structuredClone(captureSnapshot());
+
+    let didChange = false;
+    const safeTargetVolume = typeof targetTrack.volume === 'number' && Number.isFinite(targetTrack.volume)
+      ? targetTrack.volume
+      : 0;
+    if (Math.abs(safeTargetVolume - volumeDb) > 0.0001) {
+      didChange = true;
+    }
+
+    for (const track of currentTracks) {
+      if (track.id === trackId) {
+        (track as { volume: number }).volume = volumeDb;
+        continue;
+      }
+      if (!Number.isFinite(track.volume)) {
+        (track as { volume: number }).volume = 0;
+        didChange = true;
+      }
+    }
+
+    if (!didChange) {
+      return;
+    }
+
     useTimelineStore.getState().markDirty();
+    useTimelineCommandStore.getState().addUndoEntry(
+      { type: 'UPDATE_TRACK_VOLUME', payload: { id: trackId } },
+      beforeSnapshot,
+    );
+    setTrackSnapshotVersion((version) => version + 1);
   }, []);
 
   const handleTrackMuteToggle = useCallback((trackId: string) => {

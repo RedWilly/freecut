@@ -11,6 +11,8 @@ export { useTimelineStore } from '../stores/timeline-store';
 export { useItemsStore } from '../stores/items-store';
 export { useKeyframesStore } from '../stores/keyframes-store';
 export { useCompositionsStore } from '../stores/compositions-store';
+export { useTimelineCommandStore } from '../stores/timeline-command-store';
+export { captureSnapshot } from '../stores/commands/snapshot';
 export { Timeline } from '../components/timeline';
 export { BentoLayoutDialog } from '../components/bento-layout-dialog';
 export { KeyframeGraphPanel } from '../components/keyframe-graph-panel';

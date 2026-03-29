@@ -2,59 +2,93 @@
  * Lightweight per-item gain overrides for real-time mixer fader adjustments.
  *
  * During fader drag, the mixer sets linear gain multipliers keyed by itemId.
- * Audio components subscribe via useMixerLiveGain(itemId) — only those
- * components re-render (cheap gain ramp), NOT the composition renderer.
- * On fader release, overrides are cleared and the track volume commits to the store.
+ * Audio components subscribe per item, so only affected audio nodes re-render.
+ * On fader release, overrides are cleared and the committed store value takes over.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 const overrides = new Map<string, number>();
-const listeners = new Set<() => void>();
-let epoch = 0;
+const listenersByItemId = new Map<string, Set<() => void>>();
 
-function notify(): void {
-  epoch++;
-  for (const fn of listeners) fn();
+function notifyItemIds(itemIds: Iterable<string>): void {
+  const callbacks = new Set<() => void>();
+  for (const itemId of itemIds) {
+    const listeners = listenersByItemId.get(itemId);
+    if (!listeners) continue;
+    for (const listener of listeners) {
+      callbacks.add(listener);
+    }
+  }
+  for (const callback of callbacks) {
+    callback();
+  }
 }
 
 export function setMixerLiveGains(entries: Array<{ itemId: string; gain: number }>): void {
+  const changedItemIds = new Set<string>();
+
   for (const { itemId, gain } of entries) {
-    overrides.set(itemId, gain);
+    const nextGain = Object.is(gain, 1) ? undefined : gain;
+    const previousGain = overrides.get(itemId);
+
+    if (nextGain === undefined) {
+      if (overrides.delete(itemId)) {
+        changedItemIds.add(itemId);
+      }
+      continue;
+    }
+
+    if (Object.is(previousGain, nextGain)) {
+      continue;
+    }
+
+    overrides.set(itemId, nextGain);
+    changedItemIds.add(itemId);
   }
-  notify();
+
+  if (changedItemIds.size > 0) {
+    notifyItemIds(changedItemIds);
+  }
 }
 
 export function clearMixerLiveGains(): void {
   if (overrides.size === 0) return;
+  const changedItemIds = [...overrides.keys()];
   overrides.clear();
-  notify();
+  notifyItemIds(changedItemIds);
 }
 
 export function clearMixerLiveGain(itemId: string): void {
-  if (!overrides.has(itemId)) return;
-  overrides.delete(itemId);
-  notify();
+  if (!overrides.delete(itemId)) return;
+  notifyItemIds([itemId]);
 }
 
 export function getMixerLiveGain(itemId: string): number {
   return overrides.get(itemId) ?? 1;
 }
 
-function subscribe(callback: () => void): () => void {
+function subscribe(itemId: string, callback: () => void): () => void {
+  let listeners = listenersByItemId.get(itemId);
+  if (!listeners) {
+    listeners = new Set<() => void>();
+    listenersByItemId.set(itemId, listeners);
+  }
+
   listeners.add(callback);
-  return () => { listeners.delete(callback); };
+
+  return () => {
+    const currentListeners = listenersByItemId.get(itemId);
+    if (!currentListeners) return;
+    currentListeners.delete(callback);
+    if (currentListeners.size === 0) {
+      listenersByItemId.delete(itemId);
+    }
+  };
 }
 
-function getEpoch(): number {
-  return epoch;
-}
-
-/**
- * Subscribe to mixer live gain changes. Returns the current epoch.
- * Audio components call this + getMixerLiveGain(itemId) to get their multiplier.
- * Only triggers re-render when any gain override changes.
- */
-export function useMixerLiveGainEpoch(): number {
-  return useSyncExternalStore(subscribe, getEpoch);
+export function useMixerLiveGain(itemId: string): number {
+  const subscribeToItem = useCallback((callback: () => void) => subscribe(itemId, callback), [itemId]);
+  const getSnapshot = useCallback(() => getMixerLiveGain(itemId), [itemId]);
+  return useSyncExternalStore(subscribeToItem, getSnapshot, getSnapshot);
 }

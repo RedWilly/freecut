@@ -8,7 +8,7 @@ import { useTimelineStore } from '@/features/composition-runtime/deps/stores';
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
 import { getAudioClipFadeMultiplier, getAudioFadeMultiplier, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
-import { useMixerLiveGainEpoch, getMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
+import { useMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 
 let sharedAudioContext: AudioContext | null = null;
 
@@ -186,8 +186,7 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
   const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
 
   // Mixer fader live gain — updated during drag without re-rendering the composition
-  useMixerLiveGainEpoch();
-  const mixerGain = getMixerLiveGain(itemId);
+  const mixerGain = useMixerLiveGain(itemId);
   useEffect(() => { clearMixerLiveGain(itemId); }, [volume, itemId]);
 
   const finalVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier) * mixerGain;

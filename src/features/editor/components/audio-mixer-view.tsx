@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { linearLevelToPercent } from './audio-meter-utils';
-import { setMixerLiveGains } from '@/shared/state/mixer-live-gain';
+import { getMixerLiveGain, setMixerLiveGains } from '@/shared/state/mixer-live-gain';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,6 +119,8 @@ const ChannelFader = memo(function ChannelFader({
   const isDraggingRef = useRef(false);
   const dragOffsetPercentRef = useRef(0);
   const latestDbRef = useRef(volumeDb);
+  const dragStartDbRef = useRef(volumeDb);
+  const dragStartGainsRef = useRef<Map<string, number>>(new Map());
 
   // Sync from props when not dragging
   if (!isDraggingRef.current) {
@@ -166,9 +168,12 @@ const ChannelFader = memo(function ChannelFader({
       dbReadoutRef.current.textContent = formatFaderDb(db);
     }
     // Compute gain multiplier relative to the committed track volume.
-    const committedDb = volumeDb;
+    const committedDb = dragStartDbRef.current;
     const gainRatio = Math.pow(10, (db - committedDb) / 20);
-    setMixerLiveGains(itemIds.map((id) => ({ itemId: id, gain: gainRatio })));
+    setMixerLiveGains(itemIds.map((id) => ({
+      itemId: id,
+      gain: (dragStartGainsRef.current.get(id) ?? 1) * gainRatio,
+    })));
 
     // Set meter dB offset — ChannelStrip reads this during its render cycle
     // (it re-renders every frame during playback via level prop changes)
@@ -182,6 +187,8 @@ const ChannelFader = memo(function ChannelFader({
       e.preventDefault();
       e.currentTarget.setPointerCapture?.(e.pointerId);
       isDraggingRef.current = true;
+      dragStartDbRef.current = latestDbRef.current;
+      dragStartGainsRef.current = new Map(itemIds.map((id) => [id, getMixerLiveGain(id)]));
       dragOffsetPercentRef.current = dragOffsetPercentFromPointerEvent(e.nativeEvent);
       const percent = percentFromPointerEvent(e.nativeEvent);
       const adjustedPercent = Math.max(0, Math.min(100, percent + dragOffsetPercentRef.current));

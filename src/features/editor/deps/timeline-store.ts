@@ -10,4 +10,6 @@ export {
   useItemsStore,
   useKeyframesStore,
   useCompositionsStore,
+  useTimelineCommandStore,
+  captureSnapshot,
 } from './timeline-contract';

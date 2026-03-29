@@ -8,7 +8,7 @@ import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
 import type { VideoItem } from '@/types/timeline';
 import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
-import { useMixerLiveGainEpoch, getMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
+import { useMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 
 // Track video elements that have been connected to Web Audio API
 // A video element can only be connected to ONE MediaElementSourceNode ever
@@ -278,8 +278,7 @@ export function useVideoAudioVolume(
 
   // Mixer fader live gain — updated during drag without re-rendering the composition.
   // Clear when the composition re-renders with updated track volume (trackVolumeDb changes).
-  useMixerLiveGainEpoch();
-  const mixerGain = getMixerLiveGain(item.id);
+  const mixerGain = useMixerLiveGain(item.id);
   const trackVolumeDb = item.trackVolumeDb;
   useEffect(() => { clearMixerLiveGain(item.id); }, [trackVolumeDb, item.id]);
 

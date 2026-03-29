@@ -1,7 +1,7 @@
 import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
 import { useShallow } from 'zustand/react/shallow';
-import { setMixerLiveGains, clearMixerLiveGains } from '@/shared/state/mixer-live-gain';
+import { setMixerLiveGains, getMixerLiveGain } from '@/shared/state/mixer-live-gain';
 import { useTimelineZoomContext } from '../../contexts/timeline-zoom-context';
 import { useTimelineStore } from '../../stores/timeline-store';
 import { useItemsStore } from '../../stores/items-store';
@@ -18,6 +18,8 @@ import { useSelectionStore } from '@/shared/state/selection';
 import { useEditorStore } from '@/shared/state/editor';
 import { useSourcePlayerStore } from '@/shared/state/source-player';
 import { usePlaybackStore } from '@/shared/state/playback';
+import { captureSnapshot } from '../../stores/commands/snapshot';
+import { useTimelineCommandStore } from '../../stores/timeline-command-store';
 import {
   TRANSITION_DRAG_MIME,
   useTransitionDragStore,
@@ -1984,6 +1986,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     e.stopPropagation();
 
     const originalVolume = item.volume ?? 0;
+    const dragStartLiveGain = getMixerLiveGain(item.id);
     const startClientY = e.clientY;
     let latestClientY = startClientY;
     let latestPreviewVolume = originalVolume;
@@ -2001,7 +2004,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       });
       // Real-time audio feedback via live gain (no store write / no composition re-render)
       const gainRatio = Math.pow(10, (nextVolume - originalVolume) / 20);
-      setMixerLiveGains([{ itemId: item.id, gain: gainRatio }]);
+      setMixerLiveGains([{ itemId: item.id, gain: dragStartLiveGain * gainRatio }]);
     };
 
     const clearActivationTimeout = () => {
@@ -2041,11 +2044,15 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       // naturally re-renders, and the audio component auto-clears via useEffect.
 
       if (Math.abs(committedVolume - originalVolume) > AUDIO_VOLUME_EPSILON) {
-        setAudioVolumeEdit((prev) => prev ? { ...prev, isCommitting: true } : prev);
-        // Proper store update for undo/redo support
-        updateTimelineItem(item.id, { volume: committedVolume });
+        const beforeSnapshot = structuredClone(captureSnapshot());
+        (item as { volume: number }).volume = committedVolume;
+        useTimelineStore.getState().markDirty();
+        useTimelineCommandStore.getState().addUndoEntry(
+          { type: 'UPDATE_ITEM', payload: { id: item.id, updates: { volume: committedVolume } } },
+          beforeSnapshot,
+        );
+        setAudioVolumeEdit(null);
       } else {
-        clearMixerLiveGains();
         setAudioVolumeEdit(null);
       }
     };
@@ -2086,7 +2093,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [activeTool, item, trackLocked, updateTimelineItem]);
+  }, [activeTool, item, trackLocked]);
   const handleAudioVolumeDoubleClick = useCallback(() => {
     if (item.type !== 'audio' || trackLocked) {
       return;
