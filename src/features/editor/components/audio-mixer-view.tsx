@@ -205,8 +205,9 @@ const ChannelFader = memo(function ChannelFader({
       isDraggingRef.current = false;
       dragOffsetPercentRef.current = 0;
       e.currentTarget.releasePointerCapture?.(e.pointerId);
-      // Reset meter offset
-      if (meterDbOffsetRef) meterDbOffsetRef.current = 0;
+      // Keep meterDbOffsetRef at current value — the meter graph still uses
+      // the old track volume (in-place mutation doesn't trigger recompute),
+      // so the offset compensates for the stale estimate.
       // Commit volume without triggering composition re-render:
       // onVolumeChange mutates the track in place + markDirty.
       // Live gains stay active to compensate for stale segment volumeDb.
