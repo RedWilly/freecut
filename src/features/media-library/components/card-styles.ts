@@ -5,3 +5,8 @@ export const CARD_GRID_BASE =
 
 export const CARD_LIST_BASE =
   'group panel-bg border rounded overflow-hidden transition-colors flex items-center gap-3 p-2';
+
+export const CARD_PERF_STYLE = {
+  contain: 'layout style paint',
+  contentVisibility: 'auto',
+} as const;
