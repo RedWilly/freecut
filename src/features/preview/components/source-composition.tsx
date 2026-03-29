@@ -34,6 +34,7 @@ let globalSourceMonitorDecoderPool: SharedVideoExtractorPool | null = null;
 const SOURCE_MONITOR_STRICT_DECODE_FALLBACK_FAILURES = 2;
 const SOURCE_MONITOR_FRAME_CACHE_MAX = 90;
 const SOURCE_MONITOR_CACHE_TIME_QUANTUM = 1 / 60;
+const SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES = 6;
 
 function getSourceMonitorDecoderPool(): SharedVideoExtractorPool {
   if (!globalSourceMonitorDecoderPool) {
@@ -44,6 +45,10 @@ function getSourceMonitorDecoderPool(): SharedVideoExtractorPool {
 
 function quantizeSourceMonitorTime(time: number): number {
   return Math.round(time / SOURCE_MONITOR_CACHE_TIME_QUANTUM) * SOURCE_MONITOR_CACHE_TIME_QUANTUM;
+}
+
+function shouldResyncPlayingMedia(currentTime: number, targetTime: number, fps: number): boolean {
+  return Math.abs(currentTime - targetTime) * fps >= SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES;
 }
 
 function useSourceMonitorVideoSrc(mediaId: string | undefined, src: string): string {
@@ -331,13 +336,13 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
 
   const syncSourceFrame = useCallback((frame: number) => {
     const video = videoRef.current;
-    latestTargetTimeRef.current = frame / fps;
+    const targetTime = frame / fps;
+    latestTargetTimeRef.current = targetTime;
 
-    const frameDelta = Math.abs(frame - lastFrameRef.current);
     lastFrameRef.current = frame;
 
     if (!playingRef.current && !useLegacyPausedSeek) {
-      pendingTimeRef.current = latestTargetTimeRef.current;
+      pendingTimeRef.current = targetTime;
       if (decoderReadyRef.current) {
         pumpLatestDecodedFrame();
       }
@@ -353,9 +358,11 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
     }
 
     if (playingRef.current) {
-      if (frameDelta <= 1) return;
+      if (!shouldResyncPlayingMedia(video.currentTime, targetTime, fps)) {
+        return;
+      }
       try {
-        video.currentTime = frame / fps;
+        video.currentTime = targetTime;
       } catch {
         // Ignore seek errors while media is loading
       }
@@ -449,16 +456,22 @@ function AudioSource({ src, fileName }: { src: string; fileName: string }) {
     const audio = audioRef.current;
     if (!audio || !src) return;
 
-    const frameDelta = Math.abs(frame - lastFrameRef.current);
+    const targetTime = frame / fps;
     lastFrameRef.current = frame;
 
     const canSeek = audio.readyState >= 1;
-    if (canSeek && (!playing || frameDelta > 1)) {
-      try {
-        audio.currentTime = frame / fps;
-      } catch {
-        // Ignore seek errors while media is loading
-      }
+    if (!canSeek) {
+      return;
+    }
+
+    if (playing && !shouldResyncPlayingMedia(audio.currentTime, targetTime, fps)) {
+      return;
+    }
+
+    try {
+      audio.currentTime = targetTime;
+    } catch {
+      // Ignore seek errors while media is loading
     }
   }, [fps, playing, src]);
 
