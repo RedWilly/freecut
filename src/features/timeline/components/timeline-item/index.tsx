@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
 import { useShallow } from 'zustand/react/shallow';
+import { setMixerLiveGains, clearMixerLiveGains } from '@/shared/state/mixer-live-gain';
 import { useTimelineZoomContext } from '../../contexts/timeline-zoom-context';
 import { useTimelineStore } from '../../stores/timeline-store';
 import { useItemsStore } from '../../stores/items-store';
@@ -1998,6 +1999,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         originalVolume,
         isCommitting: false,
       });
+      // Real-time audio feedback via live gain (no store write / no composition re-render)
+      const gainRatio = Math.pow(10, (nextVolume - originalVolume) / 20);
+      setMixerLiveGains([{ itemId: item.id, gain: gainRatio }]);
     };
 
     const clearActivationTimeout = () => {
@@ -2033,10 +2037,14 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const committedVolume = audioVolumeEditRef.current?.previewVolume ?? latestPreviewVolume;
       audioVolumeCleanupRef.current?.();
       audioVolumeCleanupRef.current = null;
+      clearMixerLiveGains();
 
       if (Math.abs(committedVolume - originalVolume) > AUDIO_VOLUME_EPSILON) {
         setAudioVolumeEdit((prev) => prev ? { ...prev, isCommitting: true } : prev);
-        updateTimelineItem(item.id, { volume: committedVolume });
+        // Mutate in place to avoid expensive composition re-render.
+        // Live gain auto-clears when the composition naturally re-renders.
+        (item as { volume: number }).volume = committedVolume;
+        useTimelineStore.getState().markDirty();
       } else {
         setAudioVolumeEdit(null);
       }
@@ -2078,7 +2086,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [activeTool, item, trackLocked, updateTimelineItem]);
+  }, [activeTool, item, trackLocked]);
   const handleAudioVolumeDoubleClick = useCallback(() => {
     if (item.type !== 'audio' || trackLocked) {
       return;
