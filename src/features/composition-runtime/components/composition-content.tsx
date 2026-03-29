@@ -14,6 +14,7 @@ import { resolveAnimatedTransform, hasKeyframeAnimation } from '@/features/compo
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider, useCompositionSpace } from '../contexts/composition-space-context';
+import { clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 import { Item } from './item';
 import type { MaskInfo } from './item';
 import { resolveActiveShapeMasksAtFrame } from '../utils/frame-scene';
@@ -36,6 +37,7 @@ interface CompositionContentProps {
   renderDepth?: number;
   renderMode?: 'full' | 'visual-only' | 'audio-only';
   audioGainMultiplier?: number;
+  audioGainLiveItemIds?: string[];
   crossfadeFadeInFrames?: number;
   crossfadeFadeOutFrames?: number;
 }
@@ -120,7 +122,7 @@ function mapSubCompItemToWrapperWindow(params: {
  * then CSS-scaled to fit the parent container dimensions. This ensures sub-items
  * use the correct coordinate space (sub-comp dimensions, not main canvas).
  */
-export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
+export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
   const subComp = useCompositionsStore((s) => s.compositions.find((c) => c.id === item.compositionId));
   const { width: renderWidth, height: renderHeight, fps: mainFps } = useVideoConfig();
   const compositionSpace = useCompositionSpace();
@@ -260,7 +262,16 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
     wrapperFadeMultiplier = Math.cos(progress * Math.PI / 2);
   }
   const effectiveAudioGainMultiplier = audioGainMultiplier * Math.max(0, wrapperFadeMultiplier);
+  const effectiveAudioGainLiveItemIds = useMemo(
+    () => [...(audioGainLiveItemIds ?? []), item.id],
+    [audioGainLiveItemIds, item.id],
+  );
   const previousMaskInfosRef = React.useRef<MaskInfo[]>(EMPTY_MASK_INFOS);
+
+  React.useEffect(() => {
+    if (renderMode !== 'audio-only') return;
+    clearMixerLiveGain(item.id);
+  }, [audioGainMultiplier, item.id, renderMode]);
 
   // Resolve active sub-comp masks for the current local frame.
   // This allows masks authored inside a pre-comp to clip items when viewed
@@ -365,6 +376,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
                       renderDepth={renderDepth}
                       compositionRenderMode={subItem.type === 'composition' && hasLinkedAudioCompanion(resolvedItems, subItem) ? 'visual-only' : 'full'}
                       audioGainMultiplier={effectiveAudioGainMultiplier}
+                      audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
                     />
                   </Sequence>
                 ));

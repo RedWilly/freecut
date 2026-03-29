@@ -1,20 +1,13 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useSequenceContext } from '@/features/composition-runtime/deps/player';
-import { useVideoConfig, useIsPlaying } from '../hooks/use-player-compat';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { getAudioTargetTimeSeconds } from '../utils/video-timing';
-import { usePlaybackStore } from '@/features/composition-runtime/deps/stores';
-import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
-import { useTimelineStore } from '@/features/composition-runtime/deps/stores';
-import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
-import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
-import { getAudioClipFadeMultiplier, getAudioFadeMultiplier, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
-import { useMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 import {
   getOrDecodeAudio,
   getOrDecodeAudioForPlayback,
   isPreviewAudioDecodePending,
 } from '../utils/audio-decode-cache';
 import { createLogger } from '@/shared/logging/logger';
+import type { AudioPlaybackProps } from './audio-playback-props';
+import { useAudioPlaybackState } from './hooks/use-audio-playback-state';
 
 const log = createLogger('CustomDecoderBufferedAudio');
 const GAIN_RAMP_SECONDS = 0.008;
@@ -41,30 +34,9 @@ function getSharedAudioContext(): AudioContext | null {
   return sharedCtx;
 }
 
-interface CustomDecoderBufferedAudioProps {
+interface CustomDecoderBufferedAudioProps extends AudioPlaybackProps {
   src: string;
   mediaId: string;
-  itemId: string;
-  trimBefore?: number;
-  sourceFps?: number;
-  volume?: number;
-  playbackRate?: number;
-  muted?: boolean;
-  durationInFrames: number;
-  audioFadeIn?: number;
-  audioFadeOut?: number;
-  audioFadeInCurve?: number;
-  audioFadeOutCurve?: number;
-  audioFadeInCurveX?: number;
-  audioFadeOutCurveX?: number;
-  clipFadeSpans?: AudioClipFadeSpan[];
-  contentStartOffsetFrames?: number;
-  contentEndOffsetFrames?: number;
-  fadeInDelayFrames?: number;
-  fadeOutLeadFrames?: number;
-  crossfadeFadeIn?: number;
-  crossfadeFadeOut?: number;
-  volumeMultiplier?: number;
 }
 
 export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProps> = React.memo(({
@@ -90,75 +62,30 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
   fadeOutLeadFrames = 0,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  liveGainItemIds,
   volumeMultiplier = 1,
 }) => {
-  const { fps } = useVideoConfig();
-  const sequenceContext = useSequenceContext();
-  const frame = sequenceContext?.localFrame ?? 0;
-  const playing = useIsPlaying();
-
-  const itemPreview = useGizmoStore(
-    useCallback((s) => s.preview?.[itemId], [itemId])
-  );
-  const preview = itemPreview?.properties;
-
-  const previewMasterVolume = usePlaybackStore((s) => s.volume);
-  const previewMasterMuted = usePlaybackStore((s) => s.muted);
-
-  const contextKeyframes = useItemKeyframesFromContext(itemId);
-  const storeKeyframes = useTimelineStore(
-    useCallback(
-      (s) => s.keyframes.find((k) => k.itemId === itemId),
-      [itemId]
-    )
-  );
-  const itemKeyframes = contextKeyframes ?? storeKeyframes;
-
-  const volumeKeyframes = getPropertyKeyframes(itemKeyframes, 'volume');
-  const staticVolumeDb = preview?.volume ?? volume;
-  const effectiveVolumeDb = volumeKeyframes.length > 0
-    ? interpolatePropertyValue(volumeKeyframes, frame, staticVolumeDb)
-    : staticVolumeDb;
-
-  const effectiveFadeIn = preview?.audioFadeIn ?? audioFadeIn;
-  const effectiveFadeOut = preview?.audioFadeOut ?? audioFadeOut;
-
-  const clipFadeMultiplier = clipFadeSpans
-    ? getAudioClipFadeMultiplier(frame, clipFadeSpans)
-    : getAudioFadeMultiplier({
-      frame,
-      durationInFrames,
-      fadeInFrames: effectiveFadeIn * fps,
-      fadeOutFrames: effectiveFadeOut * fps,
-      contentStartOffsetFrames,
-      contentEndOffsetFrames,
-      fadeInDelayFrames,
-      fadeOutLeadFrames,
-      fadeInCurve: preview?.audioFadeInCurve ?? audioFadeInCurve,
-      fadeOutCurve: preview?.audioFadeOutCurve ?? audioFadeOutCurve,
-      fadeInCurveX: preview?.audioFadeInCurveX ?? audioFadeInCurveX,
-      fadeOutCurveX: preview?.audioFadeOutCurveX ?? audioFadeOutCurveX,
-    });
-
-  const fadeMultiplier = clipFadeMultiplier * getAudioFadeMultiplier({
-    frame,
+  const { frame, fps, playing, resolvedVolume: audioVolume } = useAudioPlaybackState({
+    itemId,
+    liveGainItemIds,
+    volume,
+    muted,
     durationInFrames,
-    fadeInFrames: crossfadeFadeIn,
-    fadeOutFrames: crossfadeFadeOut,
-    useEqualPower: true,
+    audioFadeIn,
+    audioFadeOut,
+    audioFadeInCurve,
+    audioFadeOutCurve,
+    audioFadeInCurveX,
+    audioFadeOutCurveX,
+    clipFadeSpans,
+    contentStartOffsetFrames,
+    contentEndOffsetFrames,
+    fadeInDelayFrames,
+    fadeOutLeadFrames,
+    crossfadeFadeIn,
+    crossfadeFadeOut,
+    volumeMultiplier,
   });
-
-  const linearVolume = Math.pow(10, effectiveVolumeDb / 20);
-  const itemVolume = muted ? 0 : Math.max(0, linearVolume * fadeMultiplier);
-  const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
-
-  // Mixer fader live gain — updated during drag without re-rendering the composition.
-  // When the volume prop changes (composition re-rendered with updated segment),
-  // the live gain is no longer needed — the segment already has the correct volumeDb.
-  const mixerGain = useMixerLiveGain(itemId);
-  useEffect(() => { clearMixerLiveGain(itemId); }, [volume, itemId]);
-
-  const audioVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier) * mixerGain;
 
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
 

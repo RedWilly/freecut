@@ -2044,7 +2044,15 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       // naturally re-renders, and the audio component auto-clears via useEffect.
 
       if (Math.abs(committedVolume - originalVolume) > AUDIO_VOLUME_EPSILON) {
-        const beforeSnapshot = structuredClone(captureSnapshot());
+        const snapshot = captureSnapshot();
+        const beforeSnapshot = {
+          ...snapshot,
+          items: snapshot.items.map((existingItem) => (
+            existingItem.id === item.id
+              ? { ...existingItem }
+              : existingItem
+          )),
+        };
         (item as { volume: number }).volume = committedVolume;
         useTimelineStore.getState().markDirty();
         useTimelineCommandStore.getState().addUndoEntry(

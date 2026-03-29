@@ -45,6 +45,7 @@ interface ItemProps {
   renderDepth?: number;
   compositionRenderMode?: 'full' | 'visual-only' | 'audio-only';
   audioGainMultiplier?: number;
+  audioGainLiveItemIds?: string[];
 }
 
 /**
@@ -61,7 +62,7 @@ interface ItemProps {
  *
  * Memoized to prevent unnecessary re-renders when parent (MainComposition) updates.
  */
-export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], renderDepth = 0, compositionRenderMode = 'full', audioGainMultiplier = 1 }) => {
+export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], renderDepth = 0, compositionRenderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds }) => {
   // Use muted prop directly - MainComposition already passes track.muted
   // Avoiding store subscription here prevents re-render issues with @legacy-video/media Audio
 
@@ -220,6 +221,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
           renderDepth={renderDepth + 1}
           renderMode="audio-only"
           audioGainMultiplier={audioGainMultiplier}
+          audioGainLiveItemIds={audioGainLiveItemIds}
         />
       );
     }
@@ -257,6 +259,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
         audioFadeOutCurve={item.audioFadeOutCurve}
         audioFadeInCurveX={item.audioFadeInCurveX}
         audioFadeOutCurveX={item.audioFadeOutCurveX}
+        liveGainItemIds={audioGainLiveItemIds}
         volumeMultiplier={audioGainMultiplier}
       />
     );
@@ -349,7 +352,14 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
     // Pass parent muted so muting the track silences all sub-comp audio
     return (
       <ItemVisualWrapper item={item} masks={masks}>
-        <CompositionContent item={item} parentMuted={muted} renderDepth={renderDepth + 1} renderMode={compositionRenderMode} audioGainMultiplier={audioGainMultiplier} />
+        <CompositionContent
+          item={item}
+          parentMuted={muted}
+          renderDepth={renderDepth + 1}
+          renderMode={compositionRenderMode}
+          audioGainMultiplier={audioGainMultiplier}
+          audioGainLiveItemIds={audioGainLiveItemIds}
+        />
       </ItemVisualWrapper>
     );
   }

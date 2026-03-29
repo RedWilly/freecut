@@ -87,8 +87,33 @@ function subscribe(itemId: string, callback: () => void): () => void {
   };
 }
 
+function getMixerLiveGainProduct(itemIds: readonly string[]): number {
+  let gainProduct = 1;
+  const seen = new Set<string>();
+
+  for (const itemId of itemIds) {
+    if (seen.has(itemId)) continue;
+    seen.add(itemId);
+    gainProduct *= getMixerLiveGain(itemId);
+  }
+
+  return gainProduct;
+}
+
+export function useMixerLiveGainProduct(itemIds: readonly string[]): number {
+  const itemIdsKey = itemIds.join('\u0000');
+  const subscribeToItems = useCallback((callback: () => void) => {
+    const unsubscribers = itemIds.map((itemId) => subscribe(itemId, callback));
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
+  }, [itemIdsKey]);
+  const getSnapshot = useCallback(() => getMixerLiveGainProduct(itemIds), [itemIdsKey]);
+  return useSyncExternalStore(subscribeToItems, getSnapshot, getSnapshot);
+}
+
 export function useMixerLiveGain(itemId: string): number {
-  const subscribeToItem = useCallback((callback: () => void) => subscribe(itemId, callback), [itemId]);
-  const getSnapshot = useCallback(() => getMixerLiveGain(itemId), [itemId]);
-  return useSyncExternalStore(subscribeToItem, getSnapshot, getSnapshot);
+  return useMixerLiveGainProduct([itemId]);
 }

@@ -372,7 +372,11 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     const currentTracks = useItemsStore.getState().tracks;
     const targetTrack = currentTracks.find((track) => track.id === trackId);
     if (!targetTrack) return;
-    const beforeSnapshot = structuredClone(captureSnapshot());
+    const snapshot = captureSnapshot();
+    const beforeSnapshot = {
+      ...snapshot,
+      tracks: snapshot.tracks.map((track) => ({ ...track })),
+    };
 
     let didChange = false;
     const safeTargetVolume = typeof targetTrack.volume === 'number' && Number.isFinite(targetTrack.volume)
