@@ -184,6 +184,8 @@ describe('CompositionContent masks', () => {
 
     const maskedElement = container.querySelector('[style*="clip-path"]');
     expect(maskedElement).not.toBeNull();
+    expect((maskedElement as HTMLElement).style.width).toBe('100%');
+    expect((maskedElement as HTMLElement).style.height).toBe('100%');
     const before = maskedElement?.getAttribute('style');
 
     act(() => {

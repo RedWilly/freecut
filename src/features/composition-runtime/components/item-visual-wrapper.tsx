@@ -168,49 +168,66 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     );
   }, [rasterSvgMaskDataUrl, state.maskType, state.svgMaskId, state.svgMaskPaths, state.maskFeather, state.maskInvert, canvasWidth, canvasHeight]);
 
+  const maskContainerStyle = useMemo((): React.CSSProperties => {
+    if (state.maskType === null) {
+      return {};
+    }
+
+    return {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      width: '100%',
+      height: '100%',
+      ...maskStyle,
+    };
+  }, [state.maskType, maskStyle]);
+
   return (
     <>
       {/* SVG mask definitions (hidden, referenced via CSS) */}
       {svgMaskDefs}
 
-      {/* Outer: Transform + Mask + Blend Mode */}
-      <div
-        style={{
-          ...state.transformStyle,
-          ...maskStyle,
-          overflow: state.transform.cornerRadius > 0 && !cornerPinStyle ? 'hidden' : undefined,
-          mixBlendMode: item.blendMode && item.blendMode !== 'normal'
-            ? BLEND_MODE_CSS[item.blendMode]
-            : undefined,
-        }}
-      >
-        {/* Corner Pin wrapper (only when active) */}
-        {/* When corner pin is active, will-change + backfaceVisibility force Chrome
-            to composite through the CSS pipeline instead of video hardware overlay,
-            which would otherwise ignore the matrix3d transform. */}
+      {/* Masks are authored in composition space, so they must be applied on a
+          full-canvas wrapper instead of the item-sized transform node. */}
+      <div style={maskContainerStyle}>
         <div
-          style={cornerPinStyle ? {
-            width: '100%',
-            height: '100%',
-            ...cornerPinStyle,
-            willChange: 'transform',
-            backfaceVisibility: 'hidden' as const,
-            overflow: state.transform.cornerRadius > 0 ? 'hidden' : undefined,
-          } : {
-            width: '100%',
-            height: '100%',
+          style={{
+            ...state.transformStyle,
+            overflow: state.transform.cornerRadius > 0 && !cornerPinStyle ? 'hidden' : undefined,
+            mixBlendMode: item.blendMode && item.blendMode !== 'normal'
+              ? BLEND_MODE_CSS[item.blendMode]
+              : undefined,
           }}
         >
-          {/* Inner: Effects + Content */}
+          {/* Corner Pin wrapper (only when active) */}
+          {/* When corner pin is active, will-change + backfaceVisibility force Chrome
+              to composite through the CSS pipeline instead of video hardware overlay,
+              which would otherwise ignore the matrix3d transform. */}
           <div
-            style={{
+            style={cornerPinStyle ? {
               width: '100%',
               height: '100%',
-              position: 'relative',
-              filter: state.cssFilter || undefined,
+              ...cornerPinStyle,
+              willChange: 'transform',
+              backfaceVisibility: 'hidden' as const,
+              overflow: state.transform.cornerRadius > 0 ? 'hidden' : undefined,
+            } : {
+              width: '100%',
+              height: '100%',
             }}
           >
-            {children}
+            {/* Inner: Effects + Content */}
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                position: 'relative',
+                filter: state.cssFilter || undefined,
+              }}
+            >
+              {children}
+            </div>
           </div>
         </div>
       </div>
