@@ -1,38 +1,17 @@
 ﻿import React, { useEffect, useState } from 'react';
 import { PitchCorrectedAudio } from './pitch-corrected-audio';
 import { CustomDecoderBufferedAudio } from './custom-decoder-buffered-audio';
+import type { AudioPlaybackProps } from './audio-playback-props';
 import { getOrDecodeAudio } from '../utils/audio-decode-cache';
 import { createLogger } from '@/shared/logging/logger';
 import { getDecodedPreviewAudio } from '@/infrastructure/storage/indexeddb';
 import type { DecodedPreviewAudioBin, DecodedPreviewAudioMeta } from '@/types/storage';
-import type { AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
 
 const log = createLogger('CustomDecoderAudio');
 
-interface CustomDecoderAudioProps {
+interface CustomDecoderAudioProps extends AudioPlaybackProps {
   src: string;
   mediaId: string;
-  itemId: string;
-  trimBefore?: number;
-  sourceFps?: number;
-  volume?: number;
-  playbackRate?: number;
-  muted?: boolean;
-  durationInFrames: number;
-  audioFadeIn?: number;
-  audioFadeOut?: number;
-  audioFadeInCurve?: number;
-  audioFadeOutCurve?: number;
-  audioFadeInCurveX?: number;
-  audioFadeOutCurveX?: number;
-  clipFadeSpans?: AudioClipFadeSpan[];
-  contentStartOffsetFrames?: number;
-  contentEndOffsetFrames?: number;
-  fadeInDelayFrames?: number;
-  fadeOutLeadFrames?: number;
-  crossfadeFadeIn?: number;
-  crossfadeFadeOut?: number;
-  volumeMultiplier?: number;
 }
 
 interface DecodedWavEntry {

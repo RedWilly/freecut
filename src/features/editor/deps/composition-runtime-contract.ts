@@ -4,6 +4,19 @@
  */
 
 export {
+  type AudioSegment,
+  type CompoundAudioSegment,
+  type VideoAudioSegment,
+} from '@/features/composition-runtime/utils/audio-scene';
+export {
+  buildCompoundAudioTransitionSegments,
+  buildStandaloneAudioSegments,
+  buildTransitionVideoAudioSegments,
+} from '@/features/composition-runtime/utils/audio-scene';
+export {
+  resolveCompositionRenderPlan,
+} from '@/features/composition-runtime/utils/scene-assembly';
+export {
   resolveTransform,
   getSourceDimensions,
 } from '@/features/composition-runtime/utils/transform-resolver';

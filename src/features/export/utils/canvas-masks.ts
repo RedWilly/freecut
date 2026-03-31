@@ -43,6 +43,17 @@ export interface MaskCanvasSettings {
   fps: number;
 }
 
+type MaskKeyframeResolver =
+  | Map<string, ItemKeyframes>
+  | ((itemId: string) => ItemKeyframes | undefined);
+
+function resolveMaskKeyframes(
+  keyframes: MaskKeyframeResolver,
+  itemId: string,
+): ItemKeyframes | undefined {
+  return keyframes instanceof Map ? keyframes.get(itemId) : keyframes(itemId);
+}
+
 /**
  * Convert SVG path string to Path2D for canvas clipping.
  */
@@ -323,7 +334,7 @@ export function getActiveMasksForFrame(
   index: MaskFrameIndex,
   frame: number,
   canvas: MaskCanvasSettings,
-  keyframesMap: Map<string, ItemKeyframes>,
+  keyframes: MaskKeyframeResolver,
   getPreviewTransformOverride?: (itemId: string) => Partial<ResolvedTransform> | undefined,
   getPreviewPathVerticesOverride?: PreviewPathVerticesOverride,
 ): Array<{
@@ -345,7 +356,7 @@ export function getActiveMasksForFrame(
     {
       canvas,
       frame,
-      getKeyframes: (itemId) => keyframesMap.get(itemId),
+      getKeyframes: (itemId) => resolveMaskKeyframes(keyframes, itemId),
       getPreviewTransform: getPreviewTransformOverride,
       getPreviewPathVertices: getPreviewPathVerticesOverride,
     }
@@ -373,7 +384,7 @@ export function prepareMasks(
   tracks: TimelineTrack[],
   frame: number,
   canvas: MaskCanvasSettings,
-  keyframesMap: Map<string, ItemKeyframes> = new Map(),
+  keyframes: MaskKeyframeResolver = new Map(),
   getPreviewTransformOverride?: (itemId: string) => Partial<ResolvedTransform> | undefined,
   getPreviewPathVerticesOverride?: PreviewPathVerticesOverride,
 ): Array<{
@@ -388,7 +399,7 @@ export function prepareMasks(
     index,
     frame,
     canvas,
-    keyframesMap,
+    keyframes,
     getPreviewTransformOverride,
     getPreviewPathVerticesOverride,
   );

@@ -35,10 +35,10 @@ import { createLogger } from '@/shared/logging/logger';
 import { useMediaLibraryStore } from '@/features/composition-runtime/deps/stores';
 
 const warmupLog = createLogger('StableVideoWarmup');
-const SHADOW_MOUNT_LOOKAHEAD_FRAMES = 3;
+const SAME_ORIGIN_SHADOW_MOUNT_LOOKAHEAD_FRAMES = 8;
 const SHADOW_UNMOUNT_COOLDOWN_FRAMES = 3;
 const TRANSITION_SYNC_COOLDOWN_FRAMES = 3;
-const TRANSITION_WARMUP_LOOKAHEAD_SECONDS = 0.5;
+const TRANSITION_WARMUP_LOOKAHEAD_SECONDS = 1.5;
 
 /** Video item with additional properties added by MainComposition */
 export type StableVideoSequenceItem = VideoItem & {
@@ -249,10 +249,11 @@ const GroupRenderer: React.FC<{
   // normal playback keeps using the simple single-clip path until near the cut.
   const overlapKey = useMemo(() => {
     if (isPremounted || activeItemIndex < 0 || group.items.length <= 1) return '';
+    const shadowMountLookaheadFrames = SAME_ORIGIN_SHADOW_MOUNT_LOOKAHEAD_FRAMES;
     const transitionClipIds = collectTransitionParticipantClipIds({
       transitionWindows,
       frame: globalFrame,
-      lookaheadFrames: SHADOW_MOUNT_LOOKAHEAD_FRAMES,
+      lookaheadFrames: shadowMountLookaheadFrames,
       lookbehindFrames: SHADOW_UNMOUNT_COOLDOWN_FRAMES,
     });
     return group.items

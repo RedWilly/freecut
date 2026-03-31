@@ -11,11 +11,13 @@ const mocks = vi.hoisted(() => ({
   resolveActiveShapeMasksAtFrameMock: vi.fn(
     (masks: Array<{ id?: string; mask?: { id: string }; trackOrder?: number }>, options: {
       frame: number;
+      getKeyframes?: (itemId: string) => { properties?: unknown[] } | undefined;
       getPreviewTransform?: (itemId: string) => { x?: number } | undefined;
       getPreviewPathVertices?: (itemId: string) => Array<{ position: [number, number] }> | undefined;
     }) => masks.map((maskSource) => {
       const baseShape = maskSource.mask ?? maskSource;
       const shapeId = baseShape.id ?? 'mask';
+      const keyframes = options.getKeyframes?.(shapeId);
       const previewPathVertices = options.getPreviewPathVertices?.(shapeId);
       const shape = previewPathVertices
         ? { ...baseShape, pathVertices: previewPathVertices }
@@ -24,7 +26,7 @@ const mocks = vi.hoisted(() => ({
         shape,
         trackOrder: maskSource.trackOrder ?? 0,
         transform: {
-          x: options.getPreviewTransform?.(shapeId)?.x ?? options.frame,
+          x: options.getPreviewTransform?.(shapeId)?.x ?? (keyframes ? 77 : options.frame),
           y: 0,
           width: 100,
           height: 100,
@@ -172,5 +174,19 @@ describe('canvas mask animation', () => {
 
     expect(activeMasks).toHaveLength(1);
     expect((activeMasks[0]!.path as { value?: string }).value).toContain('0.8');
+  });
+
+  it('accepts a live keyframe resolver function for mask geometry', () => {
+    const index = buildMaskFrameIndex([track], canvas);
+
+    const activeMasks = getActiveMasksForFrame(
+      index,
+      10,
+      canvas,
+      () => ({ itemId: 'mask-1', properties: [] }),
+    );
+
+    expect(activeMasks).toHaveLength(1);
+    expect((activeMasks[0]!.path as { value?: string }).value).toContain('77');
   });
 });

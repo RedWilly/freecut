@@ -1,13 +1,9 @@
-import React, { useEffect, useRef, useCallback } from 'react';
-import { useVideoConfig, useIsPlaying } from '../hooks/use-player-compat';
-import { useSequenceContext } from '@/features/composition-runtime/deps/player';
+import React, { useEffect, useRef } from 'react';
 import { getAudioTargetTimeSeconds } from '../utils/video-timing';
 import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
 import { usePlaybackStore } from '@/features/composition-runtime/deps/stores';
-import { useTimelineStore } from '@/features/composition-runtime/deps/stores';
-import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
-import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
-import { getAudioClipFadeMultiplier, getAudioFadeMultiplier, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
+import type { AudioPlaybackProps } from './audio-playback-props';
+import { useAudioPlaybackState } from './hooks/use-audio-playback-state';
 
 let sharedAudioContext: AudioContext | null = null;
 
@@ -27,34 +23,8 @@ function getSharedAudioContext(): AudioContext | null {
   return sharedAudioContext;
 }
 
-interface PitchCorrectedAudioProps {
+interface PitchCorrectedAudioProps extends AudioPlaybackProps {
   src: string;
-  itemId: string;
-  volume?: number;
-  playbackRate?: number;
-  trimBefore?: number;
-  sourceFps?: number;
-  muted?: boolean;
-  /** Duration of this audio clip in frames */
-  durationInFrames: number;
-  /** Fade in duration in seconds */
-  audioFadeIn?: number;
-  /** Fade out duration in seconds */
-  audioFadeOut?: number;
-  audioFadeInCurve?: number;
-  audioFadeOutCurve?: number;
-  audioFadeInCurveX?: number;
-  audioFadeOutCurveX?: number;
-  clipFadeSpans?: AudioClipFadeSpan[];
-  contentStartOffsetFrames?: number;
-  contentEndOffsetFrames?: number;
-  fadeInDelayFrames?: number;
-  fadeOutLeadFrames?: number;
-  /** Crossfade fade in duration in FRAMES (for transitions - overrides audioFadeIn) */
-  crossfadeFadeIn?: number;
-  /** Crossfade fade out duration in FRAMES (for transitions - overrides audioFadeOut) */
-  crossfadeFadeOut?: number;
-  volumeMultiplier?: number;
 }
 
 /**
@@ -88,13 +58,30 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
   fadeOutLeadFrames = 0,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  liveGainItemIds,
   volumeMultiplier = 1,
 }) => {
-  // Get local frame from Sequence context (0-based within this Sequence)
-  const sequenceContext = useSequenceContext();
-  const frame = sequenceContext?.localFrame ?? 0;
-  const { fps } = useVideoConfig();
-  const playing = useIsPlaying();
+  const { frame, fps, playing, resolvedVolume: finalVolume } = useAudioPlaybackState({
+    itemId,
+    liveGainItemIds,
+    volume,
+    muted,
+    durationInFrames,
+    audioFadeIn,
+    audioFadeOut,
+    audioFadeInCurve,
+    audioFadeOutCurve,
+    audioFadeInCurveX,
+    audioFadeOutCurveX,
+    clipFadeSpans,
+    contentStartOffsetFrames,
+    contentEndOffsetFrames,
+    fadeInDelayFrames,
+    fadeOutLeadFrames,
+    crossfadeFadeIn,
+    crossfadeFadeOut,
+    volumeMultiplier,
+  });
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Web Audio API refs are created lazily only when gain > 1 is needed.
@@ -114,76 +101,6 @@ export const PitchCorrectedAudio: React.FC<PitchCorrectedAudioProps> = React.mem
       needsInitialSyncRef.current = true;
     }
   }, [playing]);
-
-  // Read preview values from unified preview system
-  const itemPreview = useGizmoStore(
-    useCallback((s) => s.preview?.[itemId], [itemId])
-  );
-  const preview = itemPreview?.properties;
-
-  // Read master preview volume from playback store (only used during preview, not render)
-  // These are granular selectors to avoid unnecessary re-renders
-  const previewMasterVolume = usePlaybackStore((s) => s.volume);
-  const previewMasterMuted = usePlaybackStore((s) => s.muted);
-
-  // Get keyframes for this item (context-first for render mode, store-fallback for preview)
-  const contextKeyframes = useItemKeyframesFromContext(itemId);
-  const storeKeyframes = useTimelineStore(
-    useCallback(
-      (s) => s.keyframes.find((k) => k.itemId === itemId),
-      [itemId]
-    )
-  );
-  const itemKeyframes = contextKeyframes ?? storeKeyframes;
-
-  // Interpolate volume from keyframes if they exist, otherwise use static value
-  const volumeKeyframes = getPropertyKeyframes(itemKeyframes, 'volume');
-  const staticVolumeDb = preview?.volume ?? volume;
-  const effectiveVolumeDb = volumeKeyframes.length > 0
-    ? interpolatePropertyValue(volumeKeyframes, frame, staticVolumeDb)
-    : staticVolumeDb;
-
-  // Use preview values if available
-  const effectiveFadeIn = preview?.audioFadeIn ?? audioFadeIn;
-  const effectiveFadeOut = preview?.audioFadeOut ?? audioFadeOut;
-
-  // Calculate fade multiplier
-  // Crossfade props are in frames and override normal fades when present
-  // Normal fades are in seconds and need conversion
-  const clipFadeMultiplier = clipFadeSpans
-    ? getAudioClipFadeMultiplier(frame, clipFadeSpans)
-    : getAudioFadeMultiplier({
-      frame,
-      durationInFrames,
-      fadeInFrames: effectiveFadeIn * fps,
-      fadeOutFrames: effectiveFadeOut * fps,
-      contentStartOffsetFrames,
-      contentEndOffsetFrames,
-      fadeInDelayFrames,
-      fadeOutLeadFrames,
-      fadeInCurve: preview?.audioFadeInCurve ?? audioFadeInCurve,
-      fadeOutCurve: preview?.audioFadeOutCurve ?? audioFadeOutCurve,
-      fadeInCurveX: preview?.audioFadeInCurveX ?? audioFadeInCurveX,
-      fadeOutCurveX: preview?.audioFadeOutCurveX ?? audioFadeOutCurveX,
-    });
-
-  const fadeMultiplier = clipFadeMultiplier * getAudioFadeMultiplier({
-    frame,
-    durationInFrames,
-    fadeInFrames: crossfadeFadeIn,
-    fadeOutFrames: crossfadeFadeOut,
-    useEqualPower: true,
-  });
-
-  // Convert dB to linear (0 dB = unity gain = 1.0)
-  // +20dB = 10x, -20dB = 0.1x, -60dB ≈ 0.001x
-  const linearVolume = Math.pow(10, effectiveVolumeDb / 20);
-  // Item volume with fades - allow values > 1 for volume boost
-  const itemVolume = muted ? 0 : Math.max(0, linearVolume * fadeMultiplier);
-
-  // Apply master preview volume from playback controls
-  const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
-  const finalVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier);
 
   // Use HTML5 audio with native preservesPitch.
   // Export uses Canvas + WebCodecs (client-render-engine.ts) which handles audio separately.

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { interpolate, useSequenceContext } from '@/features/composition-runtime/deps/player';
 import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
 import { usePlaybackStore } from '@/features/composition-runtime/deps/stores';
@@ -8,6 +8,7 @@ import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
 import type { VideoItem } from '@/types/timeline';
 import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
+import { useMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 
 // Track video elements that have been connected to Web Audio API
 // A video element can only be connected to ONE MediaElementSourceNode ever
@@ -275,5 +276,11 @@ export function useVideoAudioVolume(
   // Apply master preview volume from playback controls
   const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
 
-  return itemVolume * effectiveMasterVolume;
+  // Mixer fader live gain — updated during drag without re-rendering the composition.
+  // Clear when the composition re-renders with updated track volume (trackVolumeDb changes).
+  const mixerGain = useMixerLiveGain(item.id);
+  const trackVolumeDb = item.trackVolumeDb;
+  useEffect(() => { clearMixerLiveGain(item.id); }, [trackVolumeDb, item.id]);
+
+  return itemVolume * effectiveMasterVolume * mixerGain;
 }

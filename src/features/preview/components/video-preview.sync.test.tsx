@@ -615,7 +615,7 @@ describe('VideoPreview sync behavior', () => {
     });
 
     await waitFor(() => {
-      expect(renderer.invalidateFrameCache).toHaveBeenCalledWith([0]);
+      expect(renderer.invalidateFrameCache).toHaveBeenCalledWith({ frames: [0] });
     });
   });
 
@@ -685,8 +685,152 @@ describe('VideoPreview sync behavior', () => {
     });
 
     await waitFor(() => {
-      expect(renderer.invalidateFrameCache).toHaveBeenCalledWith([24]);
+      expect(renderer.invalidateFrameCache).toHaveBeenCalledWith({ frames: [24] });
     });
+  });
+
+  it('reuses the active fast-scrub renderer for committed transform updates on gpu-effect clips', async () => {
+    useItemsStore.getState().setTracks([
+      {
+        id: 'track-video',
+        name: 'Video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'item-halftone',
+        type: 'video',
+        trackId: 'track-video',
+        from: 0,
+        durationInFrames: 120,
+        src: 'blob:mock-video',
+        transform: {
+          x: 0,
+          y: 0,
+          width: 1920,
+          height: 1080,
+          rotation: 0,
+          opacity: 1,
+        },
+        effects: [
+          {
+            id: 'effect-halftone',
+            enabled: true,
+            effect: {
+              type: 'gpu-effect',
+              gpuEffectType: 'gpu-halftone',
+              params: {
+                patternType: 'dots',
+                dotSize: 8,
+                spacing: 7,
+                angle: 107,
+                intensity: 0.4,
+                invert: false,
+                size: 0.2,
+                radius: 0.89,
+                contrast: 0.38,
+                grainOverlay: 0.29,
+                grainSize: 0.35,
+                grainMixer: 0.22,
+              },
+            },
+          },
+        ],
+      } as TimelineItem,
+    ]);
+
+    render(
+      <VideoPreview
+        project={{ width: 1920, height: 1080, backgroundColor: '#000000' }}
+        containerSize={{ width: 1280, height: 720 }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(seekToMock).toHaveBeenCalled();
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().setScrubFrame(24);
+    });
+
+    const renderer = await waitFor(() => {
+      expect(createCompositionRendererMock).toHaveBeenCalledTimes(1);
+      expect(rendererMockState.instances.length).toBe(1);
+      return rendererMockState.instances[0]!;
+    });
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24);
+    });
+
+    renderer.invalidateFrameCache.mockClear();
+    renderer.renderFrame.mockClear();
+    renderer.dispose.mockClear();
+
+    act(() => {
+      useItemsStore.getState().setItems([
+        {
+          id: 'item-halftone',
+          type: 'video',
+          trackId: 'track-video',
+          from: 0,
+          durationInFrames: 120,
+          src: 'blob:mock-video',
+          transform: {
+            x: 120,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            rotation: 0,
+            opacity: 1,
+          },
+          effects: [
+            {
+              id: 'effect-halftone',
+              enabled: true,
+              effect: {
+                type: 'gpu-effect',
+                gpuEffectType: 'gpu-halftone',
+                params: {
+                  patternType: 'dots',
+                  dotSize: 8,
+                  spacing: 7,
+                  angle: 107,
+                  intensity: 0.4,
+                  invert: false,
+                  size: 0.2,
+                  radius: 0.89,
+                  contrast: 0.38,
+                  grainOverlay: 0.29,
+                  grainSize: 0.35,
+                  grainMixer: 0.22,
+                },
+              },
+            },
+          ],
+        } as TimelineItem,
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(renderer.invalidateFrameCache).toHaveBeenCalledWith({
+        ranges: [{ startFrame: 0, endFrame: 120 }],
+      });
+      expect(renderer.renderFrame).toHaveBeenCalledWith(24);
+    });
+
+    expect(createCompositionRendererMock).toHaveBeenCalledTimes(1);
+    expect(rendererMockState.instances).toHaveLength(1);
+    expect(renderer.dispose).not.toHaveBeenCalled();
   });
 
   it('clears stale previewFrame on mount', async () => {
@@ -805,6 +949,179 @@ describe('VideoPreview sync behavior', () => {
     });
 
     expect(seekToMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps backward hover preview frame-accurate for transition frames', async () => {
+    useItemsStore.getState().setTracks([
+      {
+        id: 'track-video',
+        name: 'Video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'clip-left',
+        label: 'Left',
+        type: 'video',
+        trackId: 'track-video',
+        from: 0,
+        durationInFrames: 60,
+        src: 'blob:left',
+      } as TimelineItem,
+      {
+        id: 'clip-right',
+        label: 'Right',
+        type: 'video',
+        trackId: 'track-video',
+        from: 40,
+        durationInFrames: 60,
+        src: 'blob:right',
+      } as TimelineItem,
+    ]);
+    useTransitionsStore.getState().setTransitions([
+      {
+        id: 'transition-1',
+        type: 'crossfade',
+        presentation: 'fade',
+        timing: 'linear',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        trackId: 'track-video',
+        durationInFrames: 20,
+      },
+    ]);
+
+    const { container } = render(
+      <VideoPreview
+        project={{ width: 1920, height: 1080, backgroundColor: '#000000' }}
+        containerSize={{ width: 1280, height: 720 }}
+      />
+    );
+
+    const scrubCanvas = container.querySelectorAll('canvas')[0] as HTMLCanvasElement;
+
+    await waitFor(() => {
+      expect(seekToMock).toHaveBeenCalled();
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().setCurrentFrame(70);
+      usePlaybackStore.getState().setPreviewFrame(70);
+    });
+
+    await waitFor(() => {
+      expect(usePlaybackStore.getState().displayedFrame).toBe(70);
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(47);
+    });
+
+    const renderer = await waitFor(() => {
+      expect(rendererMockState.instances.length).toBeGreaterThan(0);
+      return rendererMockState.instances[rendererMockState.instances.length - 1]!;
+    });
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(47);
+      expect(usePlaybackStore.getState().displayedFrame).toBe(47);
+      expect(scrubCanvas.style.visibility).toBe('visible');
+    });
+  });
+
+  it('keeps backward hover preview frame-accurate for gpu-effect clips', async () => {
+    useItemsStore.getState().setTracks([
+      {
+        id: 'track-video',
+        name: 'Video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'clip-effected',
+        label: 'Effected',
+        type: 'video',
+        trackId: 'track-video',
+        from: 0,
+        durationInFrames: 60,
+        src: 'blob:effected',
+        effects: [
+          {
+            id: 'effect-1',
+            enabled: true,
+            effect: {
+              type: 'gpu-effect',
+              gpuEffectType: 'gpu-sepia',
+              params: { amount: 0.8 },
+            },
+          },
+        ],
+      } as TimelineItem,
+      {
+        id: 'clip-plain',
+        label: 'Plain',
+        type: 'video',
+        trackId: 'track-video',
+        from: 60,
+        durationInFrames: 60,
+        src: 'blob:plain',
+      } as TimelineItem,
+    ]);
+
+    const { container } = render(
+      <VideoPreview
+        project={{ width: 1920, height: 1080, backgroundColor: '#000000' }}
+        containerSize={{ width: 1280, height: 720 }}
+      />
+    );
+
+    const scrubCanvas = container.querySelectorAll('canvas')[0] as HTMLCanvasElement;
+
+    await waitFor(() => {
+      expect(seekToMock).toHaveBeenCalled();
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().setCurrentFrame(70);
+      usePlaybackStore.getState().setPreviewFrame(70);
+    });
+
+    await waitFor(() => {
+      expect(usePlaybackStore.getState().displayedFrame).toBe(70);
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().setPreviewFrame(47);
+    });
+
+    const renderer = await waitFor(() => {
+      expect(rendererMockState.instances.length).toBeGreaterThan(0);
+      return rendererMockState.instances[rendererMockState.instances.length - 1]!;
+    });
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(47);
+      expect(usePlaybackStore.getState().displayedFrame).toBe(47);
+      expect(scrubCanvas.style.visibility).toBe('visible');
+    });
   });
 
   it('prefers the Player path for glowing animated text scrubs', async () => {
@@ -1299,6 +1616,94 @@ describe('VideoPreview sync behavior', () => {
 
     act(() => {
       usePlaybackStore.getState().setCurrentFrame(64);
+    });
+
+    await waitFor(() => {
+      expect(usePlaybackStore.getState().displayedFrame).toBeNull();
+      expect(scrubCanvas.style.visibility).toBe('hidden');
+    });
+  });
+
+  it('drops the transition overlay immediately after overlap end for same-origin A-A handoffs', async () => {
+    useItemsStore.getState().setTracks([
+      {
+        id: 'track-video',
+        name: 'Video',
+        height: 60,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      },
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'clip-left',
+        label: 'Left',
+        type: 'video',
+        trackId: 'track-video',
+        from: 0,
+        durationInFrames: 60,
+        src: 'blob:shared',
+        originId: 'origin-a',
+      } as TimelineItem,
+      {
+        id: 'clip-right',
+        label: 'Right',
+        type: 'video',
+        trackId: 'track-video',
+        from: 40,
+        durationInFrames: 60,
+        src: 'blob:shared',
+        originId: 'origin-a',
+      } as TimelineItem,
+    ]);
+    useTransitionsStore.getState().setTransitions([
+      {
+        id: 'transition-1',
+        type: 'crossfade',
+        presentation: 'fade',
+        timing: 'linear',
+        leftClipId: 'clip-left',
+        rightClipId: 'clip-right',
+        trackId: 'track-video',
+        durationInFrames: 20,
+      },
+    ]);
+
+    const { container } = render(
+      <VideoPreview
+        project={{ width: 1920, height: 1080, backgroundColor: '#000000' }}
+        containerSize={{ width: 1280, height: 720 }}
+      />
+    );
+
+    const scrubCanvas = container.querySelectorAll('canvas')[0] as HTMLCanvasElement;
+
+    await waitFor(() => {
+      expect(seekToMock).toHaveBeenCalled();
+    });
+    seekToMock.mockClear();
+
+    act(() => {
+      usePlaybackStore.getState().play();
+      usePlaybackStore.getState().setCurrentFrame(58);
+    });
+
+    const renderer = await waitFor(() => {
+      expect(rendererMockState.instances.length).toBeGreaterThan(0);
+      return rendererMockState.instances[rendererMockState.instances.length - 1]!;
+    });
+
+    await waitFor(() => {
+      expect(renderer.renderFrame).toHaveBeenCalledWith(58);
+      expect(scrubCanvas.style.visibility).toBe('visible');
+    });
+
+    act(() => {
+      usePlaybackStore.getState().setCurrentFrame(61);
     });
 
     await waitFor(() => {

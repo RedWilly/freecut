@@ -1,6 +1,7 @@
 export interface PlaybackTransitionOverlayWindow {
   startFrame: number;
   endFrame: number;
+  cooldownFrames?: number;
 }
 
 export interface PlaybackTransitionOverlayState {
@@ -22,6 +23,8 @@ export function resolvePlaybackTransitionOverlayState(
   let shouldHoldOverlay = false;
 
   for (const window of transitionWindows) {
+    const windowCooldownFrames = Math.max(0, window.cooldownFrames ?? safeCooldownFrames);
+
     if (frame >= window.startFrame && frame < window.endFrame) {
       return {
         hasActiveTransition: true,
@@ -31,7 +34,7 @@ export function resolvePlaybackTransitionOverlayState(
       };
     }
 
-    if (frame >= window.endFrame && frame < window.endFrame + safeCooldownFrames) {
+    if (frame >= window.endFrame && frame < window.endFrame + windowCooldownFrames) {
       shouldHoldOverlay = true;
     }
 

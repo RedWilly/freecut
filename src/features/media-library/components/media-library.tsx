@@ -143,23 +143,11 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   useEffect(() => {
     if (!currentProjectId && projectStoreProjectId) {
       setCurrentProject(projectStoreProjectId);
+      void loadMediaItems().catch((error) => {
+        logger.error('Failed to load media library during store recovery:', error);
+      });
     }
-  }, [currentProjectId, projectStoreProjectId, setCurrentProject]);
-
-  // Load media items on mount and when project changes.
-  // We keep both paths because HMR can remount components without a project-id change.
-  useEffect(() => {
-    if (currentProjectId) {
-      loadMediaItems();
-    }
-  }, [currentProjectId, loadMediaItems]);
-
-  // Also load on mount specifically (handles HMR case where deps haven't changed)
-  useEffect(() => {
-    if (currentProjectId) {
-      loadMediaItems();
-    }
-  }, []); // Intentionally empty - run only on mount
+  }, [currentProjectId, loadMediaItems, projectStoreProjectId, setCurrentProject]);
 
   const selectedAssetCount = selectedMediaIds.length + selectedCompositionIds.length;
   const deleteAssetCount = pendingDeletion.mediaIds.length + pendingDeletion.compositionIds.length;

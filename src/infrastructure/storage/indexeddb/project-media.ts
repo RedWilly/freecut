@@ -1,8 +1,49 @@
+import type { Project } from '@/types/project';
 import type { MediaMetadata, ProjectMediaAssociation } from '@/types/storage';
 import { getDB } from './connection';
+import { getProject } from './projects';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('IndexedDB:ProjectMedia');
+const PROJECT_MEDIA_ITEM_TYPES = new Set(['video', 'audio', 'image']);
+
+function collectMediaIdsFromItems(
+  items: Array<{ type: string; mediaId?: string }> | undefined,
+  mediaIds: Set<string>,
+): void {
+  if (!items) {
+    return;
+  }
+
+  for (const item of items) {
+    if (item.mediaId && PROJECT_MEDIA_ITEM_TYPES.has(item.type)) {
+      mediaIds.add(item.mediaId);
+    }
+  }
+}
+
+/**
+ * Collect all media IDs referenced anywhere in a project's timeline.
+ *
+ * Legacy projects can still carry valid timeline media references without
+ * the newer projectMedia association rows, so we use this to backfill them.
+ */
+export function collectProjectTimelineMediaIds(
+  project: Pick<Project, 'timeline'> | null | undefined
+): string[] {
+  if (!project?.timeline) {
+    return [];
+  }
+
+  const mediaIds = new Set<string>();
+  collectMediaIdsFromItems(project.timeline.items, mediaIds);
+
+  for (const composition of project.timeline.compositions ?? []) {
+    collectMediaIdsFromItems(composition.items, mediaIds);
+  }
+
+  return [...mediaIds];
+}
 
 /**
  * Associate media with a project.
@@ -87,8 +128,37 @@ export async function getMediaForProject(
   projectId: string
 ): Promise<MediaMetadata[]> {
   try {
-    const mediaIds = await getProjectMediaIds(projectId);
     const db = await getDB();
+    const existingMediaIds = await getProjectMediaIds(projectId);
+    const project = await getProject(projectId);
+    const referencedMediaIds = collectProjectTimelineMediaIds(project);
+    const mediaIds = [...existingMediaIds];
+    const associatedMediaIds = new Set(existingMediaIds);
+
+    if (referencedMediaIds.length > 0) {
+      const missingAssociationIds = referencedMediaIds.filter((id) => !associatedMediaIds.has(id));
+
+      for (const mediaId of missingAssociationIds) {
+        const media = await db.get('media', mediaId);
+        if (!media) {
+          continue;
+        }
+
+        await db.put('projectMedia', {
+          projectId,
+          mediaId,
+          addedAt: Date.now(),
+        } satisfies ProjectMediaAssociation);
+        mediaIds.push(mediaId);
+        associatedMediaIds.add(mediaId);
+      }
+
+      if (missingAssociationIds.length > 0) {
+        logger.info(
+          `Recovered ${Math.max(0, mediaIds.length - existingMediaIds.length)} missing projectMedia association(s) for project ${projectId}`
+        );
+      }
+    }
 
     const media: MediaMetadata[] = [];
     const orphanedIds: string[] = [];

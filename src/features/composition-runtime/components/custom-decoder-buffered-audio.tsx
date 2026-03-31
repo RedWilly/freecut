@@ -1,19 +1,13 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useSequenceContext } from '@/features/composition-runtime/deps/player';
-import { useVideoConfig, useIsPlaying } from '../hooks/use-player-compat';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { getAudioTargetTimeSeconds } from '../utils/video-timing';
-import { usePlaybackStore } from '@/features/composition-runtime/deps/stores';
-import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
-import { useTimelineStore } from '@/features/composition-runtime/deps/stores';
-import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
-import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/composition-runtime/deps/keyframes';
-import { getAudioClipFadeMultiplier, getAudioFadeMultiplier, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
 import {
   getOrDecodeAudio,
   getOrDecodeAudioForPlayback,
   isPreviewAudioDecodePending,
 } from '../utils/audio-decode-cache';
 import { createLogger } from '@/shared/logging/logger';
+import type { AudioPlaybackProps } from './audio-playback-props';
+import { useAudioPlaybackState } from './hooks/use-audio-playback-state';
 
 const log = createLogger('CustomDecoderBufferedAudio');
 const GAIN_RAMP_SECONDS = 0.008;
@@ -40,30 +34,9 @@ function getSharedAudioContext(): AudioContext | null {
   return sharedCtx;
 }
 
-interface CustomDecoderBufferedAudioProps {
+interface CustomDecoderBufferedAudioProps extends AudioPlaybackProps {
   src: string;
   mediaId: string;
-  itemId: string;
-  trimBefore?: number;
-  sourceFps?: number;
-  volume?: number;
-  playbackRate?: number;
-  muted?: boolean;
-  durationInFrames: number;
-  audioFadeIn?: number;
-  audioFadeOut?: number;
-  audioFadeInCurve?: number;
-  audioFadeOutCurve?: number;
-  audioFadeInCurveX?: number;
-  audioFadeOutCurveX?: number;
-  clipFadeSpans?: AudioClipFadeSpan[];
-  contentStartOffsetFrames?: number;
-  contentEndOffsetFrames?: number;
-  fadeInDelayFrames?: number;
-  fadeOutLeadFrames?: number;
-  crossfadeFadeIn?: number;
-  crossfadeFadeOut?: number;
-  volumeMultiplier?: number;
 }
 
 export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProps> = React.memo(({
@@ -89,68 +62,30 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
   fadeOutLeadFrames = 0,
   crossfadeFadeIn,
   crossfadeFadeOut,
+  liveGainItemIds,
   volumeMultiplier = 1,
 }) => {
-  const { fps } = useVideoConfig();
-  const sequenceContext = useSequenceContext();
-  const frame = sequenceContext?.localFrame ?? 0;
-  const playing = useIsPlaying();
-
-  const itemPreview = useGizmoStore(
-    useCallback((s) => s.preview?.[itemId], [itemId])
-  );
-  const preview = itemPreview?.properties;
-
-  const previewMasterVolume = usePlaybackStore((s) => s.volume);
-  const previewMasterMuted = usePlaybackStore((s) => s.muted);
-
-  const contextKeyframes = useItemKeyframesFromContext(itemId);
-  const storeKeyframes = useTimelineStore(
-    useCallback(
-      (s) => s.keyframes.find((k) => k.itemId === itemId),
-      [itemId]
-    )
-  );
-  const itemKeyframes = contextKeyframes ?? storeKeyframes;
-
-  const volumeKeyframes = getPropertyKeyframes(itemKeyframes, 'volume');
-  const staticVolumeDb = preview?.volume ?? volume;
-  const effectiveVolumeDb = volumeKeyframes.length > 0
-    ? interpolatePropertyValue(volumeKeyframes, frame, staticVolumeDb)
-    : staticVolumeDb;
-
-  const effectiveFadeIn = preview?.audioFadeIn ?? audioFadeIn;
-  const effectiveFadeOut = preview?.audioFadeOut ?? audioFadeOut;
-
-  const clipFadeMultiplier = clipFadeSpans
-    ? getAudioClipFadeMultiplier(frame, clipFadeSpans)
-    : getAudioFadeMultiplier({
-      frame,
-      durationInFrames,
-      fadeInFrames: effectiveFadeIn * fps,
-      fadeOutFrames: effectiveFadeOut * fps,
-      contentStartOffsetFrames,
-      contentEndOffsetFrames,
-      fadeInDelayFrames,
-      fadeOutLeadFrames,
-      fadeInCurve: preview?.audioFadeInCurve ?? audioFadeInCurve,
-      fadeOutCurve: preview?.audioFadeOutCurve ?? audioFadeOutCurve,
-      fadeInCurveX: preview?.audioFadeInCurveX ?? audioFadeInCurveX,
-      fadeOutCurveX: preview?.audioFadeOutCurveX ?? audioFadeOutCurveX,
-    });
-
-  const fadeMultiplier = clipFadeMultiplier * getAudioFadeMultiplier({
-    frame,
+  const { frame, fps, playing, resolvedVolume: audioVolume } = useAudioPlaybackState({
+    itemId,
+    liveGainItemIds,
+    volume,
+    muted,
     durationInFrames,
-    fadeInFrames: crossfadeFadeIn,
-    fadeOutFrames: crossfadeFadeOut,
-    useEqualPower: true,
+    audioFadeIn,
+    audioFadeOut,
+    audioFadeInCurve,
+    audioFadeOutCurve,
+    audioFadeInCurveX,
+    audioFadeOutCurveX,
+    clipFadeSpans,
+    contentStartOffsetFrames,
+    contentEndOffsetFrames,
+    fadeInDelayFrames,
+    fadeOutLeadFrames,
+    crossfadeFadeIn,
+    crossfadeFadeOut,
+    volumeMultiplier,
   });
-
-  const linearVolume = Math.pow(10, effectiveVolumeDb / 20);
-  const itemVolume = muted ? 0 : Math.max(0, linearVolume * fadeMultiplier);
-  const effectiveMasterVolume = previewMasterMuted ? 0 : previewMasterVolume;
-  const audioVolume = itemVolume * effectiveMasterVolume * Math.max(0, volumeMultiplier);
 
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
 
@@ -326,11 +261,12 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
     const gain = gainNodeRef.current;
     if (!ctx || !gain) return;
 
-    audioVolumeRef.current = audioVolume;
+    const safeVolume = Number.isFinite(audioVolume) ? Math.max(0, audioVolume) : 0;
+    audioVolumeRef.current = safeVolume;
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(Math.max(0, audioVolume), now + GAIN_RAMP_SECONDS);
+    gain.gain.linearRampToValueAtTime(safeVolume, now + GAIN_RAMP_SECONDS);
   }, [audioVolume]);
 
   const stopSource = useCallback((fadeOut: boolean = true) => {

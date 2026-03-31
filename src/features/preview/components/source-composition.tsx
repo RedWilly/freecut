@@ -3,7 +3,9 @@ import {
   AbsoluteFill,
 } from '@/features/preview/deps/player-core';
 import {
-  useBridgedTimelineContext,
+  useClock,
+  useClockIsPlaying,
+  useClockPlaybackRate,
   useVideoConfig,
 } from '@/features/preview/deps/player-context';
 import {
@@ -32,6 +34,7 @@ let globalSourceMonitorDecoderPool: SharedVideoExtractorPool | null = null;
 const SOURCE_MONITOR_STRICT_DECODE_FALLBACK_FAILURES = 2;
 const SOURCE_MONITOR_FRAME_CACHE_MAX = 90;
 const SOURCE_MONITOR_CACHE_TIME_QUANTUM = 1 / 60;
+const SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES = 6;
 
 function getSourceMonitorDecoderPool(): SharedVideoExtractorPool {
   if (!globalSourceMonitorDecoderPool) {
@@ -42,6 +45,10 @@ function getSourceMonitorDecoderPool(): SharedVideoExtractorPool {
 
 function quantizeSourceMonitorTime(time: number): number {
   return Math.round(time / SOURCE_MONITOR_CACHE_TIME_QUANTUM) * SOURCE_MONITOR_CACHE_TIME_QUANTUM;
+}
+
+function shouldResyncPlayingMedia(currentTime: number, targetTime: number, fps: number): boolean {
+  return Math.abs(currentTime - targetTime) * fps >= SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES;
 }
 
 function useSourceMonitorVideoSrc(mediaId: string | undefined, src: string): string {
@@ -71,6 +78,9 @@ export function SourceComposition({ mediaId, src, mediaType, fileName }: SourceC
 
 function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
   const activeSrc = useSourceMonitorVideoSrc(mediaId, src);
+  const clock = useClock();
+  const playing = useClockIsPlaying();
+  const playbackRate = useClockPlaybackRate();
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const poolRef = useRef(getGlobalVideoSourcePool());
@@ -88,16 +98,17 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
   const consecutiveDecodeFailuresRef = useRef(0);
   const frameCacheRef = useRef<Map<number, ImageBitmap>>(new Map());
   const frameCacheOrderRef = useRef<number[]>([]);
-  const { frame, playing, playbackRate } = useBridgedTimelineContext();
   const { fps } = useVideoConfig();
-  const lastFrameRef = useRef(frame);
+  const lastFrameRef = useRef(clock.currentFrame);
   const playingRef = useRef(playing);
   const decoderItemId = `${mediaId ?? 'source-monitor'}:${decodeLaneRef.current}`;
   const [useLegacyPausedSeek, setUseLegacyPausedSeek] = useState(false);
   const [strictDecodeReady, setStrictDecodeReady] = useState(false);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
 
-  playingRef.current = playing;
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -323,26 +334,35 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
     };
   }, [activeSrc, decoderItemId, pumpLatestDecodedFrame]);
 
-  // Sync video currentTime — always when paused, on seeks when playing
-  useEffect(() => {
+  const syncSourceFrame = useCallback((frame: number) => {
     const video = videoRef.current;
-    if (!video || !activeSrc) return;
+    const targetTime = frame / fps;
+    latestTargetTimeRef.current = targetTime;
 
-    const frameDelta = Math.abs(frame - lastFrameRef.current);
     lastFrameRef.current = frame;
-    latestTargetTimeRef.current = frame / fps;
+
+    if (!playingRef.current && !useLegacyPausedSeek) {
+      pendingTimeRef.current = targetTime;
+      if (decoderReadyRef.current) {
+        pumpLatestDecodedFrame();
+      }
+    }
+
+    if (!video || !activeSrc) return;
 
     const canSeek = video.readyState >= 1;
     if (!canSeek) return;
 
-    if (!playing && strictDecodeReady && hasDecodedFrame && !useLegacyPausedSeek) {
+    if (!playingRef.current && strictDecodeReady && hasDecodedFrame && !useLegacyPausedSeek) {
       return;
     }
 
-    if (playing) {
-      if (frameDelta <= 1) return;
+    if (playingRef.current) {
+      if (!shouldResyncPlayingMedia(video.currentTime, targetTime, fps)) {
+        return;
+      }
       try {
-        video.currentTime = frame / fps;
+        video.currentTime = targetTime;
       } catch {
         // Ignore seek errors while media is loading
       }
@@ -354,17 +374,18 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
     } catch {
       // Ignore seek errors while media is loading
     }
-  }, [activeSrc, fps, frame, hasDecodedFrame, playing, strictDecodeReady, useLegacyPausedSeek]);
+  }, [activeSrc, fps, hasDecodedFrame, pumpLatestDecodedFrame, strictDecodeReady, useLegacyPausedSeek]);
 
   useEffect(() => {
-    latestTargetTimeRef.current = frame / fps;
-    if (playing || useLegacyPausedSeek) return;
+    syncSourceFrame(clock.currentFrame);
+    return clock.onFrameChange((frame) => {
+      syncSourceFrame(frame);
+    });
+  }, [clock, syncSourceFrame]);
 
-    pendingTimeRef.current = latestTargetTimeRef.current;
-    if (decoderReadyRef.current) {
-      pumpLatestDecodedFrame();
-    }
-  }, [fps, frame, playing, pumpLatestDecodedFrame, useLegacyPausedSeek]);
+  useEffect(() => {
+    syncSourceFrame(clock.currentFrame);
+  }, [clock, playing, syncSourceFrame]);
 
   // Handle play/pause sync
   useEffect(() => {
@@ -425,27 +446,45 @@ function ImageSource({ src }: { src: string }) {
 
 function AudioSource({ src, fileName }: { src: string; fileName: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { frame, playing, playbackRate } = useBridgedTimelineContext();
+  const clock = useClock();
+  const playing = useClockIsPlaying();
+  const playbackRate = useClockPlaybackRate();
   const { fps } = useVideoConfig();
-  const lastFrameRef = useRef(frame);
+  const lastFrameRef = useRef(clock.currentFrame);
 
-  // Sync audio currentTime — always when paused, on seeks when playing
-  useEffect(() => {
+  const syncAudioFrame = useCallback((frame: number) => {
     const audio = audioRef.current;
     if (!audio || !src) return;
 
-    const frameDelta = Math.abs(frame - lastFrameRef.current);
+    const targetTime = frame / fps;
     lastFrameRef.current = frame;
 
     const canSeek = audio.readyState >= 1;
-    if (canSeek && (!playing || frameDelta > 1)) {
-      try {
-        audio.currentTime = frame / fps;
-      } catch {
-        // Ignore seek errors while media is loading
-      }
+    if (!canSeek) {
+      return;
     }
-  }, [frame, playing, src, fps]);
+
+    if (playing && !shouldResyncPlayingMedia(audio.currentTime, targetTime, fps)) {
+      return;
+    }
+
+    try {
+      audio.currentTime = targetTime;
+    } catch {
+      // Ignore seek errors while media is loading
+    }
+  }, [fps, playing, src]);
+
+  useEffect(() => {
+    syncAudioFrame(clock.currentFrame);
+    return clock.onFrameChange((frame) => {
+      syncAudioFrame(frame);
+    });
+  }, [clock, syncAudioFrame]);
+
+  useEffect(() => {
+    syncAudioFrame(clock.currentFrame);
+  }, [clock, playing, syncAudioFrame]);
 
   // Handle play/pause
   useEffect(() => {

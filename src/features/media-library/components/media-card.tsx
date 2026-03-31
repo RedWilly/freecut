@@ -12,7 +12,7 @@ import { mediaLibraryService } from '../services/media-library-service';
 import { getMediaType, formatDuration } from '../utils/validation';
 import { getSharedProxyKey } from '../utils/proxy-key';
 import { useMediaLibraryStore } from '../stores/media-library-store';
-import { CARD_GRID_BASE, CARD_LIST_BASE } from './card-styles';
+import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles';
 import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache';
 import { proxyService } from '../services/proxy-service';
 import { mediaTranscriptionService } from '../services/media-transcription-service';
@@ -226,6 +226,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   if (viewMode === 'list') {
     return (
       <div
+        style={CARD_PERF_STYLE}
         className={`
           ${CARD_LIST_BASE} cursor-pointer
           ${selected
@@ -370,6 +371,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   // Grid view
   return (
     <div
+      style={CARD_PERF_STYLE}
       className={`
         ${CARD_GRID_BASE} cursor-pointer
         ${selected

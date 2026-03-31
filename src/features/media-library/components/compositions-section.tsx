@@ -32,7 +32,7 @@ import { removeItemsFromItemsActions as removeItems } from '@/features/media-lib
 import { useMediaLibraryStore } from '../stores/media-library-store';
 import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache';
 import { GRID_COLS_BY_SIZE } from './media-grid-constants';
-import { CARD_GRID_BASE, CARD_LIST_BASE } from './card-styles';
+import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles';
 
 /**
  * Compositions section in the media library.
@@ -340,6 +340,7 @@ function CompositionCard({
             onDragEnd={handleDragEnd}
             onClick={handleClick}
             onDoubleClick={handleDoubleClick}
+            style={CARD_PERF_STYLE}
             className={cn(
               CARD_GRID_BASE,
               selected && 'border-violet-500 ring-2 ring-violet-500/20 shadow-lg shadow-violet-500/10',
@@ -420,6 +421,7 @@ function CompositionCard({
           onDragEnd={handleDragEnd}
           onClick={handleClick}
           onDoubleClick={handleDoubleClick}
+          style={CARD_PERF_STYLE}
           className={cn(
             CARD_LIST_BASE,
             selected && 'border-violet-500 ring-1 ring-violet-500/20',

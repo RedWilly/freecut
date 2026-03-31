@@ -212,6 +212,51 @@ function migrateTimelineTransitionsToCutCentered(
   };
 }
 
+function renumberTrackOrders(
+  tracks: ProjectTimeline['tracks'],
+): ProjectTimeline['tracks'] {
+  return tracks
+    .map((track, index) => ({ track, index }))
+    .sort((left, right) => {
+      const leftOrder = left.track.order ?? left.index;
+      const rightOrder = right.track.order ?? right.index;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.index - right.index;
+    })
+    .map(({ track }, index) => ({
+      ...track,
+      order: index,
+    }));
+}
+
+function backfillOriginIds(
+  items: ProjectTimeline['items'],
+): ProjectTimeline['items'] {
+  return items.map((item) => (
+    item.originId
+      ? item
+      : {
+          ...item,
+          originId: item.id,
+        }
+  ));
+}
+
+function migrateTimelineIdentityFields(
+  timeline: ProjectTimeline,
+): ProjectTimeline {
+  return {
+    ...timeline,
+    tracks: renumberTrackOrders(timeline.tracks),
+    items: backfillOriginIds(timeline.items),
+    compositions: timeline.compositions?.map((composition) => ({
+      ...composition,
+      tracks: renumberTrackOrders(composition.tracks),
+      items: backfillOriginIds(composition.items),
+    })),
+  };
+}
+
 /**
  * Migration registry.
  * Key is the target version number.
@@ -705,6 +750,28 @@ const migrations: Record<number, Migration> = {
           transitions: rootTimeline.transitions,
           compositions,
         },
+      };
+    },
+  },
+
+  /**
+   * Version 9: Normalize track ordering and backfill stable identity fields
+   *
+   * Older projects can carry negative/non-sequential track orders and items
+   * without originId. Current snapshots assume sequential track ordering, and
+   * newer rendering paths benefit from every item having a stable originId.
+   */
+  9: {
+    version: 9,
+    description: 'Renumber legacy track orders and backfill missing originId fields',
+    migrate: (project: Project): Project => {
+      if (!project.timeline) {
+        return project;
+      }
+
+      return {
+        ...project,
+        timeline: migrateTimelineIdentityFields(project.timeline),
       };
     },
   },

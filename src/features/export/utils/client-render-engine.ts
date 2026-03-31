@@ -59,11 +59,12 @@ import { SharedVideoExtractorPool, type VideoFrameSource } from './shared-video-
 import { getCompositeOperation } from '@/types/blend-mode-css';
 import { useCompositionsStore } from '@/features/export/deps/timeline';
 import { doesMaskAffectTrack } from '@/shared/utils/mask-scope';
+import type { FrameInvalidationRequest } from '@/shared/utils/frame-invalidation';
 
 // Item renderer
 import {
+  createFrameCompositionSceneCache,
   type PreviewPathVerticesOverride,
-  resolveFrameCompositionSceneCached,
   resolveCompositionRenderPlan,
   collectFrameVideoCandidates,
   resolveFrameRenderScene,
@@ -77,6 +78,7 @@ import {
   type SubCompRenderData,
 } from './canvas-item-renderer';
 import { ScrubbingCache } from '@/features/export/deps/preview';
+import { resolveFrameRenderOptimization } from './render-path-optimizer';
 
 // Re-export orchestration functions so existing import sites keep working
 export { renderComposition, renderAudioOnly, renderSingleFrame } from './canvas-render-orchestrator';
@@ -127,6 +129,8 @@ export async function createCompositionRenderer(
     getPreviewEffectsOverride?: (itemId: string) => ItemEffect[] | undefined;
     getPreviewCornerPinOverride?: (itemId: string) => TimelineItem['cornerPin'] | undefined;
     getPreviewPathVerticesOverride?: PreviewPathVerticesOverride;
+    getLiveItemSnapshot?: (itemId: string) => TimelineItem | undefined;
+    getLiveKeyframes?: (itemId: string) => ItemKeyframes | undefined;
     domVideoElementProvider?: (itemId: string) => HTMLVideoElement | null;
   } = {},
 ) {
@@ -142,6 +146,8 @@ export async function createCompositionRenderer(
   const getPreviewEffectsOverride = options.getPreviewEffectsOverride;
   const getPreviewCornerPinOverride = options.getPreviewCornerPinOverride;
   const getPreviewPathVerticesOverride = options.getPreviewPathVerticesOverride;
+  const getLiveItemSnapshot = options.getLiveItemSnapshot;
+  const getLiveKeyframes = options.getLiveKeyframes;
   const domVideoElementProvider = options.domVideoElementProvider;
   const hasDom = typeof document !== 'undefined';
   const previewStrictDecode = renderMode === 'preview';
@@ -151,6 +157,8 @@ export async function createCompositionRenderer(
     height: canvas.height,
     fps,
   };
+  const frameSceneCache = createFrameCompositionSceneCache();
+  let frameSceneRevision = 0;
 
   const renderPlan = resolveCompositionRenderPlan({ tracks, transitions });
   const { trackRenderState } = renderPlan;
@@ -179,6 +187,19 @@ export async function createCompositionRenderer(
     ? new ScrubbingCache()
     : null;
   let lastRenderedFrame = -1;
+  const cacheRenderedFrame = (frame: number) => {
+    if (!scrubbingCache) {
+      return;
+    }
+
+    const delta = frame - lastRenderedFrame;
+    const isSequentialForward = delta > 0 && delta <= 3;
+    lastRenderedFrame = frame;
+    if (gpuPipeline) {
+      scrubbingCache.setGpuDevice(gpuPipeline.getDevice(), canvas.width, canvas.height);
+    }
+    scrubbingCache.cacheFrame(frame, canvas, isSequentialForward);
+  };
 
   // === GPU Effects Pipeline ===
   // Lazily initialized on first use to avoid blocking startup
@@ -266,6 +287,13 @@ export async function createCompositionRenderer(
 
   // Build lookup maps
   const keyframesMap = buildKeyframesMap(keyframes);
+  const getCurrentKeyframes = (itemId: string): ItemKeyframes | undefined => (
+    getLiveKeyframes?.(itemId) ?? keyframesMap.get(itemId)
+  );
+  const getCurrentItem = <TItem extends TimelineItem>(item: TItem): TItem => {
+    const liveItem = getLiveItemSnapshot?.(item.id);
+    return liveItem && liveItem.type === item.type ? liveItem as TItem : item;
+  };
 
   // === PERFORMANCE OPTIMIZATION: Use mediabunny for video decoding ===
   // VideoFrameExtractor provides precise frame access without seek delays
@@ -1072,19 +1100,19 @@ export async function createCompositionRenderer(
         maskFrameIndex,
         frame,
         maskSettings,
-        keyframesMap,
+        getCurrentKeyframes,
         renderMode === 'preview' ? getPreviewTransformOverride : undefined,
         renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
       );
 
-      const frameScene = resolveFrameCompositionSceneCached({
+      const frameScene = frameSceneCache.resolve({
         renderPlan,
         frame,
         canvas: canvasSettings,
-        getKeyframes: (itemId) => keyframesMap.get(itemId),
+        getKeyframes: getCurrentKeyframes,
         getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
         getPreviewPathVertices: renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
-      });
+      }, frameSceneRevision);
       const { activeTransitions, transitionClipIds } = frameScene.transitionFrameState;
 
       // Debug: Log transition state at key frames (only in development)
@@ -1103,43 +1131,28 @@ export async function createCompositionRenderer(
         });
       }
 
-      // === PERFORMANCE: Use pooled canvas instead of creating new one each frame ===
-      const { canvas: contentCanvas, ctx: contentCtx } = canvasPool.acquire();
-
-
-      // GPU batch mode: each item's GPU effects submit immediately via pooled
-      // output canvases, but we defer compositing so the GPU can pipeline work.
-      let useBatch = false;
-
-      // Check if any active items have GPU effects
-      // and eagerly init the pipeline + start batch before processing items
-      {
-        let hasAnyGpuEffects = false;
-        for (const track of sortedTracks) {
-          if (!visibleTrackIds.has(track.id)) continue;
-          for (const item of track.items ?? []) {
-            if (frame < item.from || frame >= item.from + item.durationInFrames) continue;
-            if (item.effects?.some((e) => e.enabled && e.effect.type === 'gpu-effect')) {
-              hasAnyGpuEffects = true;
-              break;
-            }
+      let hasAnyGpuEffects = false;
+      for (const track of sortedTracks) {
+        if (!visibleTrackIds.has(track.id)) continue;
+        for (const baseItem of track.items ?? []) {
+          const item = getCurrentItem(baseItem);
+          if (frame < item.from || frame >= item.from + item.durationInFrames) continue;
+          if (item.effects?.some((e) => e.enabled && e.effect.type === 'gpu-effect')) {
+            hasAnyGpuEffects = true;
+            break;
           }
-          if (hasAnyGpuEffects) break;
         }
-        if (hasAnyGpuEffects || activeTransitions.length > 0) {
-          if (!itemRenderContext.gpuPipeline) {
-            itemRenderContext.gpuPipeline = await ensureGpuPipeline();
-          }
-          if (itemRenderContext.gpuPipeline) {
-            if (hasAnyGpuEffects) {
-              itemRenderContext.gpuPipeline.beginBatch();
-              useBatch = true;
-            }
-            // Initialize GPU transition pipeline (shares device with effects pipeline)
-            if (activeTransitions.length > 0 && !itemRenderContext.gpuTransitionPipeline) {
-              ensureGpuTransitionPipeline();
-              itemRenderContext.gpuTransitionPipeline = gpuTransitionPipeline;
-            }
+        if (hasAnyGpuEffects) break;
+      }
+      if (hasAnyGpuEffects || activeTransitions.length > 0) {
+        if (!itemRenderContext.gpuPipeline) {
+          itemRenderContext.gpuPipeline = await ensureGpuPipeline();
+        }
+        if (itemRenderContext.gpuPipeline) {
+          // Initialize GPU transition pipeline (shares device with effects pipeline)
+          if (activeTransitions.length > 0 && !itemRenderContext.gpuTransitionPipeline) {
+            ensureGpuTransitionPipeline();
+            itemRenderContext.gpuTransitionPipeline = gpuTransitionPipeline;
           }
         }
       }
@@ -1150,12 +1163,14 @@ export async function createCompositionRenderer(
        * immediately in export mode.
        */
       const renderItemWithEffects = async (
-        item: TimelineItem,
+        baseItem: TimelineItem,
         trackOrder: number,
         deferred: boolean,
+        targetCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
       ): Promise<{ source: OffscreenCanvas; poolCanvases: OffscreenCanvas[] } | null> => {
+        const item = getCurrentItem(baseItem);
         // Get animated transform
-        const itemKeyframes = keyframesMap.get(item.id);
+        const itemKeyframes = getCurrentKeyframes(item.id);
         let transform = getAnimatedTransform(item, itemKeyframes, frame, canvasSettings);
         if (renderMode === 'preview') {
           const previewOverride = getPreviewTransformOverride?.(item.id);
@@ -1223,7 +1238,7 @@ export async function createCompositionRenderer(
           if (deferred) {
             return { source, poolCanvases: [effectCanvas] };
           }
-          contentCtx.drawImage(source, 0, 0);
+          targetCtx.drawImage(source, 0, 0);
           canvasPool.release(effectCanvas);
           return null;
         }
@@ -1231,13 +1246,14 @@ export async function createCompositionRenderer(
         if (deferred) {
           return { source: itemCanvas, poolCanvases: [itemCanvas] };
         }
-        contentCtx.drawImage(itemCanvas, 0, 0);
+        targetCtx.drawImage(itemCanvas, 0, 0);
         canvasPool.release(itemCanvas);
         return null;
       };
 
       // Helper to check if item should be rendered
-      const shouldRenderItem = (item: TimelineItem): boolean => {
+      const shouldRenderItem = (baseItem: TimelineItem): boolean => {
+        const item = getCurrentItem(baseItem);
         // Skip items not visible at this frame
         if (frame < item.from || frame >= item.from + item.durationInFrames) {
           return false;
@@ -1268,7 +1284,8 @@ export async function createCompositionRenderer(
       // - No transparency effects
       // - No active masks (masks could reveal content below)
 
-      const isFullyOccluding = (item: TimelineItem, trackOrder: number): boolean => {
+      const isFullyOccluding = (baseItem: TimelineItem, trackOrder: number): boolean => {
+        const item = getCurrentItem(baseItem);
         // Only videos and images can be fully opaque
         if (item.type !== 'video' && item.type !== 'image') return false;
 
@@ -1282,7 +1299,7 @@ export async function createCompositionRenderer(
         if (item.cornerPin) return false;
 
         // Get animated transform at current frame
-        const itemKeyframes = keyframesMap.get(item.id);
+        const itemKeyframes = getCurrentKeyframes(item.id);
         const transform = getAnimatedTransform(item, itemKeyframes, frame, canvasSettings);
 
         // Check opacity (must be 1.0)
@@ -1356,6 +1373,48 @@ export async function createCompositionRenderer(
         }
       }
 
+      const {
+        shouldDirectRenderSingleTask,
+        shouldUseDeferredGpuBatch,
+      } = resolveFrameRenderOptimization({
+        activeMaskCount: activeMasks.length,
+        activeTransitionCount: activeTransitions.length,
+        hasGpuEffects: hasAnyGpuEffects,
+        renderTaskCount: renderTasks.length,
+      });
+      if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
+        itemRenderContext.gpuPipeline.beginBatch();
+      }
+
+      if (shouldDirectRenderSingleTask) {
+        const directTask = renderTasks[0];
+        if (directTask?.type === 'item') {
+          const blendMode = getCurrentItem(directTask.item).blendMode;
+          try {
+            if (blendMode && blendMode !== 'normal') {
+              ctx.globalCompositeOperation = getCompositeOperation(blendMode);
+            }
+
+            await renderItemWithEffects(
+              directTask.item,
+              directTask.trackOrder,
+              false,
+              ctx,
+            );
+          } finally {
+            if (blendMode && blendMode !== 'normal') {
+              ctx.globalCompositeOperation = 'source-over';
+            }
+          }
+        }
+
+        cacheRenderedFrame(frame);
+        return;
+      }
+
+      // === PERFORMANCE: Use pooled canvas instead of creating new one each frame ===
+      const { canvas: contentCanvas, ctx: contentCtx } = canvasPool.acquire();
+
       // Render tracks in order (bottom to top), with transitions at their track position
       // Track order: higher values render first (behind), lower values render last (on top)
       let skippedTracks = 0;
@@ -1395,7 +1454,7 @@ export async function createCompositionRenderer(
         const results = await Promise.all(
           renderTasks.map(async (task) => {
             if (task.type === 'item') {
-              return renderItemWithEffects(task.item, task.trackOrder, true);
+              return renderItemWithEffects(task.item, task.trackOrder, true, contentCtx);
             }
             // Transitions: render to a dedicated canvas
             const { canvas: trCanvas, ctx: trCtx } = canvasPool.acquire();
@@ -1406,14 +1465,17 @@ export async function createCompositionRenderer(
 
 
         // End GPU pool mode before compositing
-        if (useBatch && itemRenderContext.gpuPipeline) {
+        if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
           itemRenderContext.gpuPipeline.endBatch();
         }
 
         // Composite all results in z-order (preserved by renderTasks ordering)
         // Use GPU compositor for pixel-perfect blend modes when available
         const hasNonNormalBlend = renderTasks.some(
-          (t) => t.type === 'item' && t.item.blendMode && t.item.blendMode !== 'normal',
+          (t) => t.type === 'item' && (() => {
+            const item = getCurrentItem(t.item);
+            return Boolean(item.blendMode && item.blendMode !== 'normal');
+          })(),
         );
         const useGpuCompositor = hasNonNormalBlend && gpuPipeline && ensureGpuCompositor();
         const gpuCompositeOutput = useGpuCompositor
@@ -1438,7 +1500,9 @@ export async function createCompositionRenderer(
             if (!result) continue;
             compositedResults.push({ task, result });
 
-            const blendMode = task.type === 'item' ? (task.item.blendMode ?? 'normal') : 'normal';
+            const blendMode = task.type === 'item'
+              ? (getCurrentItem(task.item).blendMode ?? 'normal')
+              : 'normal';
 
             // Upload item canvas to GPU texture (pooled — no per-frame alloc)
             const tex = gpuTexturePool!.acquire(w, h);
@@ -1466,7 +1530,9 @@ export async function createCompositionRenderer(
             // isn't available for this frame. This preserves feature parity and
             // avoids dropping content when WebGPU canvas presentation fails.
             for (const { task, result } of compositedResults) {
-              const blendMode = task.type === 'item' ? task.item.blendMode : undefined;
+              const blendMode = task.type === 'item'
+                ? getCurrentItem(task.item).blendMode
+                : undefined;
               if (blendMode && blendMode !== 'normal') {
                 contentCtx.globalCompositeOperation = getCompositeOperation(blendMode);
               }
@@ -1492,7 +1558,9 @@ export async function createCompositionRenderer(
             const result = applyTrackScopedMasks(results[i] ?? null, task.trackOrder);
             if (!result) continue;
 
-            const blendMode = task.type === 'item' ? task.item.blendMode : undefined;
+            const blendMode = task.type === 'item'
+              ? getCurrentItem(task.item).blendMode
+              : undefined;
             if (blendMode && blendMode !== 'normal') {
               contentCtx.globalCompositeOperation = getCompositeOperation(blendMode);
             }
@@ -1517,24 +1585,7 @@ export async function createCompositionRenderer(
 
       // Release content canvas back to pool
       canvasPool.release(contentCanvas);
-
-      // Cache the rendered frame. Tier 1 (GPU) is always populated because
-      // copyExternalImageToTexture is near-free (<0.5ms CPU, GPU-async).
-      // Tier 3 (RAM) uses createImageBitmap (~2-5ms) — skip during rapid
-      // forward playback where mediabunny sequential decode is faster (~1ms).
-      //
-      // Always caching to Tier 1 means backward scrubs after forward playback
-      // get GPU cache hits instead of full WASM re-decodes (50-200ms saved
-      // per frame on long-GOP video).
-      if (scrubbingCache) {
-        const delta = frame - lastRenderedFrame;
-        const isSequentialForward = delta > 0 && delta <= 3;
-        lastRenderedFrame = frame;
-        if (gpuPipeline) {
-          scrubbingCache.setGpuDevice(gpuPipeline.getDevice(), canvas.width, canvas.height);
-        }
-        scrubbingCache.cacheFrame(frame, canvas, isSequentialForward);
-      }
+      cacheRenderedFrame(frame);
     },
 
     async prewarmFrame(frame: number) {
@@ -1767,9 +1818,11 @@ export async function createCompositionRenderer(
     },
 
 
-    /** Evict specific frames from the render cache (e.g. after effect param changes). */
-    invalidateFrameCache(frames?: number[]) {
-      scrubbingCache?.invalidate(frames);
+    /** Evict cached render frames or cached frame ranges after visual edits. */
+    invalidateFrameCache(request?: FrameInvalidationRequest) {
+      frameSceneRevision += 1;
+      frameSceneCache.invalidate(request);
+      scrubbingCache?.invalidate(request);
     },
 
     /** Get the scrubbing cache instance for stats/GPU wiring. */
@@ -1856,6 +1909,7 @@ export async function createCompositionRenderer(
       gpuTransitionPipeline = null;
       gpuPipeline?.destroy();
       gpuPipeline = null;
+      frameSceneCache.invalidate();
       canvasPool.dispose();
       textMeasureCache.clear();
 

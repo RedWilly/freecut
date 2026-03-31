@@ -14,8 +14,10 @@ import { resolveAnimatedTransform, hasKeyframeAnimation } from '@/features/compo
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider, useCompositionSpace } from '../contexts/composition-space-context';
+import { clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 import { Item } from './item';
 import type { MaskInfo } from './item';
+import { StableVideoSequence, type StableVideoSequenceItem } from './stable-video-sequence';
 import { resolveActiveShapeMasksAtFrame } from '../utils/frame-scene';
 import {
   EMPTY_MASK_INFOS,
@@ -30,12 +32,22 @@ import { getLinkedVideoIdsWithAudio, hasLinkedAudioCompanion } from '@/shared/ut
 
 type CompositionWrapperItem = CompositionItemType | (AudioItem & { compositionId: string });
 
+interface CompositionWindow {
+  durationInFrames: number;
+  speed?: number;
+  sourceFps?: number;
+  sourceStart?: number;
+  sourceEnd?: number;
+  trimStart?: number;
+}
+
 interface CompositionContentProps {
   item: CompositionWrapperItem;
   parentMuted?: boolean;
   renderDepth?: number;
   renderMode?: 'full' | 'visual-only' | 'audio-only';
   audioGainMultiplier?: number;
+  audioGainLiveItemIds?: string[];
   crossfadeFadeInFrames?: number;
   crossfadeFadeOutFrames?: number;
 }
@@ -60,7 +72,7 @@ function resolveSubCompItem(subItem: TimelineItem): TimelineItem {
 
 function mapSubCompItemToWrapperWindow(params: {
   subItem: TimelineItem;
-  wrapper: CompositionWrapperItem;
+  wrapper: CompositionWindow;
   parentFps: number;
   subCompFps: number;
 }): TimelineItem | null {
@@ -120,7 +132,7 @@ function mapSubCompItemToWrapperWindow(params: {
  * then CSS-scaled to fit the parent container dimensions. This ensures sub-items
  * use the correct coordinate space (sub-comp dimensions, not main canvas).
  */
-export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
+export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
   const subComp = useCompositionsStore((s) => s.compositions.find((c) => c.id === item.compositionId));
   const { width: renderWidth, height: renderHeight, fps: mainFps } = useVideoConfig();
   const compositionSpace = useCompositionSpace();
@@ -128,6 +140,21 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
   const projectHeight = compositionSpace?.projectHeight ?? renderHeight;
   const renderScaleX = compositionSpace?.scaleX ?? 1;
   const renderScaleY = compositionSpace?.scaleY ?? 1;
+  const wrapperWindow = useMemo<CompositionWindow>(() => ({
+    durationInFrames: item.durationInFrames,
+    speed: item.speed,
+    sourceFps: item.sourceFps,
+    sourceStart: item.sourceStart,
+    sourceEnd: item.sourceEnd,
+    trimStart: item.trimStart,
+  }), [
+    item.durationInFrames,
+    item.sourceEnd,
+    item.sourceFps,
+    item.sourceStart,
+    item.speed,
+    item.trimStart,
+  ]);
 
   // Re-render when blob URLs are acquired (fixes media not loading on project load)
   const blobUrlVersion = useBlobUrlVersion();
@@ -140,13 +167,13 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
       .flatMap((subItem) => {
         const mapped = mapSubCompItemToWrapperWindow({
           subItem,
-          wrapper: item,
+          wrapper: wrapperWindow,
           parentFps: mainFps,
           subCompFps: subComp.fps,
         });
         return mapped ? [mapped] : [];
       });
-  }, [blobUrlVersion, item, mainFps, subComp]);
+  }, [blobUrlVersion, mainFps, subComp, wrapperWindow]);
 
   // === Compute parent container dimensions ===
   // Replicates the same priority chain as useItemVisualState:
@@ -243,10 +270,58 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
     [subComp]
   );
   const sortedTracks = trackRenderState?.visibleTracksByOrderDesc ?? [];
+  const maxTrackOrder = useMemo(
+    () => sortedTracks.reduce((max, track) => Math.max(max, track.order ?? 0), 0),
+    [sortedTracks]
+  );
   const linkedVideoIdsWithOwnedAudio = useMemo(
     () => getLinkedVideoIdsWithAudio(resolvedItems),
     [resolvedItems]
   );
+  const videoItems = useMemo<StableVideoSequenceItem[]>(() => {
+    if (renderMode === 'audio-only') {
+      return [];
+    }
+
+    return sortedTracks.flatMap((track) => {
+      const trackOrder = track.order ?? 0;
+
+      return resolvedItems
+        .filter((subItem): subItem is TimelineItem & { type: 'video' } => (
+          subItem.trackId === track.id
+          && subItem.type === 'video'
+        ))
+        .map((subItem) => ({
+          ...subItem,
+          zIndex: (maxTrackOrder - trackOrder) * 1000,
+          muted: parentMuted || track.muted || linkedVideoIdsWithOwnedAudio.has(subItem.id),
+          trackOrder,
+          trackVisible: track.visible,
+        }));
+    });
+  }, [linkedVideoIdsWithOwnedAudio, maxTrackOrder, parentMuted, renderMode, resolvedItems, sortedTracks]);
+  const nonVideoTrackItems = useMemo(() => (
+    sortedTracks
+      .map((track) => {
+        const trackOrder = track.order ?? 0;
+
+        return {
+          trackId: track.id,
+          trackOrder,
+          trackVisible: track.visible,
+          muted: parentMuted || track.muted,
+          items: resolvedItems.filter((subItem) => (
+            subItem.trackId === track.id
+            && subItem.type !== 'video'
+            // Mask shapes are control items and should not render visually.
+            && !(subItem.type === 'shape' && subItem.isMask)
+            && (renderMode !== 'visual-only' || subItem.type !== 'audio')
+            && (renderMode !== 'audio-only' || subItem.type === 'audio')
+          )),
+        };
+      })
+      .filter((track) => track.items.length > 0)
+  ), [parentMuted, renderMode, resolvedItems, sortedTracks]);
 
   let wrapperFadeMultiplier = 1;
   const hasCrossfadeIn = (crossfadeFadeInFrames ?? 0) > 0;
@@ -260,7 +335,16 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
     wrapperFadeMultiplier = Math.cos(progress * Math.PI / 2);
   }
   const effectiveAudioGainMultiplier = audioGainMultiplier * Math.max(0, wrapperFadeMultiplier);
+  const effectiveAudioGainLiveItemIds = useMemo(
+    () => [...(audioGainLiveItemIds ?? []), item.id],
+    [audioGainLiveItemIds, item.id],
+  );
   const previousMaskInfosRef = React.useRef<MaskInfo[]>(EMPTY_MASK_INFOS);
+
+  React.useEffect(() => {
+    if (renderMode !== 'audio-only') return;
+    clearMixerLiveGain(item.id);
+  }, [audioGainMultiplier, item.id, renderMode]);
 
   // Resolve active sub-comp masks for the current local frame.
   // This allows masks authored inside a pre-comp to clip items when viewed
@@ -316,6 +400,28 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
   // CSS scale from sub-comp native resolution to parent container dimensions
   const scaleX = subComp.width > 0 ? containerDims.width / subComp.width : 1;
   const scaleY = subComp.height > 0 ? containerDims.height / subComp.height : 1;
+  const renderVideoItem = useCallback((videoItem: StableVideoSequenceItem) => (
+    <AbsoluteFill
+      style={{
+        zIndex: videoItem.zIndex,
+        visibility: videoItem.trackVisible ? 'visible' : 'hidden',
+      }}
+    >
+      <Item
+        item={videoItem}
+        muted={videoItem.muted}
+        masks={getMasksForTrackOrder(activeMaskInfos, videoItem.trackOrder)}
+        renderDepth={renderDepth}
+        audioGainMultiplier={effectiveAudioGainMultiplier}
+        audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
+      />
+    </AbsoluteFill>
+  ), [
+    activeMaskInfos,
+    effectiveAudioGainLiveItemIds,
+    effectiveAudioGainMultiplier,
+    renderDepth,
+  ]);
 
   return (
     <div style={{
@@ -340,35 +446,39 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
         >
           <KeyframesProvider keyframes={subComp.keyframes}>
             <AbsoluteFill>
-              {sortedTracks.map((track) => {
-                if (!track.visible) return null;
+              <StableVideoSequence
+                items={videoItems}
+                renderItem={renderVideoItem}
+                premountFor={Math.round(subComp.fps)}
+              />
 
-                const trackItems = resolvedItems.filter((i) => (
-                  i.trackId === track.id
-                  // Mask shapes are control items and should not render visually.
-                  && !(i.type === 'shape' && i.isMask)
-                  && (renderMode !== 'visual-only' || i.type !== 'audio')
-                  && (renderMode !== 'audio-only' || i.type === 'audio')
-                ));
-                const trackOrder = track.order ?? 0;
-
-                return trackItems.map((subItem) => (
-                  <Sequence
-                    key={subItem.id}
-                    from={subItem.from}
-                    durationInFrames={subItem.durationInFrames}
-                  >
-                    <Item
-                      item={subItem}
-                      muted={parentMuted || track.muted || linkedVideoIdsWithOwnedAudio.has(subItem.id)}
-                      masks={getMasksForTrackOrder(activeMaskInfos, trackOrder)}
-                      renderDepth={renderDepth}
-                      compositionRenderMode={subItem.type === 'composition' && hasLinkedAudioCompanion(resolvedItems, subItem) ? 'visual-only' : 'full'}
-                      audioGainMultiplier={effectiveAudioGainMultiplier}
-                    />
-                  </Sequence>
-                ));
-              })}
+              {nonVideoTrackItems.map((track) => (
+                <AbsoluteFill
+                  key={track.trackId}
+                  style={{
+                    zIndex: (maxTrackOrder - track.trackOrder) * 1000 + 100,
+                    visibility: track.trackVisible ? 'visible' : 'hidden',
+                  }}
+                >
+                  {track.items.map((subItem) => (
+                    <Sequence
+                      key={subItem.id}
+                      from={subItem.from}
+                      durationInFrames={subItem.durationInFrames}
+                    >
+                      <Item
+                        item={subItem}
+                        muted={track.muted || linkedVideoIdsWithOwnedAudio.has(subItem.id)}
+                        masks={getMasksForTrackOrder(activeMaskInfos, track.trackOrder)}
+                        renderDepth={renderDepth}
+                        compositionRenderMode={subItem.type === 'composition' && hasLinkedAudioCompanion(resolvedItems, subItem) ? 'visual-only' : 'full'}
+                        audioGainMultiplier={effectiveAudioGainMultiplier}
+                        audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
+                      />
+                    </Sequence>
+                  ))}
+                </AbsoluteFill>
+              ))}
             </AbsoluteFill>
           </KeyframesProvider>
         </VideoConfigProvider>

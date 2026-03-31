@@ -261,7 +261,7 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          'fixed bottom-4 right-4 z-50 p-2.5 rounded-full shadow-lg transition-all',
+          'fixed bottom-4 left-4 z-50 p-2.5 rounded-full shadow-lg transition-all',
           'bg-amber-500 hover:bg-amber-600 text-white',
           'focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2',
           isOpen && 'rotate-180'
@@ -275,7 +275,7 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
       {isOpen && (
         <div
           className={cn(
-            'fixed bottom-16 right-4 z-50 w-64',
+            'fixed bottom-16 left-4 z-50 w-64',
             'bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl',
             'text-zinc-100 text-sm'
           )}
@@ -472,4 +472,3 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
     </>
   );
 }
-

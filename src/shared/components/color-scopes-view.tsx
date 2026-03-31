@@ -410,11 +410,9 @@ export const ColorScopesView = memo(function ColorScopesView({
   const [histogramMode, setHistogramMode] = useState<ScopeViewMode>('rgb');
   const [stackLayout, setStackLayout] = useState<StackScopeLayout>(() => loadStackLayout());
 
+  const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const captureFrameImageData = usePlaybackStore((s) => s.captureFrameImageData);
   const captureFrame = usePlaybackStore((s) => s.captureFrame);
-  const isPlaying = usePlaybackStore((s) => s.isPlaying);
-  const currentFrame = usePlaybackStore((s) => s.currentFrame);
-  const previewFrame = usePlaybackStore((s) => s.previewFrame);
   const isEmbeddedStackLayout = embedded && embeddedLayout === 'stack';
   const showHistogram = embedded && (!isEmbeddedStackLayout || stackLayout === 'all');
 
@@ -431,6 +429,8 @@ export const ColorScopesView = memo(function ColorScopesView({
   const gpuCtxCacheRef = useRef(new Map<HTMLCanvasElement, GPUCanvasContext>());
   const gpuInitedRef = useRef(false);
   const gpuRenderInFlightRef = useRef(false);
+  const cpuDrawInFlightRef = useRef(false);
+  const cpuDrawPendingRef = useRef(false);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const liveTickRef = useRef(0);
 
@@ -683,11 +683,59 @@ export const ColorScopesView = memo(function ColorScopesView({
     }
   }, [captureFrameImageData, captureFrame, open, gpuReady, colorMatrix, rangeMode, embedded, isPlaying, showHistogram]);
 
+  const runSerializedCpuDraw = useCallback(async () => {
+    if (cpuDrawInFlightRef.current) {
+      cpuDrawPendingRef.current = true;
+      return;
+    }
+
+    cpuDrawInFlightRef.current = true;
+    try {
+      do {
+        cpuDrawPendingRef.current = false;
+        await cpuDraw();
+      } while (cpuDrawPendingRef.current);
+    } finally {
+      cpuDrawInFlightRef.current = false;
+    }
+  }, [cpuDraw]);
+
   // CPU: update on frame change when paused
   useEffect(() => {
     if (gpuReady !== false || !open || isPlaying) return;
-    void cpuDraw();
-  }, [gpuReady, open, isPlaying, currentFrame, previewFrame, cpuDraw]);
+
+    let rafId: number | null = null;
+    const scheduleDraw = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        void runSerializedCpuDraw();
+      });
+    };
+
+    scheduleDraw();
+
+    const unsubscribe = usePlaybackStore.subscribe((state, previousState) => {
+      if (state.isPlaying) {
+        return;
+      }
+
+      const nextRequestedFrame = state.previewFrame ?? state.currentFrame;
+      const previousRequestedFrame = previousState.previewFrame ?? previousState.currentFrame;
+
+      if (nextRequestedFrame !== previousRequestedFrame) {
+        scheduleDraw();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      cpuDrawPendingRef.current = false;
+    };
+  }, [gpuReady, open, isPlaying, runSerializedCpuDraw]);
 
   // CPU: polling loop during playback
   useEffect(() => {
@@ -695,12 +743,12 @@ export const ColorScopesView = memo(function ColorScopesView({
     let cancelled = false;
     void (async () => {
       while (!cancelled) {
-        await cpuDraw();
+        await runSerializedCpuDraw();
         await new Promise((r) => setTimeout(r, CPU_INTERVAL));
       }
     })();
     return () => { cancelled = true; };
-  }, [gpuReady, open, isPlaying, cpuDraw]);
+  }, [gpuReady, open, isPlaying, runSerializedCpuDraw]);
 
   if (!open) return null;
 

@@ -10,7 +10,8 @@ import {
 import {
   PlayerEmitterProvider,
   ClockBridgeProvider,
-  useBridgedTimelineContext,
+  useClock,
+  useClockIsPlaying,
   VideoConfigProvider,
   usePlayer,
 } from '@/features/preview/deps/player-context';
@@ -28,6 +29,8 @@ interface SourceMonitorProps {
   mediaId: string;
   onClose: () => void;
 }
+
+const SOURCE_MONITOR_RESIZE_MIN_UPDATE_MS = 33;
 
 export const SourceMonitor = memo(function SourceMonitor({ mediaId, onClose }: SourceMonitorProps) {
   const [blobUrl, setBlobUrl] = useState<string>('');
@@ -133,6 +136,11 @@ function SourceMonitorInner({
   const containerRef = useRef<HTMLDivElement>(null);
   const contentHostRef = useRef<HTMLDivElement>(null);
   const contentScaleRef = useRef<HTMLDivElement>(null);
+  const lastLayoutRef = useRef<{
+    scaledWidth: number;
+    scaledHeight: number;
+    scale: number;
+  } | null>(null);
   const editorDensity = useSettingsStore((s) => s.editorDensity);
   const editorLayout = getEditorLayout(editorDensity);
 
@@ -151,6 +159,22 @@ function SourceMonitorInner({
     const sw = mediaWidth * scale;
     const sh = mediaHeight * scale;
 
+    const previousLayout = lastLayoutRef.current;
+    if (
+      previousLayout
+      && previousLayout.scaledWidth === sw
+      && previousLayout.scaledHeight === sh
+      && previousLayout.scale === scale
+    ) {
+      return;
+    }
+
+    lastLayoutRef.current = {
+      scaledWidth: sw,
+      scaledHeight: sh,
+      scale,
+    };
+
     host.style.width = `${sw}px`;
     host.style.height = `${sh}px`;
     host.style.marginLeft = `${-sw / 2}px`;
@@ -165,10 +189,22 @@ function SourceMonitorInner({
     const el = containerRef.current;
     if (!el) return;
     let rafId: number | null = null;
+    let lastUpdateTs = 0;
     const schedule = () => {
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
+        const now = performance.now();
+        if (now - lastUpdateTs < SOURCE_MONITOR_RESIZE_MIN_UPDATE_MS) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            lastUpdateTs = performance.now();
+            updateLayout();
+          });
+          return;
+        }
+
         rafId = null;
+        lastUpdateTs = now;
         updateLayout();
       });
     };
@@ -327,8 +363,9 @@ function SourcePlaybackControls({
   mediaType: 'video' | 'audio' | 'image';
   hasAudio: boolean;
 }) {
+  const clock = useClock();
   const player = usePlayer(durationInFrames);
-  const { frame, playing } = useBridgedTimelineContext();
+  const playing = useClockIsPlaying();
   const lastFrame = Math.max(0, durationInFrames - 1);
   const tracks = useItemsStore((s) => s.tracks);
   const activeTrackId = useSelectionStore((s) => s.activeTrackId);
@@ -336,6 +373,29 @@ function SourcePlaybackControls({
   const sourcePatchAudioEnabled = useEditorStore((s) => s.sourcePatchAudioEnabled);
   const toggleSourcePatchVideoEnabled = useEditorStore((s) => s.toggleSourcePatchVideoEnabled);
   const toggleSourcePatchAudioEnabled = useEditorStore((s) => s.toggleSourcePatchAudioEnabled);
+  const currentFrameRef = useRef(clock.currentFrame);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const currentTimeRef = useRef<HTMLSpanElement>(null);
+  const outPointRef = useRef<number | null>(useSourcePlayerStore.getState().outPoint);
+
+  const formatTime = useCallback((f: number) => {
+    const secs = f / fps;
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }, [fps]);
+
+  const updateFrameDisplay = useCallback((frame: number) => {
+    currentFrameRef.current = frame;
+    useSourcePlayerStore.getState().setCurrentSourceFrame(frame);
+    if (progressRef.current) {
+      const progress = lastFrame > 0 ? (frame / lastFrame) * 100 : 0;
+      progressRef.current.style.width = `${progress}%`;
+    }
+    if (currentTimeRef.current) {
+      currentTimeRef.current.textContent = formatTime(frame);
+    }
+  }, [formatTime, lastFrame]);
 
   // Bridge player methods into the source player store for keyboard shortcuts
   useEffect(() => {
@@ -352,10 +412,17 @@ function SourcePlaybackControls({
     };
   }, [player.toggle, player.seek, player.frameBack, player.frameForward, durationInFrames]);
 
-  // Sync current frame into source player store for Mark I/O
   useEffect(() => {
-    useSourcePlayerStore.getState().setCurrentSourceFrame(frame);
-  }, [frame]);
+    updateFrameDisplay(clock.currentFrame);
+    return clock.onFrameChange((frame) => {
+      updateFrameDisplay(frame);
+
+      if (replayingRef.current && clock.isPlaying && outPointRef.current !== null && frame >= outPointRef.current) {
+        player.pause();
+        replayingRef.current = false;
+      }
+    });
+  }, [clock, player, updateFrameDisplay]);
 
   // Consume pending seek (e.g. double-click opens clip at its In point)
   const pendingSeekFrame = useSourcePlayerStore((s) => s.pendingSeekFrame);
@@ -369,13 +436,9 @@ function SourcePlaybackControls({
   // Read I/O points from store
   const inPoint = useSourcePlayerStore((s) => s.inPoint);
   const outPoint = useSourcePlayerStore((s) => s.outPoint);
-
-  const formatTime = (f: number) => {
-    const secs = f / fps;
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  useEffect(() => {
+    outPointRef.current = outPoint;
+  }, [outPoint]);
 
   // Progress bar with drag support
   const barRef = useRef<HTMLDivElement>(null);
@@ -437,8 +500,6 @@ function SourcePlaybackControls({
     };
   }, []);
 
-  const progress = lastFrame > 0 ? (frame / lastFrame) * 100 : 0;
-
   // I/O marker positions as percentages
   const inPct = inPoint !== null && lastFrame > 0 ? (inPoint / lastFrame) * 100 : null;
   const outPct = outPoint !== null && lastFrame > 0 ? (outPoint / lastFrame) * 100 : null;
@@ -449,12 +510,12 @@ function SourcePlaybackControls({
     : null;
 
   const handleMarkIn = useCallback(() => {
-    useSourcePlayerStore.getState().setInPoint(frame);
-  }, [frame]);
+    useSourcePlayerStore.getState().setInPoint(currentFrameRef.current);
+  }, []);
 
   const handleMarkOut = useCallback(() => {
-    useSourcePlayerStore.getState().setOutPoint(frame);
-  }, [frame]);
+    useSourcePlayerStore.getState().setOutPoint(currentFrameRef.current);
+  }, []);
 
   const handleClearIO = useCallback(() => {
     useSourcePlayerStore.getState().clearInOutPoints();
@@ -464,15 +525,10 @@ function SourcePlaybackControls({
   const replayingRef = useRef(false);
 
   useEffect(() => {
-    if (!replayingRef.current || !playing) {
-      if (!playing) replayingRef.current = false;
-      return;
-    }
-    if (outPoint !== null && frame >= outPoint) {
-      player.pause();
+    if (!playing) {
       replayingRef.current = false;
     }
-  }, [frame, playing, outPoint, player]);
+  }, [playing]);
 
   const handleReplaySegment = useCallback(() => {
     const { inPoint: ip, outPoint: op } = useSourcePlayerStore.getState();
@@ -573,8 +629,9 @@ function SourcePlaybackControls({
       >
         {/* Playhead progress (bottom layer) */}
         <div
+          ref={progressRef}
           className="absolute inset-y-0 left-0 bg-primary transition-none pointer-events-none rounded-l"
-          style={{ width: `${progress}%` }}
+          style={{ width: `${lastFrame > 0 ? (clock.currentFrame / lastFrame) * 100 : 0}%` }}
         />
         {/* Shaded region between in/out points */}
         {inPct !== null && outPct !== null && (
@@ -602,7 +659,9 @@ function SourcePlaybackControls({
       {/* Transport row */}
       <div className="flex items-center justify-between">
         <span className="text-xs font-mono text-muted-foreground w-[11ch] shrink-0">
-          {formatTime(frame)} / {formatTime(lastFrame)}
+          <span ref={currentTimeRef}>{formatTime(clock.currentFrame)}</span>
+          {' / '}
+          {formatTime(lastFrame)}
         </span>
         <span className="text-xs font-mono text-primary/70 w-[7ch] shrink-0">
           {ioDuration ? `[${ioDuration}]` : ''}
