@@ -1822,11 +1822,34 @@ export const VideoPreview = memo(function VideoPreview({
     return playbackTransitionWindows.find((window) => window.startFrame === startFrame) ?? null;
   }, [playbackTransitionWindows]);
 
+  const getTransitionCooldownForWindow = useCallback((window: ResolvedTransitionWindow<TimelineItem>) => {
+    const leftOriginId = window.leftClip.originId;
+    const rightOriginId = window.rightClip.originId;
+
+    // Split/same-origin handoffs keep the primary lane alive across the exit,
+    // so extra post-overlap overlay frames just prolong the stale handoff path
+    // and can leak a visible 1-2 frame hitch.
+    if (leftOriginId && rightOriginId && leftOriginId === rightOriginId) {
+      return 0;
+    }
+
+    return playbackTransitionCooldownFrames;
+  }, [playbackTransitionCooldownFrames]);
+
   const getTransitionWindowForFrame = useCallback((frame: number) => {
     return playbackTransitionWindows.find((window) => (
-      frame >= window.startFrame && frame < window.endFrame + playbackTransitionCooldownFrames
+      frame >= window.startFrame && frame < window.endFrame + getTransitionCooldownForWindow(window)
     )) ?? null;
-  }, [playbackTransitionCooldownFrames, playbackTransitionWindows]);
+  }, [getTransitionCooldownForWindow, playbackTransitionWindows]);
+
+  const playbackTransitionOverlayWindows = useMemo(
+    () => playbackTransitionWindows.map((window) => ({
+      startFrame: window.startFrame,
+      endFrame: window.endFrame,
+      cooldownFrames: getTransitionCooldownForWindow(window),
+    })),
+    [getTransitionCooldownForWindow, playbackTransitionWindows],
+  );
   const shouldPreserveHighFidelityBackwardPreview = useCallback((frame: number | null) => {
     if (frame === null) return false;
     if (getTransitionWindowForFrame(frame) !== null) {
@@ -2834,7 +2857,7 @@ export const VideoPreview = memo(function VideoPreview({
 
     const getPlaybackTransitionStateForFrame = (frame: number) => (
       resolvePlaybackTransitionOverlayState(
-        playbackTransitionWindows,
+        playbackTransitionOverlayWindows,
         frame,
         playbackTransitionLookaheadFrames,
         playbackTransitionCooldownFrames,

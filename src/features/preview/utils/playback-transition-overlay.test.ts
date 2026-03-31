@@ -57,6 +57,17 @@ describe('resolvePlaybackTransitionOverlayState', () => {
     });
   });
 
+  it('allows a transition window to override the shared cooldown', () => {
+    expect(resolvePlaybackTransitionOverlayState([
+      { startFrame: 40, endFrame: 60, cooldownFrames: 0 },
+    ], 61, 8, 3)).toEqual({
+      hasActiveTransition: false,
+      shouldHoldOverlay: false,
+      shouldPrewarm: false,
+      nextTransitionStartFrame: null,
+    });
+  });
+
   it('handles multiple transition windows', () => {
     const windows = [
       { startFrame: 100, endFrame: 200 },
