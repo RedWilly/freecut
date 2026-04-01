@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { GizmoState, GizmoHandle, Transform, Point } from '../types/gizmo';
 import type { ItemEffect } from '@/types/effects';
+import type { CropSettings } from '@/types/transform';
 import { calculateTransform } from '../utils/transform-calculations';
 import { applySnapping, applyScaleSnapping, type SnapLine } from '../utils/canvas-snap-utils';
 
@@ -8,6 +9,7 @@ import { applySnapping, applyScaleSnapping, type SnapLine } from '../utils/canva
 export interface ItemPropertiesPreview {
   fadeIn?: number;
   fadeOut?: number;
+  crop?: CropSettings;
   // Audio properties
   volume?: number;
   audioFadeIn?: number;

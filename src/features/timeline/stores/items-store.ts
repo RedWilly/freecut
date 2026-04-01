@@ -10,6 +10,7 @@ import { useCompositionNavigationStore } from './composition-navigation-store';
 import { useTimelineSettingsStore } from './timeline-settings-store';
 import { useTransitionsStore } from './transitions-store';
 import { clampAudioFadeCurve, clampAudioFadeCurveX } from '@/shared/utils/audio-fade-curve';
+import { normalizeCropSettings } from '@/shared/utils/media-crop';
 
 function getLog() { return createLogger('ItemsStore'); }
 
@@ -44,6 +45,7 @@ function normalizeFrameFields<T extends TimelineItem>(item: T): T {
     sourceEnd: roundOptionalFrame(item.sourceEnd),
     sourceDuration: roundOptionalFrame(item.sourceDuration),
     sourceFps: normalizeOptionalFps(item.sourceFps),
+    crop: normalizeCropSettings(item.crop),
     audioFadeInCurve: item.audioFadeInCurve === undefined ? undefined : clampAudioFadeCurve(item.audioFadeInCurve),
     audioFadeOutCurve: item.audioFadeOutCurve === undefined ? undefined : clampAudioFadeCurve(item.audioFadeOutCurve),
     audioFadeInCurveX: item.audioFadeInCurveX === undefined ? undefined : clampAudioFadeCurveX(item.audioFadeInCurveX),
@@ -73,6 +75,7 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   if (normalized.sourceEnd !== undefined) normalized.sourceEnd = roundFrame(normalized.sourceEnd);
   if (normalized.sourceDuration !== undefined) normalized.sourceDuration = roundFrame(normalized.sourceDuration);
   if (normalized.sourceFps !== undefined) normalized.sourceFps = normalizeOptionalFps(normalized.sourceFps);
+  if (normalized.crop !== undefined) normalized.crop = normalizeCropSettings(normalized.crop);
 
   // Keep legacy end-only bounds explicit and stable.
   if (normalized.sourceEnd !== undefined &&

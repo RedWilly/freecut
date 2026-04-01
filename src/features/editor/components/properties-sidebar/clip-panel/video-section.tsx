@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { Video, RotateCcw } from 'lucide-react';
+import { Crop, RotateCcw, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { TimelineItem, VideoItem, AudioItem } from '@/types/timeline';
 import { useTimelineStore } from '@/features/editor/deps/timeline-store';
@@ -12,18 +12,51 @@ import {
   SliderInput,
 } from '../components';
 import { getMixedValue } from '../utils';
+import { cropPixelsToRatio, cropRatioToPixels, normalizeCropSettings } from '@/shared/utils/media-crop';
 
 // Speed limits (matching rate-stretch)
 const MIN_SPEED = 0.1;
 const MAX_SPEED = 10.0;
+const CROP_STEP = 0.1;
+const CROP_TOLERANCE = 0.01;
 
 interface VideoSectionProps {
   items: TimelineItem[];
 }
 
+type CropEdge = 'left' | 'right' | 'top' | 'bottom';
+
+function getSourceWidth(item: VideoItem): number {
+  return Math.max(1, item.sourceWidth ?? item.transform?.width ?? 1920);
+}
+
+function getSourceHeight(item: VideoItem): number {
+  return Math.max(1, item.sourceHeight ?? item.transform?.height ?? 1080);
+}
+
+function getCropPixels(item: VideoItem, edge: CropEdge): number {
+  const dimension = edge === 'left' || edge === 'right'
+    ? getSourceWidth(item)
+    : getSourceHeight(item);
+  return cropRatioToPixels(item.crop?.[edge], dimension);
+}
+
+function buildCropUpdate(item: VideoItem, edge: CropEdge, pixels: number) {
+  const dimension = edge === 'left' || edge === 'right'
+    ? getSourceWidth(item)
+    : getSourceHeight(item);
+  return normalizeCropSettings({
+    ...item.crop,
+    [edge]: cropPixelsToRatio(pixels, dimension),
+  });
+}
+
+function formatCropValue(value: number): string {
+  return value.toFixed(3);
+}
+
 /**
- * Video section - playback rate and video fades.
- * Only shown when selection includes video clips.
+ * Video section - playback rate, video fades, and edge crop.
  *
  * Speed changes affect clip duration (rate stretch behavior):
  * - Faster speed = shorter clip (same content plays faster)
@@ -33,7 +66,7 @@ export function VideoSection({ items }: VideoSectionProps) {
   const rateStretchItem = useTimelineStore((s: TimelineState & TimelineActions) => s.rateStretchItem);
   const updateItem = useTimelineStore((s: TimelineState & TimelineActions) => s.updateItem);
 
-  // Gizmo store for live fade preview
+  // Gizmo store for live previews
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew);
   const clearPreview = useGizmoStore((s) => s.clearPreview);
 
@@ -42,7 +75,7 @@ export function VideoSection({ items }: VideoSectionProps) {
     [items]
   );
 
-  // Memoize video item IDs for fade controls (video-only)
+  // Memoize video item IDs for fade/crop controls (video-only)
   const itemIds = useMemo(() => videoItems.map((item) => item.id), [videoItems]);
 
   // Memoize IDs for rate-stretch: includes audio items too so detached audio tracks
@@ -58,6 +91,19 @@ export function VideoSection({ items }: VideoSectionProps) {
   const speed = getMixedValue(videoItems, (item) => item.speed, 1);
   const fadeIn = getMixedValue(videoItems, (item) => item.fadeIn, 0);
   const fadeOut = getMixedValue(videoItems, (item) => item.fadeOut, 0);
+  const cropLeft = getMixedValue(videoItems, (item) => getCropPixels(item, 'left'), 0);
+  const cropRight = getMixedValue(videoItems, (item) => getCropPixels(item, 'right'), 0);
+  const cropTop = getMixedValue(videoItems, (item) => getCropPixels(item, 'top'), 0);
+  const cropBottom = getMixedValue(videoItems, (item) => getCropPixels(item, 'bottom'), 0);
+
+  const maxSourceWidth = useMemo(
+    () => Math.max(1, ...videoItems.map(getSourceWidth)),
+    [videoItems]
+  );
+  const maxSourceHeight = useMemo(
+    () => Math.max(1, ...videoItems.map(getSourceHeight)),
+    [videoItems]
+  );
 
   // Handle speed change - uses rate stretch to adjust duration
   // Read current values from store to avoid depending on videoItems
@@ -82,8 +128,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             item.sourceEnd !== undefined && item.sourceStart !== undefined
               ? item.sourceEnd - item.sourceStart
               : timelineToSourceFrames(item.durationInFrames, currentSpeed, fps, sourceFps);
-          // Calculate new duration based on new speed — FPS-aware conversion so
-          // 23.981fps source clips get the correct timeline duration.
+          // Calculate new duration based on new speed using FPS-aware conversion.
           const newDuration = Math.max(1, sourceToTimelineFrames(effectiveSourceFrames, clampedSpeed, sourceFps, fps));
           // Keep start position the same (stretch from end)
           rateStretchItem(item.id, item.from, newDuration, clampedSpeed);
@@ -91,6 +136,10 @@ export function VideoSection({ items }: VideoSectionProps) {
     },
     [rateStretchableIds, rateStretchItem]
   );
+
+  const commitPreviewClear = useCallback(() => {
+    queueMicrotask(() => clearPreview());
+  }, [clearPreview]);
 
   // Live preview for fade in (during drag)
   const handleFadeInLiveChange = useCallback(
@@ -108,9 +157,9 @@ export function VideoSection({ items }: VideoSectionProps) {
   const handleFadeInChange = useCallback(
     (value: number) => {
       itemIds.forEach((id) => updateItem(id, { fadeIn: value }));
-      queueMicrotask(() => clearPreview());
+      commitPreviewClear();
     },
-    [itemIds, updateItem, clearPreview]
+    [itemIds, updateItem, commitPreviewClear]
   );
 
   // Live preview for fade out (during drag)
@@ -129,12 +178,54 @@ export function VideoSection({ items }: VideoSectionProps) {
   const handleFadeOutChange = useCallback(
     (value: number) => {
       itemIds.forEach((id) => updateItem(id, { fadeOut: value }));
-      queueMicrotask(() => clearPreview());
+      commitPreviewClear();
     },
-    [itemIds, updateItem, clearPreview]
+    [itemIds, updateItem, commitPreviewClear]
   );
 
-  // Reset speed to 1x — pushes subsequent clips right to avoid overlaps
+  const previewCropEdge = useCallback(
+    (edge: CropEdge, pixels: number) => {
+      const previews: Record<string, { crop: VideoItem['crop'] }> = {};
+      videoItems.forEach((item) => {
+        previews[item.id] = {
+          crop: buildCropUpdate(item, edge, pixels),
+        };
+      });
+      setPropertiesPreviewNew(previews);
+    },
+    [setPropertiesPreviewNew, videoItems]
+  );
+
+  const commitCropEdge = useCallback(
+    (edge: CropEdge, pixels: number) => {
+      videoItems.forEach((item) => {
+        updateItem(item.id, {
+          crop: buildCropUpdate(item, edge, pixels),
+        });
+      });
+      commitPreviewClear();
+    },
+    [videoItems, updateItem, commitPreviewClear]
+  );
+
+  const resetCropEdge = useCallback(
+    (edge: CropEdge) => {
+      const needsUpdate = videoItems.some((item) => getCropPixels(item, edge) > CROP_TOLERANCE);
+      if (!needsUpdate) return;
+
+      videoItems.forEach((item) => {
+        updateItem(item.id, {
+          crop: normalizeCropSettings({
+            ...item.crop,
+            [edge]: 0,
+          }),
+        });
+      });
+    },
+    [updateItem, videoItems]
+  );
+
+  // Reset speed to 1x - pushes subsequent clips right to avoid overlaps
   const resetSpeedWithRipple = useTimelineStore((s: TimelineState & TimelineActions) => s.resetSpeedWithRipple);
   const handleResetSpeed = useCallback(() => {
     resetSpeedWithRipple(rateStretchableIds);
@@ -167,80 +258,187 @@ export function VideoSection({ items }: VideoSectionProps) {
   if (videoItems.length === 0) return null;
 
   return (
-    <PropertySection title="Video" icon={Video} defaultOpen={true}>
-      {/* Playback Rate - affects clip duration */}
-      <PropertyRow label="Speed">
-        <div className="flex items-center gap-1 w-full">
-          <SliderInput
-            value={speed}
-            onChange={handleSpeedChange}
-            min={MIN_SPEED}
-            max={MAX_SPEED}
-            step={0.01}
-            unit="x"
-            className="flex-1 min-w-0"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 flex-shrink-0"
-            onClick={handleResetSpeed}
-            title="Reset to 1x"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      </PropertyRow>
+    <>
+      <PropertySection title="Video" icon={Video} defaultOpen={true}>
+        {/* Playback Rate - affects clip duration */}
+        <PropertyRow label="Speed">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={speed}
+              onChange={handleSpeedChange}
+              min={MIN_SPEED}
+              max={MAX_SPEED}
+              step={0.01}
+              unit="x"
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={handleResetSpeed}
+              title="Reset to 1x"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
 
-      {/* Video Fades */}
-      <PropertyRow label="Fade In">
-        <div className="flex items-center gap-1 w-full">
-          <SliderInput
-            value={fadeIn}
-            onChange={handleFadeInChange}
-            onLiveChange={handleFadeInLiveChange}
-            min={0}
-            max={5}
-            step={0.1}
-            unit="s"
-            className="flex-1 min-w-0"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 flex-shrink-0"
-            onClick={handleResetFadeIn}
-            title="Reset to 0"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      </PropertyRow>
+        {/* Video Fades */}
+        <PropertyRow label="Fade In">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={fadeIn}
+              onChange={handleFadeInChange}
+              onLiveChange={handleFadeInLiveChange}
+              min={0}
+              max={5}
+              step={0.1}
+              unit="s"
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={handleResetFadeIn}
+              title="Reset to 0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
 
-      <PropertyRow label="Fade Out">
-        <div className="flex items-center gap-1 w-full">
-          <SliderInput
-            value={fadeOut}
-            onChange={handleFadeOutChange}
-            onLiveChange={handleFadeOutLiveChange}
-            min={0}
-            max={5}
-            step={0.1}
-            unit="s"
-            className="flex-1 min-w-0"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 flex-shrink-0"
-            onClick={handleResetFadeOut}
-            title="Reset to 0"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      </PropertyRow>
-    </PropertySection>
+        <PropertyRow label="Fade Out">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={fadeOut}
+              onChange={handleFadeOutChange}
+              onLiveChange={handleFadeOutLiveChange}
+              min={0}
+              max={5}
+              step={0.1}
+              unit="s"
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={handleResetFadeOut}
+              title="Reset to 0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
+      </PropertySection>
+
+      <PropertySection title="Cropping" icon={Crop} defaultOpen={true}>
+        <PropertyRow label="Crop Left">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={cropLeft}
+              onChange={(value) => commitCropEdge('left', value)}
+              onLiveChange={(value) => previewCropEdge('left', value)}
+              min={0}
+              max={maxSourceWidth}
+              step={CROP_STEP}
+              unit="px"
+              formatValue={formatCropValue}
+              formatInputValue={formatCropValue}
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={() => resetCropEdge('left')}
+              title="Reset left crop"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
+
+        <PropertyRow label="Crop Right">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={cropRight}
+              onChange={(value) => commitCropEdge('right', value)}
+              onLiveChange={(value) => previewCropEdge('right', value)}
+              min={0}
+              max={maxSourceWidth}
+              step={CROP_STEP}
+              unit="px"
+              formatValue={formatCropValue}
+              formatInputValue={formatCropValue}
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={() => resetCropEdge('right')}
+              title="Reset right crop"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
+
+        <PropertyRow label="Crop Top">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={cropTop}
+              onChange={(value) => commitCropEdge('top', value)}
+              onLiveChange={(value) => previewCropEdge('top', value)}
+              min={0}
+              max={maxSourceHeight}
+              step={CROP_STEP}
+              unit="px"
+              formatValue={formatCropValue}
+              formatInputValue={formatCropValue}
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={() => resetCropEdge('top')}
+              title="Reset top crop"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
+
+        <PropertyRow label="Crop Bottom">
+          <div className="flex items-center gap-1 w-full">
+            <SliderInput
+              value={cropBottom}
+              onChange={(value) => commitCropEdge('bottom', value)}
+              onLiveChange={(value) => previewCropEdge('bottom', value)}
+              min={0}
+              max={maxSourceHeight}
+              step={CROP_STEP}
+              unit="px"
+              formatValue={formatCropValue}
+              formatInputValue={formatCropValue}
+              className="flex-1 min-w-0"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              onClick={() => resetCropEdge('bottom')}
+              title="Reset bottom crop"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </PropertyRow>
+      </PropertySection>
+    </>
   );
 }
-

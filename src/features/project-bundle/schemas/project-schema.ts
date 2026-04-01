@@ -260,6 +260,13 @@ const transformSchema = z.object({
   aspectRatioLocked: z.boolean().optional(),
 });
 
+const cropSchema = z.object({
+  left: z.number().min(0).max(1).optional(),
+  right: z.number().min(0).max(1).optional(),
+  top: z.number().min(0).max(1).optional(),
+  bottom: z.number().min(0).max(1).optional(),
+});
+
 const cornerPinSchema = z.object({
   topLeft: z.tuple([z.number(), z.number()]),
   topRight: z.tuple([z.number(), z.number()]),
@@ -326,6 +333,7 @@ const timelineItemSchema = z.object({
   sourceHeight: z.number().optional(),
   // Transform
   transform: transformSchema.optional(),
+  crop: cropSchema.optional(),
   // Audio properties
   volume: z.number().min(-60).max(12).optional(),
   audioFadeIn: z.number().min(0).optional(),

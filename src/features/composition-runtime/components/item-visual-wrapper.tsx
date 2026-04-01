@@ -9,10 +9,18 @@ import {
   renderSvgMaskPathsToDataUrl,
 } from '../utils/clip-mask-raster';
 import type { MaskInfo } from './item';
+import type { CropSettings } from '@/types/transform';
+import { ContainedMediaLayout } from './contained-media-layout';
 
 interface ItemVisualWrapperProps {
   item: TimelineItem;
   masks?: MaskInfo[];
+  mediaContent?: {
+    fitMode: 'contain';
+    sourceWidth?: number;
+    sourceHeight?: number;
+    crop?: CropSettings;
+  };
   children: React.ReactNode;
 }
 
@@ -32,6 +40,7 @@ interface ItemVisualWrapperProps {
 export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
   item,
   masks = [],
+  mediaContent,
   children,
 }) => {
   const { width: canvasWidth, height: canvasHeight } = useVideoConfig();
@@ -182,6 +191,20 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
     };
   }, [maskStyle, blendModeCss]);
 
+  const effectiveMediaChildren = mediaContent?.fitMode === 'contain'
+    ? (
+      <ContainedMediaLayout
+        sourceWidth={mediaContent.sourceWidth ?? state.transform.width}
+        sourceHeight={mediaContent.sourceHeight ?? state.transform.height}
+        containerWidth={state.transform.width}
+        containerHeight={state.transform.height}
+        crop={state.propertiesPreview?.crop ?? mediaContent.crop}
+      >
+        {children}
+      </ContainedMediaLayout>
+    )
+    : children;
+
   const innerContent = (
     <>
       {/* Corner Pin wrapper (only when active) */}
@@ -210,7 +233,7 @@ export const ItemVisualWrapper: React.FC<ItemVisualWrapperProps> = ({
             filter: state.cssFilter || undefined,
           }}
         >
-          {children}
+          {effectiveMediaChildren}
         </div>
       </div>
     </>

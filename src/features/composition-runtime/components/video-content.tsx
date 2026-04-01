@@ -47,6 +47,7 @@ const NativePreviewVideo: React.FC<{
   audioVolume: number;
   onError: (error: Error) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
+  fitMode?: 'contain' | 'fill';
   forceCssComposite?: boolean;
   sharedTransitionSync?: boolean;
 }> = ({
@@ -60,6 +61,7 @@ const NativePreviewVideo: React.FC<{
   audioVolume,
   onError,
   containerRef,
+  fitMode = 'contain',
   forceCssComposite = false,
   sharedTransitionSync = false,
 }) => {
@@ -306,7 +308,7 @@ const NativePreviewVideo: React.FC<{
     if (container && element.parentElement !== container) {
       element.style.width = '100%';
       element.style.height = '100%';
-      element.style.objectFit = 'contain';
+      element.style.objectFit = fitMode;
       element.style.display = 'block';
       element.style.position = 'absolute';
       element.style.top = '0';
@@ -409,7 +411,7 @@ const NativePreviewVideo: React.FC<{
     // Ongoing seeking is handled by the separate sync effect, and itemId-only
     // handoffs are handled by the registration + sync refs without tearing down
     // the element across split-boundary transitions.
-  }, [poolClipId, src, pool, containerRef, shortId, syncRegisteredVideoElement, clearRegisteredVideoElement]);
+  }, [poolClipId, src, pool, containerRef, shortId, syncRegisteredVideoElement, clearRegisteredVideoElement, fitMode]);
 
   useEffect(() => {
     const element = elementRef.current;
@@ -855,6 +857,7 @@ export const VideoContent: React.FC<{
       audioVolume={audioVolume}
       onError={handleError}
       containerRef={containerRef}
+      fitMode="fill"
       forceCssComposite={forceCssComposite}
       sharedTransitionSync={item._sharedTransitionSync === true}
     />

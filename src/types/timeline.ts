@@ -1,4 +1,4 @@
-import type { TransformProperties } from './transform';
+import type { CropSettings, TransformProperties } from './transform';
 import type { ItemEffect } from './effects';
 import type { BlendMode } from './blend-modes';
 
@@ -23,6 +23,8 @@ type BaseTimelineItem = {
   speed?: number; // Playback speed multiplier (default 1.0, range 0.1-10.0)
   // Transform properties (optional - defaults computed at render time)
   transform?: TransformProperties;
+  // Source-relative media crop (normalized edge ratios)
+  crop?: CropSettings;
   // Audio properties (for video/audio items)
   volume?: number; // Volume in dB, -60 to +12 (default: 0)
   audioFadeIn?: number; // Audio fade in duration in seconds (default: 0)

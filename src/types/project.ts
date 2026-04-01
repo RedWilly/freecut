@@ -102,6 +102,12 @@ export interface ProjectTimeline {
       cornerRadius?: number;
       aspectRatioLocked?: boolean;
     };
+    crop?: {
+      left?: number;
+      right?: number;
+      top?: number;
+      bottom?: number;
+    };
     // Audio properties
     volume?: number;
     audioFadeIn?: number;

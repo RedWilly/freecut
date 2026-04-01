@@ -26,6 +26,7 @@ import type { ItemKeyframes } from '@/types/keyframe';
 import type { ItemEffect } from '@/types/effects';
 import type { ResolvedTransform } from '@/types/transform';
 import { createLogger } from '@/shared/logging/logger';
+import { hasMediaCrop } from '@/shared/utils/media-crop';
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { resolveMediaUrl } from '@/features/export/deps/media-library';
 import { VideoSourcePool } from '@/features/export/deps/player-contract';
@@ -492,6 +493,10 @@ export async function createCompositionRenderer(
     textMeasureCache,
     renderMode,
     scrubbingCache,
+    getCurrentItemSnapshot: getCurrentItem,
+    getCurrentKeyframes,
+    getPreviewTransformOverride,
+    getPreviewCornerPinOverride,
     videoExtractors,
     videoElements,
     useMediabunny,
@@ -1304,6 +1309,7 @@ export async function createCompositionRenderer(
 
         // Corner pin warps the shape, exposing content below
         if (item.cornerPin) return false;
+        if (hasMediaCrop(item.crop)) return false;
 
         // Get animated transform at current frame
         const itemKeyframes = getCurrentKeyframes(item.id);

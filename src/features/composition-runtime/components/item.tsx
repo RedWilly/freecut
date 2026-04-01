@@ -12,6 +12,7 @@ import { ShapeContent } from './shape-content';
 import { VideoContent } from './video-content';
 import { CompositionContent } from './composition-content';
 import { useVideoConfig } from '../hooks/use-player-compat';
+import { getSourceDimensions } from '../utils/transform-resolver';
 import {
   timelineToSourceFrames,
   sourceToTimelineFrames,
@@ -74,6 +75,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
   );
 
   if (item.type === 'video') {
+    const mediaSource = getSourceDimensions(item);
     // Guard against missing src (media resolution failed)
     if (!item.src) {
       return (
@@ -202,7 +204,16 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
     // Use new ItemVisualWrapper for consolidated state and fixed DOM structure
     // resolveTransform handles defaults (fit-to-canvas) when no explicit transform is set
     return (
-      <ItemVisualWrapper item={item} masks={masks}>
+      <ItemVisualWrapper
+        item={item}
+        masks={masks}
+        mediaContent={{
+          fitMode: 'contain',
+          sourceWidth: mediaSource?.width,
+          sourceHeight: mediaSource?.height,
+          crop: item.crop,
+        }}
+      >
         {videoContent}
       </ItemVisualWrapper>
     );
@@ -266,6 +277,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
   }
 
   if (item.type === 'image') {
+    const mediaSource = getSourceDimensions(item);
     // Guard against missing src (media resolution failed)
     if (!item.src) {
       return (
@@ -289,7 +301,7 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
         <GifPlayer
           mediaId={item.mediaId}
           src={item.src}
-          fit="cover"
+          fit="fill"
           playbackRate={playbackRate}
           loopBehavior="loop"
           format={isAnimatedWebp ? 'webp' : 'gif'}
@@ -297,7 +309,16 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
       );
 
       return (
-        <ItemVisualWrapper item={item} masks={masks}>
+        <ItemVisualWrapper
+          item={item}
+          masks={masks}
+          mediaContent={{
+            fitMode: 'contain',
+            sourceWidth: mediaSource?.width,
+            sourceHeight: mediaSource?.height,
+            crop: item.crop,
+          }}
+        >
           {animatedContent}
         </ItemVisualWrapper>
       );
@@ -311,14 +332,23 @@ export const Item = React.memo<ItemProps>(({ item, muted = false, masks = [], re
         style={{
           width: '100%',
           height: '100%',
-          objectFit: 'contain'
+          objectFit: 'fill'
         }}
       />
     );
 
     // Use new ItemVisualWrapper for consolidated state and fixed DOM structure
     return (
-      <ItemVisualWrapper item={item} masks={masks}>
+      <ItemVisualWrapper
+        item={item}
+        masks={masks}
+        mediaContent={{
+          fitMode: 'contain',
+          sourceWidth: mediaSource?.width,
+          sourceHeight: mediaSource?.height,
+          crop: item.crop,
+        }}
+      >
         {imageContent}
       </ItemVisualWrapper>
     );

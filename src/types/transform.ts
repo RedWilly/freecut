@@ -23,6 +23,17 @@ export interface TransformProperties {
 }
 
 /**
+ * Edge crop values stored as normalized source ratios.
+ * Example: left=0.1 crops 10% of the source width from the left edge.
+ */
+export interface CropSettings {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
+}
+
+/**
  * Computed/resolved transform values for rendering.
  * All values are concrete numbers, no undefined.
  */

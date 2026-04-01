@@ -16,6 +16,7 @@ import type { TimelineTrack, TimelineItem, VideoItem } from '@/types/timeline';
 import type { ClientExportSettings, RenderProgress, ClientRenderResult } from './client-renderer';
 import { createOutputFormat, getMimeType } from './client-renderer';
 import { createLogger } from '@/shared/logging/logger';
+import { hasMediaCrop } from '@/shared/utils/media-crop';
 
 // Subsystems
 import { createCompositionRenderer } from './client-render-engine';
@@ -73,6 +74,7 @@ const EPSILON = 1e-6;
 
 function isIdentityTransform(item: VideoItem): boolean {
   const transform = item.transform;
+  if (hasMediaCrop(item.crop)) return false;
   if (!transform) return true;
 
   if (transform.width !== undefined || transform.height !== undefined) return false;
@@ -943,4 +945,3 @@ export async function renderAudioOnly(options: AudioRenderOptions): Promise<Clie
     fileSize: blob.size,
   };
 }
-
