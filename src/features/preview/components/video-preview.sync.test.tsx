@@ -550,7 +550,14 @@ describe('VideoPreview sync behavior', () => {
         from: 0,
         durationInFrames: 120,
         src: 'blob:mock-video',
-      } as ReturnType<typeof useItemsStore.getState>['items'][number],
+        effects: [
+          {
+            id: 'effect-1',
+            enabled: true,
+            effect: { type: 'gpu-effect', gpuEffectType: 'gpu-sepia', params: { amount: 0.5 } },
+          },
+        ],
+      } as TimelineItem,
     ]);
 
     render(

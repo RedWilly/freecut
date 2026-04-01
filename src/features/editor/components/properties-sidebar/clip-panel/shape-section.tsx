@@ -15,6 +15,7 @@ import {
   PropertySection,
   PropertyRow,
   NumberInput,
+  SliderInput,
   ColorPicker,
 } from '../components';
 
@@ -503,7 +504,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
           {sharedValues.maskType === 'alpha' && (
             <PropertyRow label="Feather">
               <div className="flex items-center gap-1 w-full">
-                <NumberInput
+                <SliderInput
                   value={sharedValues.maskFeather}
                   onChange={handleMaskFeatherChange}
                   onLiveChange={handleMaskFeatherLiveChange}
