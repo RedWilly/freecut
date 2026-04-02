@@ -124,32 +124,10 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
   // Resolve the URL to use: prefer freshly resolved blobUrl, fall back to item.src
   const resolvedSrc = blobUrl || src;
 
-  // Static image filmstrip: tile the image using CSS background-repeat
-  if (!isAnimated) {
-    if (height === 0 || !resolvedSrc) {
-      return <div ref={containerRef} className="absolute inset-0" />;
-    }
-
-    return (
-      <div ref={containerRef} className="absolute inset-0">
-        <div
-          className="absolute left-0 top-0 pointer-events-none"
-          style={{
-            width: clipWidth,
-            height,
-            backgroundImage: `url(${resolvedSrc})`,
-            backgroundRepeat: 'repeat-x',
-            backgroundSize: `${tileWidth}px ${height}px`,
-            backgroundPosition: 'left center',
-          }}
-        />
-      </div>
-    );
-  }
-
-  // Animated image filmstrip: tile extracted frames
+  // Animated image filmstrip: tile extracted frames.
+  // Must be called unconditionally (Rules of Hooks) — returns [] when not animated.
   const tiles = useMemo(() => {
-    if (!frames || frames.length === 0 || !durations || totalDuration === null || totalDuration <= 0 || height === 0) {
+    if (!isAnimated || !frames || frames.length === 0 || !durations || totalDuration === null || totalDuration <= 0 || height === 0) {
       return [];
     }
 
@@ -165,7 +143,6 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
     }
 
     // Map clip pixels to animation time, looping through the cycle.
-    // Each tile represents (tileWidth / clipWidth) of the clip's timeline duration.
     const clipDurationMs = (clipWidth / fps) * 1000 / speed;
     const result: { tileIndex: number; bitmap: ImageBitmap; x: number; width: number }[] = [];
 
@@ -195,9 +172,32 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
     }
 
     return result;
-  }, [frames, durations, totalDuration, clipWidth, tileWidth, height, speed, fps]);
+  }, [isAnimated, frames, durations, totalDuration, clipWidth, tileWidth, height, speed, fps]);
 
-  if (height === 0 || (!frames && isAnimated)) {
+  // Static image filmstrip: tile the image using CSS background-repeat
+  if (!isAnimated) {
+    if (height === 0 || !resolvedSrc) {
+      return <div ref={containerRef} className="absolute inset-0" />;
+    }
+
+    return (
+      <div ref={containerRef} className="absolute inset-0">
+        <div
+          className="absolute left-0 top-0 pointer-events-none"
+          style={{
+            width: clipWidth,
+            height,
+            backgroundImage: `url(${resolvedSrc})`,
+            backgroundRepeat: 'repeat-x',
+            backgroundSize: `${tileWidth}px ${height}px`,
+            backgroundPosition: 'left center',
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (height === 0 || !frames) {
     return <div ref={containerRef} className="absolute inset-0" />;
   }
 

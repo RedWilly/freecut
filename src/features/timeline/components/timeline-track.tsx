@@ -998,16 +998,16 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           onMouseDown={handleMouseDown}
           onContextMenu={handleContextMenu}
         >
-          {isDragOver && !track.locked && !isExternalDragOver && ghostPreviews.length === 0 && (
+          {isDragOver && !isDropDisabled && !isExternalDragOver && ghostPreviews.length === 0 && (
             <div className="absolute inset-0 pointer-events-none z-10 rounded border border-dashed border-primary/50 bg-primary/10" />
           )}
 
-          {!track.locked && ghostPreviews.length > 0 && (
+          {!isDropDisabled && ghostPreviews.length > 0 && (
             <div className={`absolute inset-0 pointer-events-none z-10 rounded border border-dashed ${ghostHighlightClasses}`} />
           )}
 
           {/* Ghost preview clips during drag */}
-          {!track.locked && ghostPreviews.map((ghost, index) => (
+          {!isDropDisabled && ghostPreviews.map((ghost, index) => (
             <div
               key={index}
               className={`absolute inset-y-0 rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 ${

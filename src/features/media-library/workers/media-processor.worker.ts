@@ -300,7 +300,7 @@ function parseSvgDimensions(svgText: string): { width: number; height: number } 
     return { width: Math.round(parseFloat(wAttr[1]!)), height: Math.round(parseFloat(hAttr[1]!)) };
   }
 
-  const vb = tag.match(/viewBox=["']\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+  const vb = tag.match(/viewBox=["']\s*(-?[\d.]+)\s+(-?[\d.]+)\s+([\d.]+)\s+([\d.]+)/);
   if (vb) {
     return { width: Math.round(parseFloat(vb[3]!)), height: Math.round(parseFloat(vb[4]!)) };
   }
