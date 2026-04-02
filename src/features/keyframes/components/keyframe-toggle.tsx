@@ -172,9 +172,11 @@ export function KeyframeToggle({
           aria-label={
             isInTransition
               ? 'Keyframes blocked (transition region)'
-              : hasKeyframe
-                ? 'Remove keyframe'
-                : 'Add keyframe'
+              : isOutsideBounds
+                ? 'Playhead outside clip bounds'
+                : hasKeyframe
+                  ? 'Remove keyframe'
+                  : 'Add keyframe'
           }
         >
           <Diamond
@@ -188,6 +190,8 @@ export function KeyframeToggle({
       <TooltipContent side="top" className="text-xs max-w-[200px]">
         {isInTransition && transitionBlockedRange ? (
           <>{getTransitionBlockedMessage(transitionBlockedRange)}</>
+        ) : isOutsideBounds ? (
+          <>Playhead is outside clip bounds</>
         ) : hasKeyframe ? (
           <>Remove keyframe at frame {relativeFrame}</>
         ) : (

@@ -12,7 +12,9 @@ import {
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '@/features/preview/deps/timeline-store';
+import { usePlaybackStore } from '@/shared/state/playback';
+import { useTimelineStore, useKeyframesStore } from '@/features/preview/deps/timeline-store';
+import { getAutoKeyframeOperation, type AutoKeyframeOperation } from '../deps/keyframes';
 import { useVisualTransforms } from '../hooks/use-visual-transform';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import type { TransformProperties } from '@/types/transform';
@@ -55,6 +57,7 @@ interface AlignmentToolbarProps {
 export function AlignmentToolbar({ projectSize }: AlignmentToolbarProps) {
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
   const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap);
+  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations);
 
   const visualItems = useTimelineStore(
     useShallow((s) =>
@@ -141,10 +144,42 @@ export function AlignmentToolbar({ projectSize }: AlignmentToolbarProps) {
       }
     }
 
-    if (updates.size > 0) {
-      updateItemsTransformMap(updates, { operation: 'move' });
+    if (updates.size === 0) return;
+
+    // Split updates into keyframe operations and base transform updates
+    const currentFrame = usePlaybackStore.getState().currentFrame;
+    const autoOps: AutoKeyframeOperation[] = [];
+    const baseUpdates = new Map<string, Partial<TransformProperties>>();
+
+    for (const [itemId, props] of updates) {
+      const item = selectedVisualItems.find((i) => i.id === itemId);
+      if (!item) continue;
+
+      const itemKeyframes = useKeyframesStore.getState().keyframesByItemId[itemId];
+      const baseProps: Partial<TransformProperties> = {};
+
+      for (const axis of ['x', 'y'] as const) {
+        if (props[axis] === undefined) continue;
+        const op = getAutoKeyframeOperation(item, itemKeyframes, axis, props[axis], currentFrame);
+        if (op) {
+          autoOps.push(op);
+        } else {
+          baseProps[axis] = props[axis];
+        }
+      }
+
+      if (Object.keys(baseProps).length > 0) {
+        baseUpdates.set(itemId, baseProps);
+      }
     }
-  }, [selectedVisualItems, visualTransformsMap, projectSize, updateItemsTransformMap]);
+
+    if (autoOps.length > 0) {
+      applyAutoKeyframeOperations(autoOps);
+    }
+    if (baseUpdates.size > 0) {
+      updateItemsTransformMap(baseUpdates, { operation: 'move' });
+    }
+  }, [selectedVisualItems, visualTransformsMap, projectSize, updateItemsTransformMap, applyAutoKeyframeOperations]);
 
   if (itemCount < 1) return null;
 

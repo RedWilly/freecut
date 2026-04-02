@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { Search } from 'lucide-react';
+import { ZoomIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -41,7 +41,7 @@ export function PreviewZoomControls() {
             if (e.key === ' ' || e.code === 'Space') e.preventDefault();
           }}
         >
-          <Search className="w-3.5 h-3.5" />
+          <ZoomIn className="w-3.5 h-3.5" />
           <span className="text-[10px] leading-none">{currentLabel}</span>
         </Button>
       </DropdownMenuTrigger>

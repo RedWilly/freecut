@@ -46,7 +46,6 @@ function computeItemTypeInfo(items: TimelineItem[]) {
     hasTextItems: types.has('text'),
     hasShapeItems: types.has('shape'),
     hasAdjustmentItems: types.has('adjustment'),
-    isOnlyAdjustmentItems: types.size === 1 && types.has('adjustment'),
     isOnlyTextOrShape: items.length > 0 && items.every(
       item => item.type === 'text' || item.type === 'shape'
     ),
@@ -109,7 +108,6 @@ export const ClipPanel = memo(function ClipPanel() {
     hasTextItems,
     hasShapeItems,
     hasAdjustmentItems,
-    isOnlyAdjustmentItems,
     isOnlyTextOrShape,
   } = itemTypeInfo;
 
@@ -157,7 +155,7 @@ export const ClipPanel = memo(function ClipPanel() {
   );
 
   // Determine which categories should be visible
-  const showVideoTab = hasVisualItems && !isOnlyAdjustmentItems;
+  const showVideoTab = layoutFillItems.length > 0;
   const showAudioTab = hasAudioItems;
   const showEffectsTab = hasVisualItems;
 
@@ -222,7 +220,7 @@ export const ClipPanel = memo(function ClipPanel() {
         <TabsContent value="video" className="mt-3">
           {showVideoTab && (
             <div className="divide-y divide-border [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
-              {hasVisualItems && !isOnlyAdjustmentItems && (
+              {showVideoTab && (
                 <LayoutSection
                   items={layoutFillItems}
                   canvas={canvas}
@@ -232,14 +230,14 @@ export const ClipPanel = memo(function ClipPanel() {
                 />
               )}
               {hasVideoItems && <VideoSection items={selectedItems} />}
-              {hasVisualItems && !isOnlyAdjustmentItems && (
+              {showVideoTab && (
                 <FillSection
                   items={layoutFillItems}
                   canvas={canvas}
                   onTransformChange={handleTransformChange}
                 />
               )}
-              {hasVisualItems && !isOnlyAdjustmentItems && (
+              {showVideoTab && (
                 <CornerPinSection items={layoutFillItems} />
               )}
               {hasTextItems && (
