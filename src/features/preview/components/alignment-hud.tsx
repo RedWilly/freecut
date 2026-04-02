@@ -89,14 +89,22 @@ export function AlignmentToolbar({ projectSize }: AlignmentToolbarProps) {
     if (alignment === 'distribute-h' || alignment === 'distribute-v') {
       if (entries.length < 3) return;
       const axis = alignment === 'distribute-h' ? 'x' : 'y';
+      const size = axis === 'x' ? 'width' : 'height';
       const sorted = [...entries].sort((a, b) => a[axis] - b[axis]);
       const first = sorted[0]!;
       const last = sorted[sorted.length - 1]!;
-      const step = (last[axis] - first[axis]) / (sorted.length - 1);
 
+      // Distribute gaps evenly between item edges, not centers
+      const spanStart = first[axis] - first[size] / 2;
+      const spanEnd = last[axis] + last[size] / 2;
+      const totalItemSize = sorted.reduce((sum, e) => sum + e[size], 0);
+      const gap = (spanEnd - spanStart - totalItemSize) / (sorted.length - 1);
+
+      let cursor = spanStart + first[size];
       for (let index = 1; index < sorted.length - 1; index += 1) {
         const entry = sorted[index]!;
-        const target = first[axis] + step * index;
+        const target = cursor + gap + entry[size] / 2;
+        cursor = target + entry[size] / 2;
         if (Math.abs(target - entry[axis]) <= tolerance) continue;
         updates.set(entry.id, axis === 'x' ? { x: target } : { y: target });
       }

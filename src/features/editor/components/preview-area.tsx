@@ -608,8 +608,8 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
                   </div>
                 </div>
 
-                <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-                  <div className="flex items-center gap-0">
+                <div className="ml-auto flex items-center gap-2 flex-shrink-0 overflow-hidden">
+                  <div className="flex items-center gap-0 overflow-x-auto">
                     <AlignmentToolbar projectSize={{ width, height }} />
                   </div>
                   <PreviewZoomControls />

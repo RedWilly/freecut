@@ -37,9 +37,8 @@ export function PreviewZoomControls() {
         <Button
           ref={triggerRef}
           variant="ghost"
-          size="icon"
-          className="flex-shrink-0 text-muted-foreground hover:text-foreground"
-          style={BUTTON_STYLE}
+          className="flex-shrink-0 text-muted-foreground hover:text-foreground gap-1 px-1.5"
+          style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlButtonSize }}
           data-tooltip={`Zoom: ${currentLabel}`}
           aria-label={`Preview zoom: ${currentLabel}`}
           onKeyDown={(e) => {
@@ -47,7 +46,8 @@ export function PreviewZoomControls() {
             if (e.key === ' ' || e.code === 'Space') e.preventDefault();
           }}
         >
-          <Search className="w-4 h-4" />
+          <Search className="w-3.5 h-3.5" />
+          <span className="text-[10px] leading-none">{currentLabel}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
