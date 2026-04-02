@@ -55,6 +55,34 @@ function buildCompoundWrapperSourceFields(composition: SubComposition) {
   };
 }
 
+function expandSelectionWithCompoundClipCompanions(
+  items: TimelineItem[],
+  selectedIds: readonly string[],
+): string[] {
+  const expandedIds = new Set(selectedIds);
+
+  for (const item of items) {
+    if (!expandedIds.has(item.id)) continue;
+
+    if (item.type === 'composition') {
+      const companion = getLinkedCompositionAudioCompanion(items, item);
+      if (companion) {
+        expandedIds.add(companion.id);
+      }
+      continue;
+    }
+
+    if (isCompositionAudioItem(item)) {
+      const companion = getLinkedCompositionVisualCompanion(items, item);
+      if (companion) {
+        expandedIds.add(companion.id);
+      }
+    }
+  }
+
+  return Array.from(expandedIds);
+}
+
 type TimelineSnapshotLike = {
   items: TimelineItem[];
   tracks: TimelineTrack[];
@@ -427,9 +455,10 @@ export function createPreComp(name?: string, itemIds?: string[]): TimelineItem |
     const { fps } = useTimelineSettingsStore.getState();
     const requestedIds = itemIds ?? useSelectionStore.getState().selectedItemIds;
     const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
-    const selectedIds = linkedSelectionEnabled
+    const baseSelectedIds = linkedSelectionEnabled
       ? expandSelectionWithLinkedItems(items, requestedIds)
       : Array.from(new Set(requestedIds));
+    const selectedIds = expandSelectionWithCompoundClipCompanions(items, baseSelectedIds);
 
     if (selectedIds.length === 0) return null;
 
@@ -867,14 +896,8 @@ export function dissolvePreComp(compositionItemId: string): boolean {
       useKeyframesStore.getState().setKeyframes([...currentKeyframes, ...restoredKeyframes]);
     }
 
-    // Check if composition is still referenced by other items
-    const remainingRefs = useItemsStore.getState().items.filter(
-      (item) => item.compositionId === compositionId
-        && (item.type === 'composition' || isCompositionAudioItem(item))
-    );
-
-    // Only remove the sub-composition if no other items reference it
-    if (remainingRefs.length === 0) {
+    // Only remove the compound definition when nothing else in the project references it.
+    if (getCompoundClipDeletionImpact([compositionId]).totalReferenceCount === 0) {
       useCompositionsStore.getState().removeComposition(compositionId);
     }
 

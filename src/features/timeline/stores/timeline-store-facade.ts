@@ -54,7 +54,7 @@ import {
 } from '@/features/timeline/deps/export-contract';
 import { resolveMediaUrls } from '@/features/timeline/deps/media-library-resolver';
 import { mediaLibraryService } from '@/features/timeline/deps/media-library-service';
-import { validateMediaReferences } from '@/features/timeline/utils/media-validation';
+import { validateProjectMediaReferences } from '@/features/timeline/utils/media-validation';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import { migrateProject, CURRENT_SCHEMA_VERSION } from '@/domain/projects/migrations';
 import {
@@ -533,6 +533,7 @@ async function saveTimeline(projectId: string): Promise<void> {
     .map((breadcrumb) => ({
       compositionId: breadcrumb.compositionId!,
       label: breadcrumb.label,
+      entryItemId: breadcrumb.entryItemId,
     }));
   if (previousBreadcrumbs.length > 0) {
     navStore.resetToRoot();
@@ -540,7 +541,11 @@ async function saveTimeline(projectId: string): Promise<void> {
 
   const restoreCompositionPath = () => {
     for (const breadcrumb of previousBreadcrumbs) {
-      useCompositionNavigationStore.getState().enterComposition(breadcrumb.compositionId, breadcrumb.label);
+      useCompositionNavigationStore.getState().enterComposition(
+        breadcrumb.compositionId,
+        breadcrumb.label,
+        breadcrumb.entryItemId,
+      );
     }
   };
 
@@ -882,7 +887,11 @@ async function loadTimeline(
 
     // Validate media references after loading timeline
     const loadedItems = useItemsStore.getState().items;
-    const orphans = await validateMediaReferences(loadedItems, projectId);
+    const orphans = await validateProjectMediaReferences({
+      rootItems: loadedItems,
+      compositions: useCompositionsStore.getState().compositions,
+      projectId,
+    });
     if (orphans.length > 0) {
       logger.warn(`Found ${orphans.length} orphaned clip(s) referencing deleted media`);
       useMediaLibraryStore.getState().setOrphanedClips(orphans);

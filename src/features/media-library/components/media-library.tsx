@@ -40,8 +40,9 @@ import { useFilteredMediaItems, useMediaLibraryStore } from '../stores/media-lib
 import {
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
+  getMediaDeletionImpact,
+  removeProjectItems,
   useCompositionsStore,
-  useTimelineStore,
   useCompositionNavigationStore,
 } from '@/features/media-library/deps/timeline-stores';
 import { useProjectStore } from '@/features/media-library/deps/projects';
@@ -87,10 +88,6 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const [infoPanelDismissed, setInfoPanelDismissed] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
-
-  // Timeline store selectors - don't subscribe to items to avoid re-renders
-  // Read items from store directly when needed (in delete handler)
-  const removeTimelineItems = useTimelineStore((s) => s.removeItems);
 
   // Store selectors
   const currentProjectId = useMediaLibraryStore((s) => s.currentProjectId);
@@ -439,21 +436,17 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     return parts.join(' and ');
   }, [pendingDeletion.compositionIds.length, pendingDeletion.mediaIds.length]);
 
-  // Read from stores directly to avoid subscribing to timeline items array
-  const affectedTimelineItems = useMemo(() => {
-    if (pendingDeletion.mediaIds.length === 0) return [];
-    const timelineItems = useTimelineStore.getState().items;
-    return timelineItems.filter(
-      (item) =>
-        (item.mediaId && pendingDeletion.mediaIds.includes(item.mediaId))
-    );
-  }, [pendingDeletion]);
+  const affectedMediaImpact = useMemo(() => (
+    pendingDeletion.mediaIds.length > 0
+      ? getMediaDeletionImpact(pendingDeletion.mediaIds)
+      : { itemIds: [], rootReferenceCount: 0, nestedReferenceCount: 0, totalReferenceCount: 0 }
+  ), [pendingDeletion.mediaIds]);
   const compoundClipDeleteImpact = useMemo(() => (
     pendingDeletion.compositionIds.length > 0
       ? getCompoundClipDeletionImpact(pendingDeletion.compositionIds)
       : { rootReferenceCount: 0, nestedReferenceCount: 0, totalReferenceCount: 0 }
   ), [pendingDeletion.compositionIds]);
-  const affectedAssetInstanceCount = affectedTimelineItems.length + compoundClipDeleteImpact.totalReferenceCount;
+  const affectedAssetInstanceCount = affectedMediaImpact.totalReferenceCount + compoundClipDeleteImpact.totalReferenceCount;
 
   const handleDeleteSelected = () => {
     if (selectedAssetCount === 0) return;
@@ -469,9 +462,8 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     setShowDeleteDialog(false);
     try {
       // First remove timeline items that reference selected library assets
-      if (affectedTimelineItems.length > 0) {
-        const timelineItemIds = affectedTimelineItems.map((item) => item.id);
-        removeTimelineItems(timelineItemIds);
+      if (affectedMediaImpact.itemIds.length > 0) {
+        removeProjectItems(affectedMediaImpact.itemIds);
       }
 
       if (pendingDeletion.mediaIds.length > 0) {

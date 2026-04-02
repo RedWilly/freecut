@@ -17,8 +17,11 @@ export { wouldCreateCompositionCycle } from '../utils/composition-graph';
 export {
   deleteCompoundClips,
   getCompoundClipDeletionImpact,
+  getMediaDeletionImpact,
+  removeProjectItems,
   removeItems,
   renameCompoundClip,
+  updateProjectItem,
   updateItem,
 } from '../stores/timeline-actions';
 export {

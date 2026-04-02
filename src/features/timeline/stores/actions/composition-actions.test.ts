@@ -9,6 +9,7 @@ import { useTimelineCommandStore } from '../timeline-command-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
 import { useCompositionsStore } from '../compositions-store';
 import { useCompositionNavigationStore } from '../composition-navigation-store';
+import { useEditorStore } from '@/shared/state/editor';
 import {
   createPreComp,
   deleteCompoundClips,
@@ -80,6 +81,7 @@ describe('composition-actions split wrappers', () => {
     useCompositionNavigationStore.getState().resetToRoot();
     useSelectionStore.getState().clearSelection();
     useTimelineSettingsStore.getState().setFps(30);
+    useEditorStore.setState({ linkedSelectionEnabled: true });
     useProjectStore.getState().setCurrentProject({
       id: 'project-1',
       name: 'Project',
@@ -239,6 +241,58 @@ describe('composition-actions split wrappers', () => {
     expect(restoredIds.has(restoredTransitions[0]!.rightClipId)).toBe(true);
   });
 
+  it('keeps a shared compound definition when dissolving one instance and another still exists', () => {
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'comp-a-first',
+        type: 'composition',
+        trackId: 'track-v1',
+        from: 0,
+        durationInFrames: 60,
+        label: 'Comp A',
+        compositionId: 'comp-a',
+        compositionWidth: 1920,
+        compositionHeight: 1080,
+        transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+      },
+      {
+        id: 'comp-a-second',
+        type: 'composition',
+        trackId: 'track-v1',
+        from: 80,
+        durationInFrames: 60,
+        label: 'Comp A',
+        compositionId: 'comp-a',
+        compositionWidth: 1920,
+        compositionHeight: 1080,
+        transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+      },
+    ]);
+    useCompositionsStore.getState().setCompositions([
+      {
+        id: 'comp-a',
+        name: 'Comp A',
+        tracks: [makeTrack({ id: 'comp-track-v1', name: 'V1', kind: 'video', order: 0 })],
+        items: [makeVideoItem({ id: 'nested-video', trackId: 'comp-track-v1' })],
+        transitions: [],
+        keyframes: [],
+        fps: 30,
+        width: 1920,
+        height: 1080,
+        durationInFrames: 60,
+      },
+    ]);
+
+    expect(dissolvePreComp('comp-a-first')).toBe(true);
+
+    expect(useCompositionsStore.getState().getComposition('comp-a')).toBeDefined();
+    expect(useItemsStore.getState().items.some((item) => item.id === 'comp-a-second')).toBe(true);
+    expect(useItemsStore.getState().items.some((item) => item.type === 'video' && item.id !== 'comp-a-second')).toBe(true);
+  });
+
   it('creates nested compound clips while editing inside another compound clip', () => {
     useItemsStore.getState().setTracks([]);
     useItemsStore.getState().setItems([]);
@@ -291,6 +345,81 @@ describe('composition-actions split wrappers', () => {
     expect(useCompositionNavigationStore.getState().activeCompositionId).toBe('comp-parent');
     expect(useCompositionsStore.getState().compositions).toHaveLength(2);
     expect(useItemsStore.getState().items.filter((item) => item.type === 'composition')).toHaveLength(1);
+  });
+
+  it('preserves compound audio tracks when wrapping a compound clip with linked selection off', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false });
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+      makeTrack({ id: 'track-a1', name: 'A1', kind: 'audio', order: 1 }),
+    ]);
+    useItemsStore.getState().setItems([
+      {
+        id: 'comp-visual',
+        type: 'composition',
+        trackId: 'track-v1',
+        from: 0,
+        durationInFrames: 60,
+        label: 'Compound 1',
+        compositionId: 'comp-1',
+        linkedGroupId: 'linked-1',
+        compositionWidth: 1920,
+        compositionHeight: 1080,
+        transform: { x: 0, y: 0, rotation: 0, opacity: 1 },
+      },
+      {
+        id: 'comp-audio',
+        type: 'audio',
+        trackId: 'track-a1',
+        from: 0,
+        durationInFrames: 60,
+        label: 'Compound 1',
+        compositionId: 'comp-1',
+        linkedGroupId: 'linked-1',
+        src: '',
+      } satisfies AudioItem,
+    ]);
+    useCompositionsStore.getState().setCompositions([
+      {
+        id: 'comp-1',
+        name: 'Compound 1',
+        tracks: [
+          makeTrack({ id: 'comp-track-v1', name: 'V1', kind: 'video', order: 0 }),
+          makeTrack({ id: 'comp-track-a1', name: 'A1', kind: 'audio', order: 1 }),
+        ],
+        items: [
+          makeVideoItem({
+            id: 'nested-video',
+            trackId: 'comp-track-v1',
+          }),
+          makeAudioItem({
+            id: 'nested-audio',
+            trackId: 'comp-track-a1',
+          }),
+        ],
+        transitions: [],
+        keyframes: [],
+        fps: 30,
+        width: 1920,
+        height: 1080,
+        durationInFrames: 60,
+      },
+    ]);
+
+    useSelectionStore.getState().selectItems(['comp-visual']);
+
+    const created = createPreComp('Wrapped Compound');
+
+    expect(created).toMatchObject({ type: 'composition', label: 'Wrapped Compound' });
+    expect(useCompositionsStore.getState().compositions).toHaveLength(2);
+
+    const createdComposition = useCompositionsStore.getState().compositions.find((composition) => composition.id === created?.compositionId);
+    expect(createdComposition?.tracks.map((track) => `${track.name}:${track.kind}`)).toEqual([
+      'V1:video',
+      'A1:audio',
+    ]);
+    expect(createdComposition?.items.filter((item) => item.type === 'composition')).toHaveLength(1);
+    expect(createdComposition?.items.filter((item) => item.type === 'audio' && item.compositionId === 'comp-1')).toHaveLength(1);
   });
 
   it('deletes compound clips across the root timeline, nested compounds, and open editor state', () => {
