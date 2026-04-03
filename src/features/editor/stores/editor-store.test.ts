@@ -97,6 +97,9 @@ describe('editor-store', () => {
 
     useEditorStore.getState().setActiveTab('transitions');
     expect(useEditorStore.getState().activeTab).toBe('transitions');
+
+    useEditorStore.getState().setActiveTab('ai');
+    expect(useEditorStore.getState().activeTab).toBe('ai');
   });
 
   it('sets clip inspector tab', () => {

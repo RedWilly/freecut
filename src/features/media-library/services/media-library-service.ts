@@ -95,6 +95,82 @@ async function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
 
   return new Response(blob).arrayBuffer();
 }
+
+interface PersistGeneratedMediaOptions {
+  file: File;
+  projectId: string;
+  mediaMetadata: MediaMetadata;
+  thumbnailBlob?: Blob;
+  thumbnailWidth?: number;
+  thumbnailHeight?: number;
+}
+
+async function persistGeneratedMediaAsset({
+  file,
+  projectId,
+  mediaMetadata,
+  thumbnailBlob,
+  thumbnailWidth,
+  thumbnailHeight,
+}: PersistGeneratedMediaOptions): Promise<MediaMetadata> {
+  let metadataCreated = false;
+  let thumbnailSaved = false;
+
+  try {
+    if (!mediaMetadata.opfsPath) {
+      throw new Error('Generated media is missing an OPFS path.');
+    }
+
+    await opfsService.saveFile(mediaMetadata.opfsPath, await blobToArrayBuffer(file));
+
+    if (thumbnailBlob && thumbnailWidth && thumbnailHeight) {
+      const thumbnailId = crypto.randomUUID();
+
+      await saveThumbnailDB({
+        id: thumbnailId,
+        mediaId: mediaMetadata.id,
+        blob: thumbnailBlob,
+        timestamp: 0,
+        width: thumbnailWidth,
+        height: thumbnailHeight,
+      });
+
+      mediaMetadata.thumbnailId = thumbnailId;
+      thumbnailSaved = true;
+    }
+
+    await createMediaDB(mediaMetadata);
+    metadataCreated = true;
+    await associateMediaWithProject(projectId, mediaMetadata.id);
+    return mediaMetadata;
+  } catch (error) {
+    if (metadataCreated) {
+      try {
+        await deleteMediaDB(mediaMetadata.id);
+      } catch (cleanupError) {
+        logger.warn(`Failed to roll back generated media metadata ${mediaMetadata.id}:`, cleanupError);
+      }
+    }
+
+    if (thumbnailSaved) {
+      try {
+        await deleteThumbnailsByMediaId(mediaMetadata.id);
+      } catch (cleanupError) {
+        logger.warn(`Failed to roll back generated thumbnail ${mediaMetadata.id}:`, cleanupError);
+      }
+    }
+
+    if (mediaMetadata.opfsPath) {
+      try {
+        await opfsService.deleteFile(mediaMetadata.opfsPath);
+      } catch (cleanupError) {
+        logger.warn(`Failed to roll back generated OPFS file ${mediaMetadata.opfsPath}:`, cleanupError);
+      }
+    }
+
+    throw error;
+  }
+}
 /**
  * Check and request permission for a file handle
  * @returns true if permission granted, false otherwise
@@ -375,8 +451,6 @@ class MediaLibraryService {
     const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320;
     const thumbnailQuality = options?.thumbnailQuality ?? 0.6;
 
-    let metadataCreated = false;
-    let thumbnailSaved = false;
     const mediaMetadata: MediaMetadata = {
       id: mediaId,
       storageType: 'opfs',
@@ -395,66 +469,97 @@ class MediaLibraryService {
       updatedAt: createdAt,
     };
 
+    let thumbnailBlob: Blob | undefined;
+    let thumbnailDimensions: { width: number; height: number } | undefined;
     try {
-      await opfsService.saveFile(opfsPath, await blobToArrayBuffer(file));
-
-      try {
-        const thumbnailBlob = await generateThumbnail(file, {
-          maxSize: thumbnailMaxSize,
-          quality: thumbnailQuality,
-        });
-        const thumbnailDimensions = getThumbnailDimensions(
-          dimensions.width,
-          dimensions.height,
-          thumbnailMaxSize
-        );
-        const thumbnailId = crypto.randomUUID();
-
-        await saveThumbnailDB({
-          id: thumbnailId,
-          mediaId,
-          blob: thumbnailBlob,
-          timestamp: 0,
-          width: thumbnailDimensions.width,
-          height: thumbnailDimensions.height,
-        });
-
-        mediaMetadata.thumbnailId = thumbnailId;
-        thumbnailSaved = true;
-      } catch (error) {
-        logger.warn(`Failed to save generated image thumbnail for ${file.name}:`, error);
-      }
-
-      await createMediaDB(mediaMetadata);
-      metadataCreated = true;
-      await associateMediaWithProject(projectId, mediaId);
-      return mediaMetadata;
+      thumbnailBlob = await generateThumbnail(file, {
+        maxSize: thumbnailMaxSize,
+        quality: thumbnailQuality,
+      });
+      thumbnailDimensions = getThumbnailDimensions(
+        dimensions.width,
+        dimensions.height,
+        thumbnailMaxSize
+      );
     } catch (error) {
-      if (metadataCreated) {
-        try {
-          await deleteMediaDB(mediaId);
-        } catch (cleanupError) {
-          logger.warn(`Failed to roll back generated media metadata ${mediaId}:`, cleanupError);
-        }
-      }
-
-      if (thumbnailSaved) {
-        this.clearThumbnailCache(mediaId);
-        try {
-          await deleteThumbnailsByMediaId(mediaId);
-        } catch (cleanupError) {
-          logger.warn(`Failed to roll back generated thumbnail ${mediaId}:`, cleanupError);
-        }
-      }
-
-      try {
-        await opfsService.deleteFile(opfsPath);
-      } catch (cleanupError) {
-        logger.warn(`Failed to roll back generated OPFS file ${opfsPath}:`, cleanupError);
-      }
-
-      throw error;
+      logger.warn(`Failed to save generated image thumbnail for ${file.name}:`, error);
     }
+
+    return persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob,
+      thumbnailWidth: thumbnailDimensions?.width,
+      thumbnailHeight: thumbnailDimensions?.height,
+    });
+  }
+
+  /**
+   * Save generated audio into the project media library as an OPFS-backed asset.
+   */
+  async importGeneratedAudio(
+    file: File,
+    projectId: string,
+    options?: {
+      tags?: string[];
+      thumbnailMaxSize?: number;
+      thumbnailQuality?: number;
+      codec?: string;
+    }
+  ): Promise<MediaMetadata> {
+    if (!projectId) {
+      throw new Error('No project selected');
+    }
+
+    const resolvedMimeType = file.type || getMimeType(file);
+    if (!resolvedMimeType.startsWith('audio/')) {
+      throw new Error(`Generated file must be audio. Received "${resolvedMimeType}".`);
+    }
+
+    const thumbnailMaxSize = options?.thumbnailMaxSize ?? 320;
+    const thumbnailQuality = options?.thumbnailQuality ?? 0.6;
+    const { metadata, thumbnail } = await mediaProcessorService.processMedia(file, resolvedMimeType, {
+      generateThumbnail: true,
+      thumbnailMaxSize,
+      thumbnailQuality,
+    });
+
+    if (metadata.type !== 'audio') {
+      throw new Error(`Expected generated audio metadata, received "${metadata.type}".`);
+    }
+
+    const mediaId = crypto.randomUUID();
+    const createdAt = Date.now();
+    const opfsPath = `content/${mediaId.slice(0, 2)}/${mediaId.slice(2, 4)}/${mediaId}/data`;
+    const codec = options?.codec ?? metadata.codec ?? resolvedMimeType.split('/')[1] ?? 'unknown';
+    const thumbnailHeight = Math.max(1, Math.round(thumbnailMaxSize * (9 / 16)));
+    const mediaMetadata: MediaMetadata = {
+      id: mediaId,
+      storageType: 'opfs',
+      opfsPath,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: resolvedMimeType,
+      duration: metadata.duration,
+      width: 0,
+      height: 0,
+      fps: 0,
+      codec,
+      bitrate: metadata.bitrate ?? 0,
+      tags: options?.tags ?? [],
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    return persistGeneratedMediaAsset({
+      file,
+      projectId,
+      mediaMetadata,
+      thumbnailBlob: thumbnail,
+      thumbnailWidth: thumbnail ? thumbnailMaxSize : undefined,
+      thumbnailHeight: thumbnail ? thumbnailHeight : undefined,
+    });
   }
 
   /**

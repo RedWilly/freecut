@@ -16,6 +16,7 @@ import {
   Sparkles,
   Blend,
   Pen,
+  WandSparkles,
 } from 'lucide-react';
 import { useEditorStore } from '@/shared/state/editor';
 import { useTimelineStore } from '@/features/editor/deps/timeline-store';
@@ -45,6 +46,7 @@ import { getGpuCategoriesWithEffects, getGpuEffectDefaultParams } from '@/infras
 import { useEffectPreviews } from '@/features/editor/deps/effects-contract';
 import { createLogger } from '@/shared/logging/logger';
 import { useSettingsStore } from '@/features/editor/deps/settings';
+import { AiPanel } from './ai-panel';
 import {
   EDITOR_LAYOUT_CSS_VALUES,
   clampLeftEditorSidebarWidth,
@@ -323,6 +325,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     { id: 'shapes' as const, icon: Pentagon, label: 'Shapes' },
     { id: 'effects' as const, icon: Layers, label: 'Effects' },
     { id: 'transitions' as const, icon: Blend, label: 'Transitions' },
+    { id: 'ai' as const, icon: WandSparkles, label: 'AI' },
   ];
 
   const shouldSuppressGeneratedItemClick = useCallback(() => {
@@ -748,6 +751,11 @@ export const MediaSidebar = memo(function MediaSidebar() {
           {/* Transitions Tab */}
           <div className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'transitions' ? 'block' : 'hidden'}`}>
             <TransitionsPanel />
+          </div>
+
+          {/* AI Tab */}
+          <div className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'ai' ? 'block' : 'hidden'}`}>
+            <AiPanel />
           </div>
           </div>
         </Activity>

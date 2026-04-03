@@ -17,6 +17,10 @@ const thumbnailMocks = vi.hoisted(() => ({
   generateThumbnail: vi.fn(),
 }));
 
+const mediaProcessorMocks = vi.hoisted(() => ({
+  processMedia: vi.fn(),
+}));
+
 const gifFrameCacheMocks = vi.hoisted(() => ({
   getGifFrames: vi.fn(),
   clearMedia: vi.fn(),
@@ -48,6 +52,10 @@ vi.mock('./opfs-service', () => ({
 
 vi.mock('../utils/thumbnail-generator', () => ({
   generateThumbnail: thumbnailMocks.generateThumbnail,
+}));
+
+vi.mock('./media-processor-service', () => ({
+  mediaProcessorService: mediaProcessorMocks,
 }));
 
 vi.mock('@/features/media-library/deps/timeline-services', () => ({
@@ -90,6 +98,58 @@ describe('MediaLibraryService.importGeneratedImage', () => {
       height: 1080,
       codec: 'png',
       tags: ['frame-capture'],
+      thumbnailId: expect.any(String),
+    }));
+    expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id);
+  });
+});
+
+describe('MediaLibraryService.importGeneratedAudio', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    indexedDbMocks.createMedia.mockImplementation(async (metadata) => metadata);
+    mediaProcessorMocks.processMedia.mockResolvedValue({
+      metadata: {
+        type: 'audio',
+        duration: 2.75,
+        codec: 'pcm_s16le',
+        bitrate: 384000,
+      },
+      thumbnail: new Blob(['waveform'], { type: 'image/webp' }),
+    });
+  });
+
+  it('persists generated audio as OPFS-backed media with a waveform thumbnail', async () => {
+    const file = new File(['wav-bytes'], 'ai-voice.wav', { type: 'audio/wav' });
+
+    const result = await mediaLibraryService.importGeneratedAudio(file, 'project-1', {
+      tags: ['ai-generated', 'kitten-tts'],
+    });
+
+    expect(mediaProcessorMocks.processMedia).toHaveBeenCalledWith(
+      file,
+      'audio/wav',
+      expect.objectContaining({
+        generateThumbnail: true,
+        thumbnailMaxSize: 320,
+        thumbnailQuality: 0.6,
+      })
+    );
+    expect(opfsMocks.saveFile).toHaveBeenCalledTimes(1);
+    expect(indexedDbMocks.saveThumbnail).toHaveBeenCalledWith(expect.objectContaining({
+      mediaId: result.id,
+      width: 320,
+      height: 180,
+    }));
+    expect(indexedDbMocks.createMedia).toHaveBeenCalledWith(expect.objectContaining({
+      id: result.id,
+      storageType: 'opfs',
+      fileName: 'ai-voice.wav',
+      mimeType: 'audio/wav',
+      duration: 2.75,
+      codec: 'pcm_s16le',
+      bitrate: 384000,
+      tags: ['ai-generated', 'kitten-tts'],
       thumbnailId: expect.any(String),
     }));
     expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id);
