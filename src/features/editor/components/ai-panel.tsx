@@ -225,7 +225,7 @@ export const AiPanel = memo(function AiPanel() {
 
   const [text, setText] = useState(DEFAULT_PROMPT);
   const [voice, setVoice] = useState<KittenTtsVoice>('Bella');
-  const [model, setModel] = useState<'nano' | 'micro' | 'mini'>('nano');
+  const [model, setModel] = useState<'nano' | 'micro' | 'mini'>('mini');
   const [speed, setSpeed] = useState(1.25);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);

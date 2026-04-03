@@ -16,6 +16,7 @@ import { InteractionLockRegion } from './interaction-lock-region';
 import { AudioMeterPanel } from './audio-meter-panel';
 import { Timeline, BentoLayoutDialog } from '@/features/editor/deps/timeline-ui';
 import { ClearKeyframesDialog } from './clear-keyframes-dialog';
+import { TtsGenerateDialog } from './tts-generate-dialog';
 import { toast } from 'sonner';
 import { useEditorHotkeys } from '@/features/editor/hooks/use-editor-hotkeys';
 import { useAutoSave } from '../hooks/use-auto-save';
@@ -512,6 +513,9 @@ export const LoadedEditor = memo(function LoadedEditor({
 
       {/* Bento Layout Preset Dialog */}
       <BentoLayoutDialog />
+
+      {/* TTS Generate from Text Dialog */}
+      <TtsGenerateDialog />
 
       {/* Debug Panel (dev mode only) */}
       {!isMaskEditingActive ? <ProjectDebugPanel projectId={projectId} /> : null}

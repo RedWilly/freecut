@@ -619,9 +619,6 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                   onCloseGaps={() => useTimelineStore.getState().closeAllGapsOnTrack(track.id)}
                   onAddVideoTrack={addVideoTrackToTop}
                   onAddAudioTrack={appendAudioTrackToSection}
-                  onRepairLegacyAvTracks={() => {
-                    void useTimelineStore.getState().repairLegacyAvTracks();
-                  }}
                   onDeleteTrack={() => handleDeleteTrack(track.id)}
                   onDeleteEmptyTracks={() => handleDeleteEmptyTracks(track.id)}
                   onSelect={(e) => {

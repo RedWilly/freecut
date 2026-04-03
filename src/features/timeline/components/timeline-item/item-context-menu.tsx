@@ -62,6 +62,9 @@ interface ItemContextMenuProps {
   /** Whether multiple items are selected (enables pre-comp creation) */
   canCreatePreComp?: boolean;
   onCreatePreComp?: () => void;
+  /** Whether this item is a text item (enables generate audio option) */
+  isTextItem?: boolean;
+  onGenerateAudioFromText?: () => void;
 }
 
 /**
@@ -103,6 +106,8 @@ export const ItemContextMenu = memo(function ItemContextMenu({
   onDissolveComposition,
   canCreatePreComp,
   onCreatePreComp,
+  isTextItem,
+  onGenerateAudioFromText,
 }: ItemContextMenuProps) {
   const hotkeys = useResolvedHotkeys();
   const selectedCount = useSelectionStore((s) => s.selectedItemIds.length);
@@ -217,6 +222,16 @@ export const ItemContextMenu = memo(function ItemContextMenu({
             <ContextMenuItem onClick={onFreezeFrame}>
               Insert Freeze Frame
               <ContextMenuShortcut>Shift+F</ContextMenuShortcut>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
+
+        {/* Generate Audio from Text - only show for text items */}
+        {isTextItem && onGenerateAudioFromText && (
+          <>
+            <ContextMenuItem onClick={onGenerateAudioFromText}>
+              Generate Audio from Text
             </ContextMenuItem>
             <ContextMenuSeparator />
           </>

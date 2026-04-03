@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 // Stores and selectors
 import { useTimelineStore } from '../stores/timeline-store';
 import { useItemsStore } from '../stores/items-store';
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store';
 import { useTimelineZoom } from '../hooks/use-timeline-zoom';
 import { registerZoomTo100 } from '../stores/zoom-store';
@@ -40,6 +41,7 @@ import { MarqueeOverlay } from '@/components/marquee-overlay';
 import { getVisibleTrackIds } from '../utils/group-utils';
 import { getRazorSplitPosition } from '../utils/razor-snap';
 import { getTrackKind } from '../utils/classic-tracks';
+import { resizeTracksOfKindByDelta } from '../utils/track-resize';
 import type { RazorSnapTarget } from '../utils/razor-snap';
 import type { TimelineTrack as TimelineTrackType } from '@/types/timeline';
 import { useMarkersStore } from '../stores/markers-store';
@@ -923,6 +925,24 @@ export const TimelineContent = memo(function TimelineContent({
         }
 
         applyZoomWithPlayheadCentering(newZoom);
+        return;
+      }
+
+      // Alt + scroll = resize track heights in the hovered zone
+      if (event.altKey) {
+        const sectionEl = (event.target instanceof Element)
+          ? event.target.closest('[data-track-section-scroll]') as HTMLElement | null
+          : null;
+        const zone = sectionEl?.dataset.trackSectionScroll as 'video' | 'audio' | undefined;
+        if (zone) {
+          const delta = event.deltaY > 0 ? -4 : 4;
+          const currentTracks = useItemsStore.getState().tracks;
+          const nextTracks = resizeTracksOfKindByDelta(currentTracks, zone, delta);
+          if (nextTracks !== currentTracks) {
+            useItemsStore.getState().setTracks(nextTracks);
+            useTimelineSettingsStore.getState().markDirty();
+          }
+        }
         return;
       }
 

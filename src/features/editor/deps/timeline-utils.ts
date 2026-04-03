@@ -17,4 +17,5 @@ export {
   resolveTransitionTargetFromSelection,
   timelineToSourceFrames,
   sourceToTimelineFrames,
+  linkItems,
 } from './timeline-contract';

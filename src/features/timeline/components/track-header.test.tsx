@@ -44,7 +44,6 @@ function renderTrackHeader(track: TimelineTrack, onToggleDisabled = vi.fn()) {
       onCloseGaps={() => undefined}
       onAddVideoTrack={() => undefined}
       onAddAudioTrack={() => undefined}
-      onRepairLegacyAvTracks={() => undefined}
       onDeleteTrack={() => undefined}
       onDeleteEmptyTracks={() => undefined}
     />

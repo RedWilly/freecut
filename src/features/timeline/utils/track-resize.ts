@@ -82,6 +82,24 @@ export function resizeAllTracksInList(
   return didChange ? nextTracks : tracks;
 }
 
+export function resizeTracksOfKindByDelta(
+  tracks: TimelineTrack[],
+  kind: 'video' | 'audio',
+  delta: number
+): TimelineTrack[] {
+  let didChange = false;
+
+  const nextTracks = tracks.map((track) => {
+    if (getTrackKind(track) !== kind) return track;
+    const nextHeight = clampTrackHeight(track.height + delta);
+    if (nextHeight === track.height) return track;
+    didChange = true;
+    return { ...track, height: nextHeight };
+  });
+
+  return didChange ? nextTracks : tracks;
+}
+
 export function resetAllTrackHeights(tracks: TimelineTrack[]): TimelineTrack[] {
   return resizeAllTracksInList(tracks, DEFAULT_TRACK_HEIGHT);
 }

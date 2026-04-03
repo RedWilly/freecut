@@ -31,6 +31,7 @@ export {
 export { findCompatibleTrackForItemType } from '../utils/track-item-compatibility';
 export { getTrackKind } from '../utils/classic-tracks';
 export { resolveEffectiveTrackStates } from '../utils/group-utils';
+export { linkItems } from '../stores/actions/item-actions';
 export {
   timelineToSourceFrames,
   sourceToTimelineFrames,

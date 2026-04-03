@@ -27,7 +27,6 @@ interface TrackHeaderProps {
   onCloseGaps?: () => void;
   onAddVideoTrack: () => void;
   onAddAudioTrack: () => void;
-  onRepairLegacyAvTracks: () => void;
   onDeleteTrack: () => void;
   onDeleteEmptyTracks: () => void;
 }
@@ -68,7 +67,6 @@ export const TrackHeader = memo(function TrackHeader({
   onCloseGaps,
   onAddVideoTrack,
   onAddAudioTrack,
-  onRepairLegacyAvTracks,
   onDeleteTrack,
   onDeleteEmptyTracks,
 }: TrackHeaderProps) {
@@ -203,9 +201,6 @@ export const TrackHeader = memo(function TrackHeader({
         </ContextMenuItem>
         <ContextMenuItem onClick={onAddAudioTrack}>
           Add Audio Track
-        </ContextMenuItem>
-        <ContextMenuItem onClick={onRepairLegacyAvTracks}>
-          Repair Legacy A/V Tracks
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!canDeleteTrack} onClick={onDeleteTrack}>

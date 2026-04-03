@@ -55,19 +55,20 @@ function getDraggedLinkedPair(items: TimelineItem[], draggedItemIds: string[]): 
     return null;
   }
 
-  const videoItem = draggedItems.find((draggedItem) => draggedItem.type === 'video');
+  // Any visual item (non-audio) paired with an audio item counts as a linked pair
+  const visualItem = draggedItems.find((draggedItem) => draggedItem.type !== 'audio');
   const audioItem = draggedItems.find((draggedItem) => draggedItem.type === 'audio');
-  if (!videoItem || !audioItem) {
+  if (!visualItem || !audioItem) {
     return null;
   }
 
-  const linkedIds = new Set(getLinkedItemIds(items, videoItem.id));
+  const linkedIds = new Set(getLinkedItemIds(items, visualItem.id));
   if (!linkedIds.has(audioItem.id)) {
     return null;
   }
 
   return {
-    videoItemId: videoItem.id,
+    videoItemId: visualItem.id,
     audioItemId: audioItem.id,
   };
 }
