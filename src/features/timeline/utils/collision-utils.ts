@@ -1,4 +1,5 @@
 import type { TimelineItem } from '@/types/timeline';
+import type { Transition } from '@/types/transition';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('CollisionUtils');
@@ -194,4 +195,94 @@ export function findNearestAvailableSpace(
     // Forward not available, try backward
     return findSpaceBackward(proposedFrom, durationInFrames, trackItems);
   }
+}
+
+export interface OverlapInfo {
+  itemA: string;
+  itemB: string;
+  trackId: string;
+  overlapFrames: number;
+}
+
+/**
+ * Detect non-transition overlapping items on the same track.
+ * Transition-linked overlaps are intentional and excluded.
+ */
+export function detectOverlappingItems(
+  items: ReadonlyArray<TimelineItem>,
+  transitions: ReadonlyArray<Transition>,
+): OverlapInfo[] {
+  const transitionPairs = new Set<string>();
+  for (const t of transitions) {
+    transitionPairs.add(`${t.leftClipId}:${t.rightClipId}`);
+    transitionPairs.add(`${t.rightClipId}:${t.leftClipId}`);
+  }
+
+  // Group by track
+  const byTrack = new Map<string, TimelineItem[]>();
+  for (const item of items) {
+    let group = byTrack.get(item.trackId);
+    if (!group) {
+      group = [];
+      byTrack.set(item.trackId, group);
+    }
+    group.push(item);
+  }
+
+  const overlaps: OverlapInfo[] = [];
+
+  for (const [trackId, trackItems] of byTrack) {
+    const sorted = [...trackItems].sort((a, b) => a.from - b.from);
+
+    for (let i = 0; i < sorted.length; i++) {
+      const current = sorted[i]!;
+      const currentEnd = current.from + current.durationInFrames;
+
+      for (let j = i + 1; j < sorted.length; j++) {
+        const next = sorted[j]!;
+        if (next.from >= currentEnd) break;
+
+        // Skip transition-linked pairs
+        if (transitionPairs.has(`${current.id}:${next.id}`)) continue;
+
+        overlaps.push({
+          itemA: current.id,
+          itemB: next.id,
+          trackId,
+          overlapFrames: currentEnd - next.from,
+        });
+      }
+    }
+  }
+
+  return overlaps;
+}
+
+/**
+ * Check if placing an item at the given position would overlap with
+ * existing items on the same track, excluding transition-linked pairs
+ * and the item itself.
+ */
+export function wouldOverlap(
+  itemId: string,
+  position: number,
+  durationInFrames: number,
+  trackId: string,
+  allItems: ReadonlyArray<TimelineItem>,
+  transitions: ReadonlyArray<Transition>,
+): boolean {
+  const transitionPairs = new Set<string>();
+  for (const t of transitions) {
+    if (t.leftClipId === itemId) transitionPairs.add(t.rightClipId);
+    if (t.rightClipId === itemId) transitionPairs.add(t.leftClipId);
+  }
+
+  const end = position + durationInFrames;
+  return allItems.some((other) => {
+    if (other.id === itemId) return false;
+    if (other.trackId !== trackId) return false;
+    if (transitionPairs.has(other.id)) return false;
+    const otherEnd = other.from + other.durationInFrames;
+    return rangesOverlap(position, end, other.from, otherEnd);
+  });
 }

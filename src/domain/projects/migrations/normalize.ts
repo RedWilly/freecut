@@ -153,6 +153,74 @@ function flattenTrackGroups(
 }
 
 /**
+ * Build a set of item ID pairs that are linked by a transition.
+ * Overlaps between transition-linked clips are intentional and must not be repaired.
+ */
+function buildTransitionPairs(
+  transitions?: NonNullable<ProjectTimeline['transitions']>
+): Set<string> {
+  const pairs = new Set<string>();
+  if (!transitions) return pairs;
+  for (const t of transitions) {
+    // Store both directions for O(1) lookup
+    pairs.add(`${t.leftClipId}:${t.rightClipId}`);
+    pairs.add(`${t.rightClipId}:${t.leftClipId}`);
+  }
+  return pairs;
+}
+
+/**
+ * Detect and repair overlapping items on the same track.
+ * Pushes later-starting items forward to eliminate overlaps.
+ * Transition-linked overlaps are intentional and left untouched.
+ */
+function repairOverlappingItems(
+  items: ProjectTimeline['items'],
+  transitions?: NonNullable<ProjectTimeline['transitions']>,
+): ProjectTimeline['items'] {
+  const transitionPairs = buildTransitionPairs(transitions);
+
+  // Group items by track, sorted by start frame
+  const byTrack = new Map<string, Array<{ index: number; item: ProjectTimeline['items'][number] }>>();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    let group = byTrack.get(item.trackId);
+    if (!group) {
+      group = [];
+      byTrack.set(item.trackId, group);
+    }
+    group.push({ index: i, item });
+  }
+
+  const repaired = [...items];
+
+  for (const [, group] of byTrack) {
+    group.sort((a, b) => a.item.from - b.item.from);
+
+    for (let i = 0; i < group.length; i++) {
+      const current = group[i]!;
+      const currentEnd = current.item.from + current.item.durationInFrames;
+
+      for (let j = i + 1; j < group.length; j++) {
+        const next = group[j]!;
+        if (next.item.from >= currentEnd) break; // No overlap
+
+        // Skip transition-linked overlaps — they're intentional
+        const pairKey = `${current.item.id}:${next.item.id}`;
+        if (transitionPairs.has(pairKey)) continue;
+
+        // Push the later item to start right after the current one
+        const repairedItem = { ...next.item, from: currentEnd };
+        repaired[next.index] = repairedItem;
+        next.item = repairedItem;
+      }
+    }
+  }
+
+  return repaired;
+}
+
+/**
  * Normalize a timeline to ensure all data conforms to current defaults.
  */
 function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
@@ -160,21 +228,28 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
     timeline.tracks.map((track, index) => normalizeTrack(track, index))
   );
 
+  const normalizedItems = timeline.items.map(normalizeItem);
+  const normalizedTransitions = timeline.transitions?.map(normalizeTransition);
+
   return {
     ...timeline,
     // Normalize tracks
     tracks: normalizedTracks,
-    // Normalize items
-    items: timeline.items.map(normalizeItem),
+    // Normalize items and repair overlaps
+    items: repairOverlappingItems(normalizedItems, normalizedTransitions),
     // Normalize transitions if present
-    transitions: timeline.transitions?.map(normalizeTransition),
+    transitions: normalizedTransitions,
     // Normalize sub-composition tracks and items
-    compositions: timeline.compositions?.map((comp) => ({
-      ...comp,
-      tracks: flattenTrackGroups(comp.tracks.map((track, index) => normalizeTrack(track, index))),
-      items: comp.items.map(normalizeItem),
-      transitions: comp.transitions?.map(normalizeTransition),
-    })),
+    compositions: timeline.compositions?.map((comp) => {
+      const compItems = comp.items.map(normalizeItem);
+      const compTransitions = comp.transitions?.map(normalizeTransition);
+      return {
+        ...comp,
+        tracks: flattenTrackGroups(comp.tracks.map((track, index) => normalizeTrack(track, index))),
+        items: repairOverlappingItems(compItems, compTransitions),
+        transitions: compTransitions,
+      };
+    }),
     // Ensure frame values are non-negative integers
     currentFrame: Math.max(0, Math.floor(timeline.currentFrame ?? 0)),
     // Ensure zoom is positive

@@ -153,3 +153,49 @@ export function computeCompositionDuration(items: TimelineItem[], fallbackDurati
     ...items.map((item) => item.from + item.durationInFrames),
   );
 }
+
+/**
+ * Dev-mode check: detect non-transition overlapping items after a mutation.
+ * Logs a warning with details so overlap-introducing bugs surface early.
+ */
+export function warnIfOverlapping(context: string): void {
+  if (import.meta.env.PROD) return;
+  const items = useItemsStore.getState().items;
+  const transitions = useTransitionsStore.getState().transitions;
+
+  // Inline overlap scan to avoid importing collision-utils (circular risk)
+  const transitionPairs = new Set<string>();
+  for (const t of transitions) {
+    transitionPairs.add(`${t.leftClipId}:${t.rightClipId}`);
+    transitionPairs.add(`${t.rightClipId}:${t.leftClipId}`);
+  }
+
+  const byTrack = new Map<string, TimelineItem[]>();
+  for (const item of items) {
+    let group = byTrack.get(item.trackId);
+    if (!group) {
+      group = [];
+      byTrack.set(item.trackId, group);
+    }
+    group.push(item);
+  }
+
+  for (const [trackId, trackItems] of byTrack) {
+    const sorted = [...trackItems].sort((a, b) => a.from - b.from);
+    for (let i = 0; i < sorted.length; i++) {
+      const current = sorted[i]!;
+      const currentEnd = current.from + current.durationInFrames;
+      for (let j = i + 1; j < sorted.length; j++) {
+        const next = sorted[j]!;
+        if (next.from >= currentEnd) break;
+        if (transitionPairs.has(`${current.id}:${next.id}`)) continue;
+
+        getLogger().warn(
+          `[OverlapDetected] ${context}: items "${current.label}" and "${next.label}" overlap by ${currentEnd - next.from} frames on track ${trackId}`,
+          { itemA: current.id, itemB: next.id, trackId, overlapFrames: currentEnd - next.from },
+        );
+        return; // Log once per mutation, not per overlap
+      }
+    }
+  }
+}

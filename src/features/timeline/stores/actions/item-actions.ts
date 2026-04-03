@@ -16,7 +16,7 @@ import {
   opfsService,
 } from '@/features/timeline/deps/media-library-service';
 import { toast } from 'sonner';
-import { execute, applyTransitionRepairs, getLogger } from './shared';
+import { execute, applyTransitionRepairs, getLogger, warnIfOverlapping } from './shared';
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { timelineToSourceFrames, sourceToTimelineFrames } from '../../utils/source-calculations';
 import { computeClampedSlipDelta } from '../../utils/slip-utils';
@@ -524,6 +524,7 @@ export function moveItem(id: string, newFrom: number, newTrackId?: string): void
     applyTransitionRepairs([id]);
 
     useTimelineSettingsStore.getState().markDirty();
+    warnIfOverlapping('MOVE_ITEM');
   }, { id, newFrom, newTrackId });
 }
 
@@ -557,6 +558,7 @@ export function moveItems(updates: Array<{ id: string; from: number; trackId?: s
     applyTransitionRepairs(updates.map((u) => u.id));
 
     useTimelineSettingsStore.getState().markDirty();
+    warnIfOverlapping('MOVE_ITEMS');
   }, { count: updates.length });
 }
 
@@ -590,6 +592,7 @@ export function moveItemsWithTrackChanges(
     useTransitionsStore.getState().setTransitions(updatedTransitions);
     applyTransitionRepairs(updates.map((u) => u.id));
     useTimelineSettingsStore.getState().markDirty();
+    warnIfOverlapping('MOVE_ITEMS_WITH_TRACKS');
   }, { count: updates.length, trackCount: tracks.length });
 }
 

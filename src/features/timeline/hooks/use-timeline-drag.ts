@@ -976,39 +976,37 @@ export function useTimelineDrag(
 
         let maxSnapForward = 0; // How many frames we need to move the whole group forward
 
-        if (snapEnabledRef.current) {
-          for (const movedItem of movedItems) {
-            const finalPosition = findNearestAvailableSpace(
-              movedItem.newFrom,
-              movedItem.durationInFrames,
-              movedItem.newTrackId,
-              itemsExcludingDragged
-            );
+        for (const movedItem of movedItems) {
+          const finalPosition = findNearestAvailableSpace(
+            movedItem.newFrom,
+            movedItem.durationInFrames,
+            movedItem.newTrackId,
+            itemsExcludingDragged
+          );
 
-            if (finalPosition === null) {
-              logger.warn(isAltDrag ? 'Cannot duplicate items: no available space' : 'Cannot move items: no available space');
-              // Clean up and cancel - defer drag state to avoid render cascade
-              if (elementRef?.current) {
-                elementRef.current.style.transform = '';
-              }
-              dragOffsetRef.current = { x: 0, y: 0 };
-              dragPreviewOffsetByItemRef.current = {};
-              clearLinkedMovePreview();
-              prevSnapTargetRef.current = null;
-              dragStateRef.current = null;
-              isAltDragRef.current = false;
-              clearGlobalDragCursor();
-              document.body.style.userSelect = '';
-              setIsDragging(false);
-              setDragOffset({ x: 0, y: 0 });
-              queueMicrotask(() => setDragState(null));
-              return;
+          if (finalPosition === null) {
+            logger.warn(isAltDrag ? 'Cannot duplicate items: no available space' : 'Cannot move items: no available space');
+            // Clean up and cancel - defer drag state to avoid render cascade
+            if (elementRef?.current) {
+              elementRef.current.style.transform = '';
             }
+            dragOffsetRef.current = { x: 0, y: 0 };
+            dragPreviewOffsetByItemRef.current = {};
+            clearLinkedMovePreview();
+            prevSnapTargetRef.current = null;
+            dragStateRef.current = null;
+            isAltDragRef.current = false;
+            clearGlobalDragCursor();
+            document.body.style.userSelect = '';
+            setIsDragging(false);
+            setDragOffset({ x: 0, y: 0 });
+            queueMicrotask(() => setDragState(null));
+            return;
+          }
 
-            const snapAmount = finalPosition - movedItem.newFrom;
-            if (snapAmount > maxSnapForward) {
-              maxSnapForward = snapAmount;
-            }
+          const snapAmount = finalPosition - movedItem.newFrom;
+          if (snapAmount > maxSnapForward) {
+            maxSnapForward = snapAmount;
           }
         }
 
@@ -1055,14 +1053,12 @@ export function useTimelineDrag(
         const itemsExcludingDragged = isAltDrag
           ? currentItems
           : currentItems.filter((i) => i.id !== item.id);
-        const finalFrame = snapEnabledRef.current
-          ? findNearestAvailableSpace(
-            proposedFrame,
-            item.durationInFrames,
-            newTrackId,
-            itemsExcludingDragged
-          )
-          : proposedFrame;
+        const finalFrame = findNearestAvailableSpace(
+          proposedFrame,
+          item.durationInFrames,
+          newTrackId,
+          itemsExcludingDragged
+        );
 
         if (finalFrame !== null) {
           const roundedFinalFrame = Math.round(finalFrame);
