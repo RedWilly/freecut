@@ -100,6 +100,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const volume = usePlaybackStore((s) => s.volume);
   const setVolume = usePlaybackStore((s) => s.setVolume);
   const muted = usePlaybackStore((s) => s.muted);
+  const toggleMute = usePlaybackStore((s) => s.toggleMute);
 
   const [waveformsByMediaId, setWaveformsByMediaId] = useState<Map<string, AudioMeterWaveform | null>>(new Map());
   const meterVisualRootRef = useRef<HTMLDivElement | null>(null);
@@ -575,7 +576,9 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
         masterEstimate={estimate}
         isPlaying={isPlaying}
         masterVolumeDb={masterVolumeDb}
+        masterMuted={muted}
         onMasterVolumeChange={handleMasterVolumeChange}
+        onMasterMuteToggle={toggleMute}
         onTrackVolumeChange={handleTrackVolumeChange}
         onTrackMuteToggle={handleTrackMuteToggle}
         onTrackSoloToggle={handleTrackSoloToggle}
@@ -596,7 +599,9 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
         masterEstimate={estimate}
         isPlaying={isPlaying}
         masterVolumeDb={masterVolumeDb}
+        masterMuted={muted}
         onMasterVolumeChange={handleMasterVolumeChange}
+        onMasterMuteToggle={toggleMute}
         onTrackVolumeChange={handleTrackVolumeChange}
         onTrackMuteToggle={handleTrackMuteToggle}
         onTrackSoloToggle={handleTrackSoloToggle}

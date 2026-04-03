@@ -34,7 +34,9 @@ export interface AudioMixerViewProps {
   };
   isPlaying: boolean;
   masterVolumeDb: number;
+  masterMuted: boolean;
   onMasterVolumeChange: (volumeDb: number) => void;
+  onMasterMuteToggle: () => void;
   onTrackVolumeChange: (trackId: string, volumeDb: number) => void;
   onTrackMuteToggle: (trackId: string) => void;
   onTrackSoloToggle: (trackId: string) => void;
@@ -538,10 +540,12 @@ interface BusMeterProps {
   masterEstimate: AudioMixerViewProps['masterEstimate'];
   isPlaying: boolean;
   volumeDb: number;
+  muted: boolean;
   onVolumeChange: (volumeDb: number) => void;
+  onMuteToggle: () => void;
 }
 
-const BusMeter = memo(function BusMeter({ masterEstimate, isPlaying, volumeDb, onVolumeChange }: BusMeterProps) {
+const BusMeter = memo(function BusMeter({ masterEstimate, isPlaying, volumeDb, muted, onVolumeChange, onMuteToggle }: BusMeterProps) {
   const leftBarRef = useRef<HTMLDivElement | null>(null);
   const rightBarRef = useRef<HTMLDivElement | null>(null);
   const dbReadoutRef = useRef<HTMLDivElement | null>(null);
@@ -673,8 +677,22 @@ const BusMeter = memo(function BusMeter({ masterEstimate, isPlaying, volumeDb, o
           Bus 1
         </div>
 
-        {/* Spacer to align with S/M row */}
-        <div className="h-[18px] shrink-0" />
+        {/* Mute button — aligned with S/M row */}
+        <div className="flex justify-center py-0.5 shrink-0">
+          <button
+            type="button"
+            className={`w-[18px] h-[16px] rounded-[3px] text-[9px] font-bold leading-none flex items-center justify-center transition-colors ${
+              muted
+                ? 'bg-red-600 text-white shadow-[0_0_8px_rgba(220,38,38,0.4)]'
+                : 'bg-muted/40 text-muted-foreground/40 hover:bg-muted/70 hover:text-muted-foreground/70'
+            }`}
+            onClick={onMuteToggle}
+            aria-label="Mute master"
+            aria-pressed={muted}
+          >
+            M
+          </button>
+        </div>
 
         {/* Meter bars + fader area */}
         <div className="flex-1 min-h-0 flex items-stretch gap-px py-1">
@@ -810,7 +828,9 @@ export const AudioMixerView = memo(function AudioMixerView({
   masterEstimate,
   isPlaying,
   masterVolumeDb,
+  masterMuted,
   onMasterVolumeChange,
+  onMasterMuteToggle,
   onTrackVolumeChange,
   onTrackMuteToggle,
   onTrackSoloToggle,
@@ -884,7 +904,7 @@ export const AudioMixerView = memo(function AudioMixerView({
         </div>
 
         {/* Bus / master strip */}
-        <BusMeter masterEstimate={masterEstimate} isPlaying={isPlaying} volumeDb={masterVolumeDb} onVolumeChange={onMasterVolumeChange} />
+        <BusMeter masterEstimate={masterEstimate} isPlaying={isPlaying} volumeDb={masterVolumeDb} muted={masterMuted} onVolumeChange={onMasterVolumeChange} onMuteToggle={onMasterMuteToggle} />
       </div>
     </aside>
   );

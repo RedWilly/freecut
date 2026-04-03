@@ -48,7 +48,9 @@ describe('AudioMixerView', () => {
         onTrackMuteToggle={() => undefined}
         onTrackSoloToggle={() => undefined}
         masterVolumeDb={0}
+        masterMuted={false}
         onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
       />,
     );
 
@@ -88,7 +90,9 @@ describe('AudioMixerView', () => {
         onTrackMuteToggle={() => undefined}
         onTrackSoloToggle={() => undefined}
         masterVolumeDb={0}
+        masterMuted={false}
         onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
       />,
     );
 
@@ -154,7 +158,9 @@ describe('AudioMixerView', () => {
       onTrackMuteToggle: () => undefined,
       onTrackSoloToggle: () => undefined,
       masterVolumeDb: 0,
+      masterMuted: false,
       onMasterVolumeChange: () => undefined,
+      onMasterMuteToggle: () => undefined,
     };
 
     const { container, rerender } = render(<AudioMixerView {...props} />);
@@ -226,7 +232,9 @@ describe('AudioMixerView', () => {
       onTrackMuteToggle: () => undefined,
       onTrackSoloToggle: () => undefined,
       masterVolumeDb: 0,
+      masterMuted: false,
       onMasterVolumeChange: () => undefined,
+      onMasterMuteToggle: () => undefined,
     };
 
     const { container, rerender } = render(<AudioMixerView {...props} />);
@@ -292,7 +300,9 @@ describe('AudioMixerView', () => {
         onTrackMuteToggle={() => undefined}
         onTrackSoloToggle={() => undefined}
         masterVolumeDb={0}
+        masterMuted={false}
         onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
       />,
     );
 
@@ -356,7 +366,9 @@ describe('AudioMixerView', () => {
         onTrackMuteToggle={() => undefined}
         onTrackSoloToggle={() => undefined}
         masterVolumeDb={0}
+        masterMuted={false}
         onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
       />,
     );
 
