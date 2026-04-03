@@ -16,8 +16,10 @@ import {
   timelineToSourceFrames,
 } from '../utils/source-calculations';
 import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
-import { getSynchronizedLinkedItems } from '../utils/linked-items';
-import { applyRateStretchPreview } from '../utils/item-edit-preview';
+import { getSynchronizedLinkedItems, getLinkedItemIds } from '../utils/linked-items';
+import { applyRateStretchPreview, applyMovePreview } from '../utils/item-edit-preview';
+import type { PreviewItemUpdate } from '../utils/item-edit-preview';
+import { useTransitionsStore } from '../stores/transitions-store';
 
 type StretchHandle = 'start' | 'end';
 
@@ -32,6 +34,86 @@ export function isRateStretchableItem(item: Pick<TimelineItem, 'type' | 'label'>
 export function getLoopingMediaStretchPreviewSpeed(initialSpeed: number, deltaFrames: number): number {
   const speedDelta = -(deltaFrames / 30) * 0.1;
   return Math.round(Math.max(MIN_SPEED, Math.min(MAX_SPEED, initialSpeed + speedDelta)) * 100) / 100;
+}
+
+/**
+ * Compute preview updates for adjacent clips that will be rippled
+ * when the rate stretch commits. Mirrors the ripple logic in rateStretchItem action.
+ */
+function computeRipplePreviewUpdates(
+  items: TimelineItem[],
+  stretchedItemId: string,
+  synchronizedIds: Set<string>,
+  oldFrom: number,
+  oldEnd: number,
+  previewFrom: number,
+  previewEnd: number,
+): PreviewItemUpdate[] {
+  const fromDelta = previewFrom - oldFrom;
+  const endDelta = previewEnd - oldEnd;
+  if (fromDelta === 0 && endDelta === 0) return [];
+
+  const transitions = useTransitionsStore.getState().transitions;
+  const movedIds = new Set<string>();
+  const updates: PreviewItemUpdate[] = [];
+
+  // Collect tracks touched by the stretched item + synchronized items
+  const touchedTrackIds = new Set<string>();
+  for (const i of items) {
+    if (synchronizedIds.has(i.id)) touchedTrackIds.add(i.trackId);
+  }
+
+  const addMove = (itemId: string, delta: number) => {
+    if (movedIds.has(itemId)) return;
+    const it = items.find((i) => i.id === itemId);
+    if (!it) return;
+    movedIds.add(itemId);
+    updates.push(applyMovePreview(it, delta));
+
+    for (const linkedId of getLinkedItemIds(items, itemId)) {
+      if (linkedId === itemId || movedIds.has(linkedId)) continue;
+      const linked = items.find((i) => i.id === linkedId);
+      if (linked) {
+        movedIds.add(linkedId);
+        updates.push(applyMovePreview(linked, delta));
+      }
+    }
+  };
+
+  if (endDelta !== 0) {
+    for (const trackId of touchedTrackIds) {
+      for (const i of items) {
+        if (i.trackId === trackId && !synchronizedIds.has(i.id) && i.from >= oldEnd) {
+          addMove(i.id, endDelta);
+        }
+      }
+    }
+    // Transition-connected neighbors at stretched clip's end
+    for (const t of transitions) {
+      if (synchronizedIds.has(t.leftClipId) && !synchronizedIds.has(t.rightClipId)) {
+        addMove(t.rightClipId, endDelta);
+      }
+    }
+  }
+
+  if (fromDelta !== 0) {
+    for (const trackId of touchedTrackIds) {
+      for (const i of items) {
+        if (i.trackId === trackId && !synchronizedIds.has(i.id)) {
+          const iEnd = i.from + i.durationInFrames;
+          if (iEnd <= oldFrom) addMove(i.id, fromDelta);
+        }
+      }
+    }
+    // Transition-connected neighbors at stretched clip's start
+    for (const t of transitions) {
+      if (synchronizedIds.has(t.rightClipId) && !synchronizedIds.has(t.leftClipId)) {
+        addMove(t.leftClipId, fromDelta);
+      }
+    }
+  }
+
+  return updates;
 }
 
 interface StretchState {
@@ -334,13 +416,36 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       previewFrom = Math.round(initialFrom + (initialDuration - previewDuration));
     }
 
+    const allItems = useTimelineStore.getState().items;
     const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const synchronizedItems = linkedSelectionEnabled
+      ? getSynchronizedLinkedItems(allItems, item.id)
+      : [item];
+    const synchronizedIds = new Set(synchronizedItems.map((si) => si.id));
+
+    // Include the stretched item's own preview so the transition bridge can track it
+    const stretchedItemPreview: PreviewItemUpdate = {
+      id: item.id,
+      from: previewFrom,
+      durationInFrames: previewDuration,
+      speed: previewSpeed,
+    };
+
     const linkedPreviewUpdates = linkedSelectionEnabled
-      ? getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+      ? synchronizedItems
         .filter((linkedItem) => linkedItem.id !== item.id)
         .map((linkedItem) => applyRateStretchPreview(linkedItem, linkedItem.from + (previewFrom - initialFrom), previewDuration, previewSpeed, fps))
       : [];
-    useLinkedEditPreviewStore.getState().setUpdates(linkedPreviewUpdates);
+
+    // Compute ripple preview for adjacent clips that will be pushed/pulled
+    const oldEnd = initialFrom + initialDuration;
+    const previewEnd = previewFrom + previewDuration;
+    const rippleUpdates = computeRipplePreviewUpdates(
+      allItems, item.id, synchronizedIds,
+      initialFrom, oldEnd, previewFrom, previewEnd,
+    );
+
+    useLinkedEditPreviewStore.getState().setUpdates([stretchedItemPreview, ...linkedPreviewUpdates, ...rippleUpdates]);
 
     // Update snap target visualization (only when changed)
     const prevSnap = prevSnapTargetRef.current;

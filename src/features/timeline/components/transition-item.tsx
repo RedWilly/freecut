@@ -31,6 +31,7 @@ import {
   applyPreviewGeometryToClip,
   getTransitionBridgeBounds,
 } from '../utils/transition-preview-geometry';
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
 
 interface TransitionItemProps {
   transition: Transition;
@@ -208,6 +209,28 @@ export const TransitionItem = memo(function TransitionItem({
     ), [transition.leftClipId, transition.rightClipId])
   );
 
+  // Linked edit preview (rate stretch ripple and other generic previews)
+  // Extract only the geometry fields the bridge needs, with useShallow to prevent
+  // re-renders when the store rebuilds objects with identical values.
+  const leftLinkedEditPreview = useLinkedEditPreviewStore(
+    useShallow(
+      useCallback((s) => {
+        const update = s.updatesById[transition.leftClipId];
+        if (!update) return null;
+        return { from: update.from, durationInFrames: update.durationInFrames };
+      }, [transition.leftClipId])
+    )
+  );
+  const rightLinkedEditPreview = useLinkedEditPreviewStore(
+    useShallow(
+      useCallback((s) => {
+        const update = s.updatesById[transition.rightClipId];
+        if (!update) return null;
+        return { from: update.from, durationInFrames: update.durationInFrames };
+      }, [transition.rightClipId])
+    )
+  );
+
   // Track hovered edge for showing resize handles
   const [hoveredEdge, setHoveredEdge] = useState<'left' | 'right' | null>(null);
 
@@ -276,9 +299,10 @@ export const TransitionItem = memo(function TransitionItem({
           delta: ripplePreview.delta,
           isDownstream: ripplePreview.leftDownstream,
         },
+        linkedEdit: leftLinkedEditPreview,
       },
     );
-  }, [leftClip, rollingPreview, slidePreview, ripplePreview]);
+  }, [leftClip, rollingPreview, slidePreview, ripplePreview, leftLinkedEditPreview]);
 
   const effectiveRightClip = useMemo(() => {
     if (!rightClip) return null;
@@ -294,9 +318,10 @@ export const TransitionItem = memo(function TransitionItem({
           delta: ripplePreview.delta,
           isDownstream: ripplePreview.rightDownstream,
         },
+        linkedEdit: rightLinkedEditPreview,
       },
     );
-  }, [rightClip, rollingPreview, slidePreview, ripplePreview]);
+  }, [rightClip, rollingPreview, slidePreview, ripplePreview, rightLinkedEditPreview]);
 
   const position = useMemo(() => {
     if (!effectiveLeftClip || !effectiveRightClip) return null;

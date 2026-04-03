@@ -903,8 +903,10 @@ export function rateStretchItem(
     const anchorBefore = synchronizedItems.find((item) => item.id === id);
     if (!anchorBefore) return;
 
-    // Get old duration BEFORE applying rate stretch (needed for keyframe scaling)
+    // Capture old boundaries BEFORE stretch (needed for ripple + keyframe scaling)
     const oldDuration = anchorBefore.durationInFrames;
+    const oldFrom = anchorBefore.from;
+    const oldEnd = oldFrom + oldDuration;
 
     itemsStore._rateStretchItem(id, newFrom, newDuration, newSpeed);
 
@@ -938,8 +940,131 @@ export function rateStretchItem(
       }
     }
 
-    // Repair transitions
-    applyTransitionRepairs(synchronizedItems.map((item) => item.id));
+    // Ripple phase: push/pull adjacent clips to maintain adjacency and prevent overlaps.
+    // End handle: endDelta !== 0 → shift downstream clips.
+    // Start handle: fromDelta !== 0, end stays fixed → shift upstream clips.
+    const newEnd = actualFrom + actualDuration;
+    const endDelta = newEnd - oldEnd;
+    const allSynchronizedIds = new Set(synchronizedItems.map((si) => si.id));
+    const freshItems = useItemsStore.getState().items;
+    const transitions = useTransitionsStore.getState().transitions;
+    const movedIds = new Set<string>();
+    const moveUpdates: Array<{ id: string; from: number }> = [];
+
+    // Collect all track IDs touched by the stretched item + its linked companions
+    const touchedTrackIds = new Set<string>();
+    for (const si of synchronizedItems) {
+      const freshSi = freshItems.find((i) => i.id === si.id);
+      if (freshSi) touchedTrackIds.add(freshSi.trackId);
+    }
+
+    if (endDelta !== 0) {
+      // End handle changed — shift downstream clips (at or past old end) on touched tracks
+      for (const trackId of touchedTrackIds) {
+        const downstreamItems = freshItems
+          .filter((i) => i.trackId === trackId && !allSynchronizedIds.has(i.id) && i.from >= oldEnd)
+          .sort((a, b) => a.from - b.from);
+
+        for (const downstream of downstreamItems) {
+          if (movedIds.has(downstream.id)) continue;
+          movedIds.add(downstream.id);
+          moveUpdates.push({ id: downstream.id, from: downstream.from + endDelta });
+
+          // Also move linked companions on other tracks
+          const linkedIds = getLinkedItemIds(freshItems, downstream.id);
+          for (const linkedId of linkedIds) {
+            if (linkedId === downstream.id || movedIds.has(linkedId)) continue;
+            const linked = freshItems.find((i) => i.id === linkedId);
+            if (linked) {
+              movedIds.add(linkedId);
+              moveUpdates.push({ id: linkedId, from: linked.from + endDelta });
+            }
+          }
+        }
+      }
+
+      // Also shift transition-connected neighbors that aren't downstream by position
+      // but are directly bridged to the stretched clip's end
+      for (const si of synchronizedItems) {
+        for (const t of transitions) {
+          if (t.leftClipId === si.id && !allSynchronizedIds.has(t.rightClipId) && !movedIds.has(t.rightClipId)) {
+            const neighbor = freshItems.find((i) => i.id === t.rightClipId);
+            if (neighbor) {
+              movedIds.add(neighbor.id);
+              moveUpdates.push({ id: neighbor.id, from: neighbor.from + endDelta });
+              const linkedIds = getLinkedItemIds(freshItems, neighbor.id);
+              for (const linkedId of linkedIds) {
+                if (linkedId === neighbor.id || movedIds.has(linkedId)) continue;
+                const linked = freshItems.find((i) => i.id === linkedId);
+                if (linked) {
+                  movedIds.add(linkedId);
+                  moveUpdates.push({ id: linkedId, from: linked.from + endDelta });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (fromDelta !== 0) {
+      // Start handle changed — shift upstream clips (ending at or before old from) on touched tracks
+      for (const trackId of touchedTrackIds) {
+        const upstreamItems = freshItems
+          .filter((i) => {
+            if (i.trackId !== trackId || allSynchronizedIds.has(i.id)) return false;
+            const iEnd = i.from + i.durationInFrames;
+            return iEnd <= oldFrom;
+          })
+          .sort((a, b) => a.from - b.from);
+
+        for (const upstream of upstreamItems) {
+          if (movedIds.has(upstream.id)) continue;
+          movedIds.add(upstream.id);
+          moveUpdates.push({ id: upstream.id, from: Math.max(0, upstream.from + fromDelta) });
+
+          const linkedIds = getLinkedItemIds(freshItems, upstream.id);
+          for (const linkedId of linkedIds) {
+            if (linkedId === upstream.id || movedIds.has(linkedId)) continue;
+            const linked = freshItems.find((i) => i.id === linkedId);
+            if (linked) {
+              movedIds.add(linkedId);
+              moveUpdates.push({ id: linkedId, from: Math.max(0, linked.from + fromDelta) });
+            }
+          }
+        }
+      }
+
+      // Also shift transition-connected neighbors bridged to the stretched clip's start
+      for (const si of synchronizedItems) {
+        for (const t of transitions) {
+          if (t.rightClipId === si.id && !allSynchronizedIds.has(t.leftClipId) && !movedIds.has(t.leftClipId)) {
+            const neighbor = freshItems.find((i) => i.id === t.leftClipId);
+            if (neighbor) {
+              movedIds.add(neighbor.id);
+              moveUpdates.push({ id: neighbor.id, from: Math.max(0, neighbor.from + fromDelta) });
+              const linkedIds = getLinkedItemIds(freshItems, neighbor.id);
+              for (const linkedId of linkedIds) {
+                if (linkedId === neighbor.id || movedIds.has(linkedId)) continue;
+                const linked = freshItems.find((i) => i.id === linkedId);
+                if (linked) {
+                  movedIds.add(linkedId);
+                  moveUpdates.push({ id: linkedId, from: Math.max(0, linked.from + fromDelta) });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (moveUpdates.length > 0) {
+      useItemsStore.getState()._moveItems(moveUpdates);
+    }
+
+    // Repair transitions for all affected clips
+    const allAffectedIds = [...allSynchronizedIds, ...movedIds];
+    applyTransitionRepairs(allAffectedIds);
 
     useTimelineSettingsStore.getState().markDirty();
   }, { id, newFrom, newDuration, newSpeed });

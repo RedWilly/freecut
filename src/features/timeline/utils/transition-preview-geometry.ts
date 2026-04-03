@@ -20,10 +20,16 @@ export interface RipplePreviewLike {
   isDownstream: boolean;
 }
 
+export interface LinkedEditPreviewLike {
+  from?: number;
+  durationInFrames?: number;
+}
+
 export interface PreviewAdjustments {
   rolling: RollingPreviewLike;
   slide: SlidePreviewLike;
   ripple: RipplePreviewLike;
+  linkedEdit?: LinkedEditPreviewLike | null;
 }
 
 export interface PreviewGeometry {
@@ -80,6 +86,13 @@ export function applyPreviewGeometryToClip(
   }
   if (ripple.isDownstream && ripple.trimmedItemId != null && ripple.trimmedItemId !== clipId) {
     from += ripple.delta;
+  }
+
+  // Linked edit preview (rate stretch and other generic previews)
+  const { linkedEdit } = adjustments;
+  if (linkedEdit) {
+    if (linkedEdit.from !== undefined) from = linkedEdit.from;
+    if (linkedEdit.durationInFrames !== undefined) durationInFrames = linkedEdit.durationInFrames;
   }
 
   return {
