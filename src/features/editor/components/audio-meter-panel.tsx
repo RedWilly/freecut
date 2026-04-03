@@ -177,7 +177,6 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       frame: effectiveFrame,
       masterGain: 1,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- liveOverrideVersion invalidates when fader overrides change
   }, [compiledGraph, effectiveFrame, liveOverrideVersion]);
 
   // Per-track sources include track volume but not master/bus volume.
