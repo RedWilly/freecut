@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, type HTMLAttributes, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, type HTMLAttributes, type ReactNode, type RefObject } from 'react';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { linearLevelToPercent, setLiveTrackVolumeOverride, clearLiveTrackVolumeOverride, setLiveBusVolumeOverride, clearLiveBusVolumeOverride } from './audio-meter-utils';
 import { getMixerLiveGain, setMixerLiveGains } from '@/shared/state/mixer-live-gain';
@@ -95,6 +95,8 @@ interface SegmentedMeterBarProps {
   className?: string;
   /** Optional attributes for the active fill element */
   fillProps?: HTMLAttributes<HTMLDivElement>;
+  /** Imperative ref used for smooth local meter preview during fader drag */
+  fillRef?: RefObject<HTMLDivElement | null>;
 }
 
 const SegmentedMeterBar = memo(function SegmentedMeterBar({
@@ -103,6 +105,7 @@ const SegmentedMeterBar = memo(function SegmentedMeterBar({
   scanning,
   className = '',
   fillProps,
+  fillRef,
 }: SegmentedMeterBarProps) {
   return (
     <div className={`relative flex-1 rounded-[2px] bg-[#08090b] overflow-hidden ${className}`}>
@@ -114,6 +117,7 @@ const SegmentedMeterBar = memo(function SegmentedMeterBar({
 
       {/* Active fill — gradient with segment mask */}
       <div
+        ref={fillRef}
         {...fillProps}
         className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#1be255] via-[#f5e146] to-[#ff6633] ${scanning ? 'opacity-50' : ''}`}
         style={{
@@ -174,7 +178,9 @@ interface ChannelFaderProps {
   /** Called once on drag end — triggers store update + markDirty */
   onVolumeChange: (trackId: string, volumeDb: number) => void;
   /** Imperative ref for updating the dB readout during drag (no re-render) */
-  dbReadoutRef?: React.RefObject<HTMLDivElement | null>;
+  dbReadoutRef?: RefObject<HTMLDivElement | null>;
+  /** Immediate visual preview for the per-track meter while graph estimates catch up */
+  onMeterPreviewChange?: (previewDb: number | null) => void;
 }
 
 const ChannelFader = memo(function ChannelFader({
@@ -183,6 +189,7 @@ const ChannelFader = memo(function ChannelFader({
   itemIds,
   onVolumeChange,
   dbReadoutRef,
+  onMeterPreviewChange,
 }: ChannelFaderProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLDivElement | null>(null);
@@ -191,6 +198,10 @@ const ChannelFader = memo(function ChannelFader({
   const latestDbRef = useRef(volumeDb);
   const dragStartDbRef = useRef(volumeDb);
   const dragStartGainsRef = useRef<Map<string, number>>(new Map());
+  const finalizeDragRef = useRef<(params?: {
+    pointerId?: number;
+    target?: Pick<HTMLDivElement, 'releasePointerCapture'> | null;
+  }) => void>(() => {});
 
   // Sync from props when not dragging
   if (!isDraggingRef.current) {
@@ -248,7 +259,8 @@ const ChannelFader = memo(function ChannelFader({
     // Feed live volume into the meter source builder so both per-track
     // and bus meters update in real-time during drag.
     setLiveTrackVolumeOverride(trackId, db);
-  }, [dbReadoutRef, itemIds, trackId, volumeDb]);
+    onMeterPreviewChange?.(db);
+  }, [dbReadoutRef, itemIds, onMeterPreviewChange, trackId, volumeDb]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -293,7 +305,9 @@ const ChannelFader = memo(function ChannelFader({
     // then clear the live override so the next resolution uses the compiled value.
     onVolumeChange(trackId, latestDbRef.current);
     clearLiveTrackVolumeOverride(trackId);
-  }, [onVolumeChange, trackId]);
+    onMeterPreviewChange?.(null);
+  }, [onMeterPreviewChange, onVolumeChange, trackId]);
+  finalizeDragRef.current = finalizeDrag;
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -307,9 +321,9 @@ const ChannelFader = memo(function ChannelFader({
 
   useEffect(() => {
     return () => {
-      finalizeDrag();
+      finalizeDragRef.current();
     };
-  }, [finalizeDrag]);
+  }, []);
 
   const handleDoubleClick = useCallback(() => {
     applyDragValue(0);
@@ -397,6 +411,12 @@ const ChannelStrip = memo(function ChannelStrip({
   onSoloToggle,
 }: ChannelStripProps) {
   const dbReadoutRef = useRef<HTMLDivElement | null>(null);
+  const leftBarRef = useRef<HTMLDivElement | null>(null);
+  const rightBarRef = useRef<HTMLDivElement | null>(null);
+  const leftPercentRef = useRef(0);
+  const rightPercentRef = useRef(0);
+  const showScanningFallbackRef = useRef(false);
+  const trackVolumeRef = useRef(track.volume);
   const handleMuteClick = useCallback(() => {
     onMuteToggle(track.id);
   }, [onMuteToggle, track.id]);
@@ -415,6 +435,33 @@ const ChannelStrip = memo(function ChannelStrip({
   const leftPercent = isPlaying ? Math.max(level ? linearLevelToPercent(level.left) : 0, fallbackPercent) : 0;
   const rightPercent = isPlaying ? Math.max(level ? linearLevelToPercent(level.right) : 0, fallbackPercent) : 0;
   const showScanningFallback = fallbackPercent > 0;
+  leftPercentRef.current = leftPercent;
+  rightPercentRef.current = rightPercent;
+  showScanningFallbackRef.current = showScanningFallback;
+  trackVolumeRef.current = track.volume;
+
+  const applyMeterPreview = useCallback((previewDb: number | null) => {
+    if (!leftBarRef.current || !rightBarRef.current) {
+      return;
+    }
+
+    const baseLeftPercent = leftPercentRef.current;
+    const baseRightPercent = rightPercentRef.current;
+    const canPreview = showScanningFallbackRef.current || baseLeftPercent > 0 || baseRightPercent > 0;
+    if (previewDb === null || !canPreview) {
+      leftBarRef.current.style.height = `${baseLeftPercent}%`;
+      rightBarRef.current.style.height = `${baseRightPercent}%`;
+      return;
+    }
+
+    const meterOffsetPercent = ((previewDb - trackVolumeRef.current) / 60) * 100;
+    leftBarRef.current.style.height = `${Math.max(0, Math.min(100, baseLeftPercent + meterOffsetPercent))}%`;
+    rightBarRef.current.style.height = `${Math.max(0, Math.min(100, baseRightPercent + meterOffsetPercent))}%`;
+  }, []);
+
+  useEffect(() => {
+    applyMeterPreview(null);
+  }, [applyMeterPreview]);
 
   // dB readout color: green at unity, amber when boosted, dim when cut
   const dbColor = track.volume > 0.05
@@ -424,7 +471,8 @@ const ChannelStrip = memo(function ChannelStrip({
       : 'text-muted-foreground/60';
 
   const stripWidth = expanded ? 'min-w-[68px] w-[68px]' : 'min-w-[52px] w-[52px]';
-  const meterBarWidth = expanded ? 'w-[14px]' : 'w-[10px]';
+  const meterBarWidth = expanded ? 'w-[14px]' : 'w-[14px]';
+  const meterBarGap = 'gap-[2px]';
   const buttonSize = expanded ? 'w-[22px] h-[18px] text-[10px]' : 'w-[18px] h-[16px] text-[9px]';
 
   return (
@@ -478,10 +526,11 @@ const ChannelStrip = memo(function ChannelStrip({
         {/* Fader + segmented level meter area */}
         <div className={`flex-1 w-full min-h-0 flex items-stretch ${expanded ? 'gap-0.5' : 'gap-px'} py-1`}>
           {/* Segmented per-track level bars */}
-          <div className={`flex gap-px ${meterBarWidth} shrink-0`}>
+          <div className={`flex ${meterBarGap} ${meterBarWidth} shrink-0`}>
             <SegmentedMeterBar
               height={`${leftPercent}%`}
               scanning={showScanningFallback}
+              fillRef={leftBarRef}
               fillProps={{
                 'data-track-id': track.id,
                 'data-track-channel': 'left',
@@ -490,6 +539,7 @@ const ChannelStrip = memo(function ChannelStrip({
             <SegmentedMeterBar
               height={`${rightPercent}%`}
               scanning={showScanningFallback}
+              fillRef={rightBarRef}
               fillProps={{
                 'data-track-id': track.id,
                 'data-track-channel': 'right',
@@ -505,6 +555,7 @@ const ChannelStrip = memo(function ChannelStrip({
               itemIds={track.itemIds}
               onVolumeChange={onVolumeChange}
               dbReadoutRef={dbReadoutRef}
+              onMeterPreviewChange={applyMeterPreview}
             />
           </div>
         </div>
