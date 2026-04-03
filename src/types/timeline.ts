@@ -61,6 +61,7 @@ export type VideoItem = BaseTimelineItem & {
   src: string;
   thumbnailUrl?: string;
   offset?: number; // Trim offset in source video
+  embeddedAudioMuted?: boolean; // Suppress embedded audio after unlinking from audio companion
   // Source dimensions (intrinsic size from media metadata)
   sourceWidth?: number;
   sourceHeight?: number;

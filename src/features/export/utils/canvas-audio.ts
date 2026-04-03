@@ -698,6 +698,7 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
       if (item.type === 'video') {
         const videoItem = item as VideoItem;
         if (linkedRootVideoIds.has(videoItem.id)) continue;
+        if (videoItem.embeddedAudioMuted) continue;
         if (!videoItem.src) continue;
         videoById.set(item.id, {
           item: videoItem,

@@ -310,7 +310,7 @@ export function getCompositionOwnedAudioSources(params: {
       }];
     }
 
-    if (item.type === 'video' && !hasLinkedAudioCompanion(orderedItems, item)) {
+    if (item.type === 'video' && !item.embeddedAudioMuted && !hasLinkedAudioCompanion(orderedItems, item)) {
       return [{
         itemId: item.id,
         mediaId: item.mediaId,

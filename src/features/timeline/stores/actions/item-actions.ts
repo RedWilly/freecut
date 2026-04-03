@@ -339,10 +339,25 @@ export function unlinkItems(ids: string[]): void {
   const linkedItems = items.filter((item) => unlinkIds.has(item.id) && item.linkedGroupId);
   if (linkedItems.length === 0) return;
 
+  // Detect video items that have a linked audio companion — their embedded audio
+  // should be muted after unlinking so it doesn't start playing when the audio is deleted.
+  const videoIdsWithAudioCompanion = new Set<string>();
+  for (const item of linkedItems) {
+    if (item.type === 'video') {
+      const hasAudio = linkedItems.some(
+        (other) => other.type === 'audio' && other.linkedGroupId === item.linkedGroupId,
+      );
+      if (hasAudio) videoIdsWithAudioCompanion.add(item.id);
+    }
+  }
+
   execute('UNLINK_ITEMS', () => {
     const store = useItemsStore.getState();
     for (const item of linkedItems) {
-      store._updateItem(item.id, { linkedGroupId: item.id });
+      store._updateItem(item.id, {
+        linkedGroupId: item.id,
+        ...(videoIdsWithAudioCompanion.has(item.id) && { embeddedAudioMuted: true }),
+      });
     }
     useSelectionStore.getState().selectItems(linkedItems.map((item) => item.id));
     useTimelineSettingsStore.getState().markDirty();
@@ -364,7 +379,10 @@ export function linkItems(ids: string[]): boolean {
   execute('LINK_ITEMS', () => {
     const store = useItemsStore.getState();
     for (const item of selectedItems) {
-      store._updateItem(item.id, { linkedGroupId });
+      store._updateItem(item.id, {
+        linkedGroupId,
+        ...(item.type === 'video' && { embeddedAudioMuted: undefined }),
+      });
     }
     useSelectionStore.getState().selectItems(selectedItems.map((item) => item.id));
     useTimelineSettingsStore.getState().markDirty();

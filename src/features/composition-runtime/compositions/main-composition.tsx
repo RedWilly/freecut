@@ -241,7 +241,7 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
   // Video audio is rendered in a dedicated audio layer to decouple audio
   // from transition visual overlays and pooled video element state.
   const videoAudioItems = useMemo(
-    () => renderPlan.videoItems.filter((item) => !hasLinkedAudioCompanion(audioItems, item)),
+    () => renderPlan.videoItems.filter((item) => !item.embeddedAudioMuted && !hasLinkedAudioCompanion(audioItems, item)),
     [audioItems, renderPlan.videoItems]
   );
 

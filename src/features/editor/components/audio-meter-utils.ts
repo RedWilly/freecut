@@ -417,7 +417,7 @@ function appendAudioMeterSources(params: {
   const standaloneAudioItems = audioItems.filter((item) => (
     !isCompositionAudioItem(item) && !managedLinkedAudioIds.has(item.id)
   ));
-  const videoAudioItems = renderPlan.videoItems.filter((item) => !hasLinkedAudioCompanion(audioItems, item));
+  const videoAudioItems = renderPlan.videoItems.filter((item) => !item.embeddedAudioMuted && !hasLinkedAudioCompanion(audioItems, item));
   const directTrackIdByItemId = new Map<string, string>([
     ...standaloneAudioItems.map((item) => [item.id, item.trackId] as const),
     ...videoAudioItems.map((item) => [item.id, item.trackId] as const),
@@ -597,7 +597,7 @@ function buildAudioMeterGraphNode(params: {
   const standaloneAudioItems = audioItems.filter((item) => (
     !isCompositionAudioItem(item) && !managedLinkedAudioIds.has(item.id)
   ));
-  const videoAudioItems = renderPlan.videoItems.filter((item) => !hasLinkedAudioCompanion(audioItems, item));
+  const videoAudioItems = renderPlan.videoItems.filter((item) => !item.embeddedAudioMuted && !hasLinkedAudioCompanion(audioItems, item));
   const directTrackIdByItemId = new Map<string, string>([
     ...standaloneAudioItems.map((item) => [item.id, item.trackId] as const),
     ...videoAudioItems.map((item) => [item.id, item.trackId] as const),
@@ -1047,6 +1047,7 @@ export function isAudioMixerTrack(track: TimelineTrack, timelineItems: readonly 
 
   return track.items.some((item) => (
     (item.type === 'video' || item.type === 'composition')
+    && !(item.type === 'video' && item.embeddedAudioMuted)
     && !hasLinkedAudioCompanion(timelineItems as TimelineItem[], item)
   ));
 }
