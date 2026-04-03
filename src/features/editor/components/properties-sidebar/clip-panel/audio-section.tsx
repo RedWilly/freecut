@@ -24,6 +24,9 @@ interface AudioSectionProps {
   items: TimelineItem[];
 }
 
+const AUDIO_GAIN_DB_MIN = -60;
+const AUDIO_GAIN_DB_MAX = 12;
+
 /**
  * Audio section - volume and audio fades.
  * Shown for video and audio clips.
@@ -222,15 +225,15 @@ export function AudioSection({ items }: AudioSectionProps) {
 
   return (
     <PropertySection title="Audio" icon={Volume2} defaultOpen={true}>
-      {/* Volume in dB (-60 to +20, 0 dB = unity gain) */}
+      {/* Volume in dB (-60 to +12, 0 dB = unity gain) */}
       <PropertyRow label="Gain">
         <div className="flex items-center gap-1 w-full">
           <SliderInput
             value={volume}
             onChange={handleVolumeChange}
             onLiveChange={handleVolumeLiveChange}
-            min={-60}
-            max={20}
+            min={AUDIO_GAIN_DB_MIN}
+            max={AUDIO_GAIN_DB_MAX}
             step={0.1}
             unit="dB"
             className="flex-1 min-w-0"
