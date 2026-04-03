@@ -366,12 +366,10 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
             </div>
           )}
           {canScrubPreview && skimProgress !== null && (
-            <>
               <div
                 className="absolute inset-y-0 w-px bg-white/80 shadow-[0_0_0_1px_rgba(0,0,0,0.25)] pointer-events-none"
                 style={{ left: `${skimProgress * 100}%` }}
               />
-            </>
           )}
         </div>
 
@@ -560,12 +558,10 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
           </div>
         )}
         {canScrubPreview && skimProgress !== null && (
-          <>
             <div
               className="absolute inset-y-0 w-px bg-white/85 shadow-[0_0_0_1px_rgba(0,0,0,0.3)] pointer-events-none"
               style={{ left: `${skimProgress * 100}%` }}
             />
-          </>
         )}
       </div>
 

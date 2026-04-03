@@ -7,6 +7,7 @@ import {
   renderSingleFrame,
   resolveMediaUrl,
   resolveMediaUrls,
+  useCompositionsStore,
   type SubComposition,
 } from '../deps/timeline-contract';
 
@@ -40,8 +41,8 @@ class CompoundClipThumbnailService {
 
   async getThumbnailBlobUrl(
     compositionId: string,
-    compositionById: Record<string, SubComposition | undefined>,
   ): Promise<string | null> {
+    const compositionById = useCompositionsStore.getState().compositionById;
     const composition = compositionById[compositionId];
     if (!composition) {
       return null;

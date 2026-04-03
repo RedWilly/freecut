@@ -36,13 +36,14 @@ export const InlineSourcePreview = memo(function InlineSourcePreview({
   containerSize,
 }: InlineSourcePreviewProps) {
   const [blobUrl, setBlobUrl] = useState('');
-  const media = useMediaLibraryStore((s) => s.mediaItems.find((item) => item.id === mediaId));
+  const media = useMediaLibraryStore((s) => s.mediaById[mediaId]);
   const zoom = usePlaybackStore((s) => s.zoom);
   const mediaWidth = media?.width || 640;
   const mediaHeight = media?.height || 360;
 
   useEffect(() => {
     let cancelled = false;
+    setBlobUrl('');
 
     resolveMediaUrl(mediaId).then((url) => {
       if (!cancelled) {
@@ -118,7 +119,7 @@ export const InlineSourcePreview = memo(function InlineSourcePreview({
       >
         <div className="relative">
           <div
-            className="relative shadow-2xl"
+            className="relative shadow-2xl overflow-hidden"
             style={{
               width: `${playerSize.width}px`,
               height: `${playerSize.height}px`,

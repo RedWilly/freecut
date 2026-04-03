@@ -263,7 +263,9 @@ function CompositionCard({
   const thumbnailContainerRef = useRef<HTMLDivElement | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [skimProgress, setSkimProgress] = useState<number | null>(null);
-  const compositionById = useCompositionsStore((s) => s.compositionById);
+  const thisComposition = useCompositionsStore(
+    useCallback((s) => s.compositionById[composition.id], [composition.id])
+  );
   const setCompoundClipSkimPreview = useEditorStore((s) => s.setCompoundClipSkimPreview);
   const clearCompoundClipSkimPreview = useEditorStore((s) => s.clearCompoundClipSkimPreview);
 
@@ -278,10 +280,7 @@ function CompositionCard({
     let mounted = true;
 
     const loadThumbnail = async () => {
-      const url = await compoundClipThumbnailService.getThumbnailBlobUrl(
-        composition.id,
-        compositionById,
-      );
+      const url = await compoundClipThumbnailService.getThumbnailBlobUrl(composition.id);
       if (mounted) {
         setThumbnailUrl(url);
       }
@@ -295,7 +294,7 @@ function CompositionCard({
         clearCompoundClipSkimPreview();
       }
     };
-  }, [clearCompoundClipSkimPreview, composition.id, compositionById]);
+  }, [clearCompoundClipSkimPreview, composition.id, thisComposition]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
