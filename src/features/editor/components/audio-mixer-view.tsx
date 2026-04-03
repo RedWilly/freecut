@@ -413,11 +413,8 @@ const ChannelStrip = memo(function ChannelStrip({
   const dbReadoutRef = useRef<HTMLDivElement | null>(null);
   const leftBarRef = useRef<HTMLDivElement | null>(null);
   const rightBarRef = useRef<HTMLDivElement | null>(null);
-  const previewDbRef = useRef<number | null>(null);
   const leftPercentRef = useRef(0);
   const rightPercentRef = useRef(0);
-  const showScanningFallbackRef = useRef(false);
-  const trackVolumeRef = useRef(track.volume);
   const handleMuteClick = useCallback(() => {
     onMuteToggle(track.id);
   }, [onMuteToggle, track.id]);
@@ -438,32 +435,16 @@ const ChannelStrip = memo(function ChannelStrip({
   const showScanningFallback = fallbackPercent > 0;
   leftPercentRef.current = leftPercent;
   rightPercentRef.current = rightPercent;
-  showScanningFallbackRef.current = showScanningFallback;
-  trackVolumeRef.current = track.volume;
 
-  const applyMeterPreview = useCallback((previewDb: number | null) => {
-    if (!leftBarRef.current || !rightBarRef.current) {
-      return;
-    }
-
-    previewDbRef.current = previewDb;
-    const baseLeftPercent = leftPercentRef.current;
-    const baseRightPercent = rightPercentRef.current;
-    const canPreview = showScanningFallbackRef.current || baseLeftPercent > 0 || baseRightPercent > 0;
-    if (previewDb === null || !canPreview) {
-      leftBarRef.current.style.height = `${baseLeftPercent}%`;
-      rightBarRef.current.style.height = `${baseRightPercent}%`;
-      return;
-    }
-
-    const meterOffsetPercent = ((previewDb - trackVolumeRef.current) / 60) * 100;
-    leftBarRef.current.style.height = `${Math.max(0, Math.min(100, baseLeftPercent + meterOffsetPercent))}%`;
-    rightBarRef.current.style.height = `${Math.max(0, Math.min(100, baseRightPercent + meterOffsetPercent))}%`;
+  const syncMeterBars = useCallback(() => {
+    if (!leftBarRef.current || !rightBarRef.current) return;
+    leftBarRef.current.style.height = `${leftPercentRef.current}%`;
+    rightBarRef.current.style.height = `${rightPercentRef.current}%`;
   }, []);
 
   useEffect(() => {
-    applyMeterPreview(previewDbRef.current);
-  }, [applyMeterPreview, leftPercent, rightPercent, showScanningFallback, track.volume]);
+    syncMeterBars();
+  }, [syncMeterBars, leftPercent, rightPercent]);
 
   // dB readout color: green at unity, amber when boosted, dim when cut
   const dbColor = track.volume > 0.05
@@ -557,7 +538,6 @@ const ChannelStrip = memo(function ChannelStrip({
               itemIds={track.itemIds}
               onVolumeChange={onVolumeChange}
               dbReadoutRef={dbReadoutRef}
-              onMeterPreviewChange={applyMeterPreview}
             />
           </div>
         </div>
