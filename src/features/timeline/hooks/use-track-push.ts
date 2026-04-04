@@ -183,7 +183,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
 
     setDragState({
       isDragging: true,
-      draggedItemIds: [item.id],
+      draggedItemIds: [],
       offset: { x: 0, y: 0 },
       activeSnapTarget: null,
     });

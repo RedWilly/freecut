@@ -735,19 +735,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     useCallback((s) => s.itemId !== null && s.itemId !== item.id, [item.id])
   ) && linkedEditPreviewUpdate !== null && linkedEditPreviewUpdate.sourceStart !== undefined;
 
-  // Linked slide companion: true when another clip is being slid and this
-  // item receives a linked from-offset preview update.
-  const linkedSlideActiveItemId = useSlideEditPreviewStore(
+  // Linked slide companion: true ONLY when this item is the direct linked
+  // companion of the slid clip (not a counterpart of a neighbor).
+  // Verified by checking that this item is linked to the slid clip.
+  const isLinkedSlideCompanion = useSlideEditPreviewStore(
     useCallback((s) => {
-      if (!s.itemId || s.itemId === item.id) return null;
-      // Not a neighbor — must be a linked companion
-      if (s.leftNeighborId === item.id || s.rightNeighborId === item.id) return null;
-      return s.itemId;
+      if (!s.itemId || s.itemId === item.id) return false;
+      if (s.leftNeighborId === item.id || s.rightNeighborId === item.id) return false;
+      // Must actually be linked to the slid clip
+      const items = useItemsStore.getState().items;
+      const linkedIds = getLinkedItemIds(items, s.itemId);
+      return linkedIds.includes(item.id);
     }, [item.id])
   );
-  const isLinkedSlideCompanion = linkedSlideActiveItemId !== null
-    && linkedEditPreviewUpdate !== null
-    && linkedEditPreviewUpdate.from !== undefined;
 
   // Slide edit preview: real-time visual offsets during slide drag.
   // - Slid clip: position shifts by slideDelta

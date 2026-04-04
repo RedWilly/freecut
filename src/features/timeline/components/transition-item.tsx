@@ -7,6 +7,7 @@ import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store';
 import { useTransitionBreakPreviewStore } from '../stores/transition-break-preview-store';
+import { useTrackPushPreviewStore } from '../stores/track-push-preview-store';
 import { useSelectionStore } from '@/shared/state/selection';
 import {
   TRANSITION_DRAG_MIME,
@@ -231,6 +232,24 @@ export const TransitionItem = memo(function TransitionItem({
     )
   );
 
+  // Track push preview: both clips shift by delta if they're in the shifted set
+  const trackPushLeft = useTrackPushPreviewStore(
+    useShallow(
+      useCallback((s) => ({
+        delta: s.delta,
+        isShifted: s.shiftedItemIds.has(transition.leftClipId),
+      }), [transition.leftClipId])
+    )
+  );
+  const trackPushRight = useTrackPushPreviewStore(
+    useShallow(
+      useCallback((s) => ({
+        delta: s.delta,
+        isShifted: s.shiftedItemIds.has(transition.rightClipId),
+      }), [transition.rightClipId])
+    )
+  );
+
   // Track hovered edge for showing resize handles
   const [hoveredEdge, setHoveredEdge] = useState<'left' | 'right' | null>(null);
 
@@ -300,9 +319,10 @@ export const TransitionItem = memo(function TransitionItem({
           isDownstream: ripplePreview.leftDownstream,
         },
         linkedEdit: leftLinkedEditPreview,
+        trackPush: trackPushLeft,
       },
     );
-  }, [leftClip, rollingPreview, slidePreview, ripplePreview, leftLinkedEditPreview]);
+  }, [leftClip, rollingPreview, slidePreview, ripplePreview, leftLinkedEditPreview, trackPushLeft]);
 
   const effectiveRightClip = useMemo(() => {
     if (!rightClip) return null;
@@ -319,9 +339,10 @@ export const TransitionItem = memo(function TransitionItem({
           isDownstream: ripplePreview.rightDownstream,
         },
         linkedEdit: rightLinkedEditPreview,
+        trackPush: trackPushRight,
       },
     );
-  }, [rightClip, rollingPreview, slidePreview, ripplePreview, rightLinkedEditPreview]);
+  }, [rightClip, rollingPreview, slidePreview, ripplePreview, rightLinkedEditPreview, trackPushRight]);
 
   const position = useMemo(() => {
     if (!effectiveLeftClip || !effectiveRightClip) return null;

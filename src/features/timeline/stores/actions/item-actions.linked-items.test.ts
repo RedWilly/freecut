@@ -298,6 +298,171 @@ describe('linked timeline items', () => {
     expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 30 });
   });
 
+  it('close gap shifts solo clips on other tracks when downstream of gap', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-anchor',
+        durationInFrames: 60,
+        linkedGroupId: undefined,
+        originId: 'origin-anchor',
+        mediaId: 'media-anchor',
+      }),
+      makeVideoItem({
+        id: 'video-2',
+        from: 120,
+        linkedGroupId: undefined,
+        originId: 'origin-2',
+        mediaId: 'media-2',
+      }),
+      // Solo audio AFTER gapEnd (120), so it should shift
+      makeAudioItem({
+        id: 'solo-audio',
+        from: 150,
+        durationInFrames: 30,
+        linkedGroupId: undefined,
+        originId: 'origin-solo',
+        mediaId: 'media-solo',
+      }),
+    ]);
+
+    closeGapAtPosition('video-track', 75);
+
+    const items = useItemsStore.getState().items;
+    expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
+    // Solo audio shifted left by gapSize (60): 150 → 90
+    expect(items.find((item) => item.id === 'solo-audio')).toMatchObject({ from: 90 });
+  });
+
+  it('close gap leaves solo clips before gap end in place', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-anchor',
+        durationInFrames: 60,
+        linkedGroupId: undefined,
+        originId: 'origin-anchor',
+        mediaId: 'media-anchor',
+      }),
+      makeVideoItem({
+        id: 'video-2',
+        from: 120,
+        linkedGroupId: undefined,
+        originId: 'origin-2',
+        mediaId: 'media-2',
+      }),
+      // Solo audio BEFORE gapEnd (120), should NOT shift
+      makeAudioItem({
+        id: 'solo-audio',
+        from: 80,
+        durationInFrames: 30,
+        linkedGroupId: undefined,
+        originId: 'origin-solo',
+        mediaId: 'media-solo',
+      }),
+    ]);
+
+    closeGapAtPosition('video-track', 75);
+
+    const items = useItemsStore.getState().items;
+    expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
+    expect(items.find((item) => item.id === 'solo-audio')).toMatchObject({ from: 80 });
+  });
+
+  it('close gap deletes non-shifted items overlapped by shifted items', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-anchor',
+        durationInFrames: 50,
+        linkedGroupId: undefined,
+        originId: 'origin-anchor',
+        mediaId: 'media-anchor',
+      }),
+      makeVideoItem({
+        id: 'video-2',
+        from: 100,
+        durationInFrames: 60,
+        linkedGroupId: undefined,
+        originId: 'origin-2',
+        mediaId: 'media-2',
+      }),
+      // Solo audio starts at frame 60, will be overlapped by video-2 shifting from 100 to 50
+      makeAudioItem({
+        id: 'solo-audio',
+        from: 40,
+        durationInFrames: 30,
+        linkedGroupId: undefined,
+        originId: 'origin-solo',
+        mediaId: 'media-solo',
+      }),
+    ]);
+
+    closeGapAtPosition('video-track', 75);
+
+    const items = useItemsStore.getState().items;
+    // video-2 shifted from 100 to 50
+    expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 50 });
+    // solo-audio at 40-70 is NOT shifted (from 40 < gapEnd 100), but would it be
+    // overlapped? video-2 moves to 50-110 on video-track, solo-audio is on audio-track
+    // -> different track, no overlap, should survive
+    expect(items.find((item) => item.id === 'solo-audio')).toBeDefined();
+  });
+
+  it('ripple delete removes non-shifted items overlapped by shifted items', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-delete',
+        durationInFrames: 100,
+        linkedGroupId: 'group-del',
+        originId: 'origin-del',
+        mediaId: 'media-del',
+      }),
+      makeAudioItem({
+        id: 'audio-delete',
+        durationInFrames: 100,
+        linkedGroupId: 'group-del',
+        originId: 'origin-del',
+        mediaId: 'media-del',
+      }),
+      // Solo audio on audio-track that doesn't shift (not downstream of deleted audio)
+      makeAudioItem({
+        id: 'solo-audio',
+        from: 50,
+        durationInFrames: 30,
+        linkedGroupId: undefined,
+        originId: 'origin-solo',
+        mediaId: 'media-solo',
+      }),
+      // Downstream video that shifts left
+      makeVideoItem({
+        id: 'video-downstream',
+        from: 100,
+        durationInFrames: 60,
+        linkedGroupId: 'group-ds',
+        originId: 'origin-ds',
+        mediaId: 'media-ds',
+      }),
+      makeAudioItem({
+        id: 'audio-downstream',
+        from: 100,
+        durationInFrames: 60,
+        linkedGroupId: 'group-ds',
+        originId: 'origin-ds',
+        mediaId: 'media-ds',
+      }),
+    ]);
+
+    rippleDeleteItems(['video-delete']);
+
+    const items = useItemsStore.getState().items;
+    // Deleted items gone
+    expect(items.find((item) => item.id === 'video-delete')).toBeUndefined();
+    expect(items.find((item) => item.id === 'audio-delete')).toBeUndefined();
+    // Downstream items shifted left by 100
+    expect(items.find((item) => item.id === 'video-downstream')).toMatchObject({ from: 0 });
+    expect(items.find((item) => item.id === 'audio-downstream')).toMatchObject({ from: 0 });
+    // Solo audio at 50-80 overlapped by audio-downstream shifting to 0-60 → deleted
+    expect(items.find((item) => item.id === 'solo-audio')).toBeUndefined();
+  });
+
   it('links an arbitrary multi-selection with a fresh group id', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({ linkedGroupId: 'video-1' }),

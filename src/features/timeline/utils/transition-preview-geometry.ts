@@ -25,11 +25,17 @@ export interface LinkedEditPreviewLike {
   durationInFrames?: number;
 }
 
+export interface TrackPushPreviewLike {
+  delta: number;
+  isShifted: boolean;
+}
+
 export interface PreviewAdjustments {
   rolling: RollingPreviewLike;
   slide: SlidePreviewLike;
   ripple: RipplePreviewLike;
   linkedEdit?: LinkedEditPreviewLike | null;
+  trackPush?: TrackPushPreviewLike;
 }
 
 export interface PreviewGeometry {
@@ -86,6 +92,11 @@ export function applyPreviewGeometryToClip(
   }
   if (ripple.isDownstream && ripple.trimmedItemId != null && ripple.trimmedItemId !== clipId) {
     from += ripple.delta;
+  }
+
+  // Track push preview: shifted items move by delta
+  if (adjustments.trackPush?.isShifted) {
+    from += adjustments.trackPush.delta;
   }
 
   // Linked edit preview (rate stretch and other generic previews)
