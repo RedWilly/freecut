@@ -1595,7 +1595,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const hasGapBefore = item.from > 0 && !leftNeighbor;
 
   // Gap width in pixels — used for track-push handle sizing.
-  // Computed lazily only when a gap exists to avoid work on gapless clips.
+  // Uses getState() snapshot — acceptable because this only affects the push
+  // handle width, which is only visible during active gap interactions.
   const gapBeforePx = useMemo(() => {
     if (!hasGapBefore) return 0;
     const trackItems = useItemsStore.getState().itemsByTrackId[item.trackId] ?? [];

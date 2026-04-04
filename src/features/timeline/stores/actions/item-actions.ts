@@ -453,24 +453,30 @@ export function rippleDeleteItems(ids: string[]): void {
     }
   }
 
-  const allRemoveIds = [...expandedIds, ...coveredIds];
+  // Expand covered IDs with linked companions so we don't orphan them
+  const expandedCoveredIds = expandIdsWithLinkedItems(coveredIds);
+  const allRemoveIds = [...expandedIds, ...expandedCoveredIds];
+
+  // Filter out updates for items that were removed as covered (including their linked companions)
+  const coveredSet = new Set(expandedCoveredIds);
+  const filteredUpdates = coveredSet.size > 0
+    ? updates.filter((u) => !coveredSet.has(u.id))
+    : updates;
 
   execute('RIPPLE_DELETE_ITEMS', () => {
     useItemsStore.getState()._removeItems(allRemoveIds);
-    if (updates.length > 0) {
-      // Filter out updates for items that were removed as covered
-      const coveredSet = new Set(coveredIds);
-      const filteredUpdates = coveredSet.size > 0
-        ? updates.filter((u) => !coveredSet.has(u.id))
-        : updates;
-      if (filteredUpdates.length > 0) {
-        useItemsStore.getState()._moveItems(filteredUpdates);
-      }
+    if (filteredUpdates.length > 0) {
+      useItemsStore.getState()._moveItems(filteredUpdates);
     }
 
     // Cascade: Remove transitions and keyframes
     useTransitionsStore.getState()._removeTransitionsForItems(allRemoveIds);
     useKeyframesStore.getState()._removeKeyframesForItems(allRemoveIds);
+
+    // Repair transitions on moved clips (they may now overlap or gap differently)
+    if (filteredUpdates.length > 0) {
+      applyTransitionRepairs(filteredUpdates.map((u) => u.id));
+    }
 
     useTimelineSettingsStore.getState().markDirty();
   }, { ids: allRemoveIds });

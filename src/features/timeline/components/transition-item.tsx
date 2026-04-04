@@ -232,21 +232,24 @@ export const TransitionItem = memo(function TransitionItem({
     )
   );
 
-  // Track push preview: both clips shift by delta if they're in the shifted set
+  // Track push preview: only subscribe to delta when this clip is shifted.
+  // Return undefined for non-shifted clips so they skip re-renders entirely.
   const trackPushLeft = useTrackPushPreviewStore(
     useShallow(
-      useCallback((s) => ({
-        delta: s.delta,
-        isShifted: s.shiftedItemIds.has(transition.leftClipId),
-      }), [transition.leftClipId])
+      useCallback((s) => (
+        s.shiftedItemIds.has(transition.leftClipId)
+          ? { delta: s.delta, isShifted: true as const }
+          : undefined
+      ), [transition.leftClipId])
     )
   );
   const trackPushRight = useTrackPushPreviewStore(
     useShallow(
-      useCallback((s) => ({
-        delta: s.delta,
-        isShifted: s.shiftedItemIds.has(transition.rightClipId),
-      }), [transition.rightClipId])
+      useCallback((s) => (
+        s.shiftedItemIds.has(transition.rightClipId)
+          ? { delta: s.delta, isShifted: true as const }
+          : undefined
+      ), [transition.rightClipId])
     )
   );
 

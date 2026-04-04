@@ -671,6 +671,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
+        useRollingEditPreviewStore.getState().clearPreview();
         useTransitionBreakPreviewStore.getState().clearPreview();
         useLinkedEditPreviewStore.getState().clear();
       };

@@ -138,9 +138,21 @@ export function useTimelineSlipSlide(
         slipDelta: 0,
       });
     } else {
-      // Compute the effective slide range (tightest across all tracks)
-      const slideMinDelta = clampSlideDelta(-1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
-      const slideMaxDelta = clampSlideDelta(1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
+      // Compute the effective slide range (tightest across all tracks),
+      // incorporating transition constraints so the initial limit box matches
+      // the bounds used during dragging.
+      const allItems = useTimelineStore.getState().items;
+      const transitions = useTransitionsStore.getState().transitions;
+      const sourceMinDelta = clampSlideDelta(-1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
+      const sourceMaxDelta = clampSlideDelta(1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
+      const slideMinDelta = clampSlideDeltaToPreserveTransitions(
+        currentItem, sourceMinDelta, leftNeighbor ?? null, rightNeighbor ?? null,
+        allItems, transitions, fps,
+      );
+      const slideMaxDelta = clampSlideDeltaToPreserveTransitions(
+        currentItem, sourceMaxDelta, leftNeighbor ?? null, rightNeighbor ?? null,
+        allItems, transitions, fps,
+      );
       useSlideEditPreviewStore.getState().setPreview({
         itemId: item.id,
         trackId: currentItem.trackId,

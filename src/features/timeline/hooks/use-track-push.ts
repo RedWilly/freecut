@@ -128,6 +128,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
         useTrackPushPreviewStore.getState().clearPreview();
+        setDragState(null);
       };
     }
   }, [state.isActive, handleMouseMove, handleMouseUp]);
