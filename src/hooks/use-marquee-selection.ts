@@ -256,6 +256,8 @@ export function useMarqueeSelection({
       target.closest('[data-gizmo]') ||
       // Don't start marquee if clicking on a resize handle
       target.closest('[data-resize-handle]') ||
+      // Don't start marquee if clicking on a track-push handle
+      target.closest('[data-track-push]') ||
       target.style.cursor === 'col-resize' ||
       target.style.cursor === 'ns-resize'
     ) {

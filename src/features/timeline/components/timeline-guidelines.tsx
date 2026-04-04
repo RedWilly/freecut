@@ -37,7 +37,7 @@ export function TimelineGuidelines({ activeSnapTarget }: TimelineGuidelinesProps
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10000 }}>
       <div
-        className="absolute top-0 bottom-0 w-0.5"
+        className="absolute top-0 bottom-0 w-px"
         style={{
           left: `${left}px`,
           backgroundColor: 'var(--color-timeline-snap)',

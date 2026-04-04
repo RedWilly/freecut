@@ -12,6 +12,7 @@ import { useTrackDropPreviewStore } from '../../stores/track-drop-preview-store'
 import { useLinkedEditPreviewStore } from '../../stores/linked-edit-preview-store';
 import { useRollingEditPreviewStore } from '../../stores/rolling-edit-preview-store';
 import { useRippleEditPreviewStore } from '../../stores/ripple-edit-preview-store';
+import { useTrackPushPreviewStore } from '../../stores/track-push-preview-store';
 import { useSlipEditPreviewStore } from '../../stores/slip-edit-preview-store';
 import { useSlideEditPreviewStore } from '../../stores/slide-edit-preview-store';
 import { useSelectionStore } from '@/shared/state/selection';
@@ -30,6 +31,7 @@ import { getMediaDragData } from '@/features/timeline/deps/media-library-resolve
 import { useSettingsStore } from '@/features/timeline/deps/settings';
 import { useTimelineDrag, dragOffsetRef, dragPreviewOffsetByItemRef } from '../../hooks/use-timeline-drag';
 import { useTimelineTrim } from '../../hooks/use-timeline-trim';
+import { useTrackPush } from '../../hooks/use-track-push';
 import { isRateStretchableItem, useRateStretch } from '../../hooks/use-rate-stretch';
 import { useTimelineSlipSlide } from '../../hooks/use-timeline-slip-slide';
 import { useClipVisibility } from '../../hooks/use-clip-visibility';
@@ -46,7 +48,9 @@ import { ClipContent } from './clip-content';
 import { ClipIndicators } from './clip-indicators';
 import { shouldSuppressLinkedSyncBadge } from './linked-sync-badge';
 import { shouldSuppressTimelineItemClickAfterDrag } from './post-drag-click-guard';
-import { TrimHandles } from './trim-handles';
+import { TrimHandles, CONSTRAINED_COLORS, FREE_COLORS } from './trim-handles';
+import { TrackPushHandle } from './track-push-handle';
+import type { ActiveEdgeState } from './trim-handles';
 import { StretchHandles } from './stretch-handles';
 import { AudioFadeHandles } from './audio-fade-handles';
 import { VideoFadeHandles } from './video-fade-handles';
@@ -84,6 +88,7 @@ import {
   getLinkedItemIds,
   getLinkedItems,
   getLinkedSyncOffsetFrames,
+  getSynchronizedLinkedItems,
   hasLinkedItems,
 } from '../../utils/linked-items';
 import { getVisibleTrackIds } from '../../utils/group-utils';
@@ -111,6 +116,7 @@ import {
   dissolvePreComp,
 } from '../../stores/actions/composition-actions';
 import { useTimelineItemOverlayStore } from '../../stores/timeline-item-overlay-store';
+import { useRollHoverStore } from '../../stores/roll-hover-store';
 import { timelineToSourceFrames } from '../../utils/source-calculations';
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
 import { getTransitionBridgeBounds } from '../../utils/transition-preview-geometry';
@@ -122,7 +128,7 @@ import { getAudioFadePixels, getAudioFadeSecondsFromOffset, type AudioFadeHandle
 import { getAudioFadeCurveControlPoint, getAudioFadeCurveFromOffset, getAudioFadeCurvePath } from '../../utils/audio-fade-curve';
 import { getAudioVolumeDbFromDragDelta, getAudioVisualizationScale, getAudioVolumeLineY } from '../../utils/audio-volume';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
-import { findHandleNeighborWithTransitions } from '../../utils/transition-linked-neighbors';
+import { findHandleNeighborWithTransitions, findNearestNeighbors } from '../../utils/transition-linked-neighbors';
 import { detectScenes } from '../../deps/analysis';
 import { resolveMediaUrl } from '../../deps/media-library-resolver';
 const CAPTION_GENERATION_OVERLAY_ID = 'caption-generation';
@@ -137,10 +143,22 @@ const ACTIVE_CURSOR_CLASSES = [
   'timeline-cursor-slip-smart',
   'timeline-cursor-slide-smart',
   'timeline-cursor-gauge',
+  'timeline-cursor-track-push',
 ] as const;
 
 // Width in pixels for trim edge hover detection
 const EDGE_HOVER_ZONE = SMART_TRIM_EDGE_ZONE_PX;
+
+// Track-push trigger zone: scale with zoom so it stays hittable when zoomed out
+const TRACK_PUSH_MIN_PX = 6;
+const TRACK_PUSH_MAX_PX = 14;
+const TRACK_PUSH_ZOOM_THRESHOLD = 120;
+function getTrackPushZonePx(pxPerSec: number, gapPx: number): number {
+  const base = pxPerSec >= TRACK_PUSH_ZOOM_THRESHOLD
+    ? TRACK_PUSH_MIN_PX
+    : Math.round(TRACK_PUSH_MIN_PX + (TRACK_PUSH_MAX_PX - TRACK_PUSH_MIN_PX) * (1 - pxPerSec / TRACK_PUSH_ZOOM_THRESHOLD));
+  return Math.max(TRACK_PUSH_MIN_PX, Math.min(base, gapPx, TRACK_PUSH_MAX_PX));
+}
 const VIDEO_FADE_EPSILON = 0.0001;
 const AUDIO_FADE_EPSILON = 0.0001;
 const AUDIO_VOLUME_EPSILON = 0.05;
@@ -261,6 +279,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
   // Use refs for actions to avoid selector re-renders - read from store in callbacks
   const activeTool = useSelectionStore((s) => s.activeTool);
+  const isAnyGestureActive = useSelectionStore((s) => !!s.dragState?.isDragging);
 
   // Use ref for activeTool to avoid callback recreation on mode changes (prevents playback lag)
   const activeToolRef = useRef(activeTool);
@@ -270,6 +289,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const [hoveredEdge, setHoveredEdge] = useState<'start' | 'end' | null>(null);
   const [smartTrimIntent, setSmartTrimIntent] = useState<SmartTrimIntent>(null);
   const [smartBodyIntent, setSmartBodyIntent] = useState<SmartBodyIntent>(null);
+
+  // Clear stale hover state when the active tool changes (mouse may be stationary)
+  useEffect(() => {
+    setHoveredEdge(null);
+    setSmartTrimIntent(null);
+    setSmartBodyIntent(null);
+    useRollHoverStore.getState().clearRollHover(item.id);
+  }, [activeTool, item.id]);
+
+  // When an adjacent item enters roll mode, this item's edge should glow too
+  const rollHoverEdge = useRollHoverStore(
+    useCallback((s) => (s.neighborItemId === item.id ? s.neighborEdge : null), [item.id])
+  );
   const isSingleEffectDropTarget = useEffectDropPreviewStore(
     useCallback((state) => state.targetItemIds.length === 1 && state.targetItemIds[0] === item.id, [item.id])
   );
@@ -338,6 +370,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     handleSlipSlideStart,
   } = useTimelineSlipSlide(item, timelineDuration, trackLocked);
 
+  // Track push functionality — move clip + downstream items to close/open gaps
+  const { isTrackPushActive, handleTrackPushStart } = useTrackPush(item, timelineDuration, trackLocked);
+
   const activeGlobalCursorClass = useMemo(() => {
     if (isTrimming) {
       if (trimHandle === 'start') {
@@ -366,8 +401,12 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         : 'timeline-cursor-slip-smart';
     }
 
+    if (isTrackPushActive) {
+      return 'timeline-cursor-track-push';
+    }
+
     return null;
-  }, [isRollingEdit, isRippleEdit, isSlipSlideActive, isStretching, isTrimming, slipSlideMode, trimHandle]);
+  }, [isRollingEdit, isRippleEdit, isSlipSlideActive, isStretching, isTrimming, isTrackPushActive, slipSlideMode, trimHandle]);
 
   const gestureMode = useMemo(() => getTimelineItemGestureMode({
     isTrimming,
@@ -648,6 +687,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       return s.handle;
     }, [item.id])
   );
+  const rollingEditConstrained = useRollingEditPreviewStore(
+    useCallback((s) => s.neighborItemId === item.id && s.constrained, [item.id])
+  );
 
   // Ripple edit preview: downstream items shift by delta during ripple trim
   const rippleEditOffset = useRippleEditPreviewStore(
@@ -669,12 +711,41 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     }, [item.id])
   );
 
+  // Track push preview: all shifted items (anchor + downstream) move by delta
+  const trackPushOffset = useTrackPushPreviewStore(
+    useCallback((s) => {
+      if (!s.anchorItemId) return 0;
+      if (s.shiftedItemIds.has(item.id)) return s.delta;
+      return 0;
+    }, [item.id])
+  );
+
   // Slip edit preview: source window shift for the active slipped clip.
   // Used to update filmstrip/waveform source alignment during drag.
   const slipEditDelta = useSlipEditPreviewStore(
     useCallback((s) => {
       if (s.itemId !== item.id) return 0;
       return s.slipDelta;
+    }, [item.id])
+  );
+
+  // Linked slip companion: true when another clip is being slipped and this
+  // item receives a linked sourceStart/sourceEnd preview update.
+  const isLinkedSlipCompanion = useSlipEditPreviewStore(
+    useCallback((s) => s.itemId !== null && s.itemId !== item.id, [item.id])
+  ) && linkedEditPreviewUpdate !== null && linkedEditPreviewUpdate.sourceStart !== undefined;
+
+  // Linked slide companion: true ONLY when this item is the direct linked
+  // companion of the slid clip (not a counterpart of a neighbor).
+  // Verified by checking that this item is linked to the slid clip.
+  const isLinkedSlideCompanion = useSlideEditPreviewStore(
+    useCallback((s) => {
+      if (!s.itemId || s.itemId === item.id) return false;
+      if (s.leftNeighborId === item.id || s.rightNeighborId === item.id) return false;
+      // Must actually be linked to the slid clip
+      const items = useItemsStore.getState().items;
+      const linkedIds = getLinkedItemIds(items, s.itemId);
+      return linkedIds.includes(item.id);
     }, [item.id])
   );
 
@@ -708,6 +779,14 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       if (s.rightNeighborId === item.id) return 'right';
       return null;
     }, [item.id])
+  );
+
+  // Slide range from the preview store — the tightest constraint across all tracks.
+  // Used by both primary and companion overlays so limit boxes match.
+  const slideRange = useSlideEditPreviewStore(
+    useShallow(
+      useCallback((s) => (s.itemId ? { minDelta: s.minDelta, maxDelta: s.maxDelta } : null), [])
+    )
   );
 
   // For the actively slid item, read neighbor IDs from preview store so we can
@@ -776,11 +855,11 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     (slideNeighborSide === 'left' ? slideNeighborDelta : 0)
     + (slideNeighborSide === 'right' ? -slideNeighborDelta : 0);
 
-  const left = Math.round(timeToPixels((previewBaseItem.from + slideFromOffset + rippleEditOffset) / fps));
-  const right = Math.round(timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset) / fps));
+  const left = Math.round(timeToPixels((previewBaseItem.from + slideFromOffset + rippleEditOffset + trackPushOffset) / fps));
+  const right = Math.round(timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset + trackPushOffset) / fps));
   const width = right - left;
 
-  // Source FPS for converting source frames â†’ timeline frames (sourceStart etc. are in source-native FPS)
+  // Source FPS for converting source frames â†' timeline frames (sourceStart etc. are in source-native FPS)
   const effectiveSourceFps = previewBaseItem.sourceFps ?? fps;
 
   // Preview item for clip internals (filmstrip/waveform) during edit drags.
@@ -928,19 +1007,18 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     }
 
     // Rolling edit neighbor visual feedback
+    // Compute the shared boundary from absolute frame position (same path as anchor)
+    // to avoid sub-pixel divergence between the two clips.
     if (rollingEditDelta !== 0) {
       if (rollingEditHandle === 'end') {
-        // Trimmed item's end handle was dragged â†’ this neighbor's start adjusts
-        // Positive delta = edit point moved right = neighbor shrinks from left
-        const deltaPixels = Math.round(timeToPixels(rollingEditDelta / fps));
-        trimVisualLeft += deltaPixels;
-        trimVisualWidth -= deltaPixels;
+        // Trimmed item's end handle was dragged -- this neighbor's start adjusts
+        const newLeft = Math.round(frameToPixels(previewBaseItem.from + rollingEditDelta));
+        trimVisualWidth -= (newLeft - trimVisualLeft);
+        trimVisualLeft = newLeft;
       } else if (rollingEditHandle === 'start') {
-        // Trimmed item's start handle was dragged â†’ this neighbor's end adjusts
-        // Positive delta = edit point moved right â†’ neighbor extends from right
-        // Negative delta = edit point moved left â†’ neighbor shrinks from right
-        const deltaPixels = Math.round(timeToPixels(rollingEditDelta / fps));
-        trimVisualWidth += deltaPixels;
+        // Trimmed item's start handle was dragged -- this neighbor's end adjusts
+        const newRight = Math.round(frameToPixels(previewBaseItem.from + previewBaseItem.durationInFrames + rollingEditDelta));
+        trimVisualWidth = newRight - trimVisualLeft;
       }
     }
 
@@ -1005,6 +1083,41 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const { items } = useTimelineStore.getState();
       const { transitions } = useTransitionsStore.getState();
 
+      // Compute wall positions across all participants (primary + companions).
+      // Each participant's own adjacent neighbors are excluded (they get trimmed).
+      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+      const participants = linkedSelectionEnabled
+        ? getSynchronizedLinkedItems(items, item.id)
+        : [item];
+
+      let leftWallFrame: number | null = null;
+      let rightWallFrame: number | null = null;
+      for (const participant of participants) {
+        const pEnd = participant.from + participant.durationInFrames;
+        const excludeIds = new Set<string>(participants.map((p) => p.id));
+        if (slideLeftNeighborForSlidItem) excludeIds.add(slideLeftNeighborForSlidItem.id);
+        if (slideRightNeighborForSlidItem) excludeIds.add(slideRightNeighborForSlidItem.id);
+        for (const other of items) {
+          if (other.trackId !== participant.trackId || other.id === participant.id) continue;
+          const otherEnd = other.from + other.durationInFrames;
+          if (otherEnd === participant.from || other.from === pEnd) excludeIds.add(other.id);
+        }
+
+        const nearest = findNearestNeighbors(participant, items);
+        if (nearest.leftNeighbor && !excludeIds.has(nearest.leftNeighbor.id)) {
+          const wall = nearest.leftNeighbor.from + nearest.leftNeighbor.durationInFrames;
+          const maxLeft = -(participant.from - wall);
+          const primaryWall = item.from + maxLeft;
+          if (leftWallFrame === null || primaryWall > leftWallFrame) leftWallFrame = primaryWall;
+        }
+        if (nearest.rightNeighbor && !excludeIds.has(nearest.rightNeighbor.id)) {
+          const wall = nearest.rightNeighbor.from;
+          const maxRight = wall - pEnd;
+          const primaryWall = item.from + item.durationInFrames + maxRight;
+          if (rightWallFrame === null || primaryWall < rightWallFrame) rightWallFrame = primaryWall;
+        }
+      }
+
       return getSlideOperationBoundsVisual({
         item,
         items,
@@ -1017,6 +1130,10 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         constrained: slipSlideConstrained,
         currentLeftPx,
         currentRightPx,
+        leftWallFrame,
+        rightWallFrame,
+        effectiveMinDelta: slideRange?.minDelta,
+        effectiveMaxDelta: slideRange?.maxDelta,
       });
     }
 
@@ -1027,6 +1144,38 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         frameToPixels,
         constraintEdge: slipSlideConstraintEdge,
         constrained: slipSlideConstrained,
+        currentLeftPx,
+        currentRightPx,
+      });
+    }
+
+    // Linked slide companion: use the same effective range as the primary
+    if (isLinkedSlideCompanion && slideRange) {
+      return getSlideOperationBoundsVisual({
+        item,
+        items: [],
+        transitions: [],
+        fps,
+        frameToPixels,
+        leftNeighbor: null,
+        rightNeighbor: null,
+        constraintEdge: null,
+        constrained: false,
+        currentLeftPx,
+        currentRightPx,
+        effectiveMinDelta: slideRange.minDelta,
+        effectiveMaxDelta: slideRange.maxDelta,
+      });
+    }
+
+    // Linked slip companion: show the limit box for this item's own source bounds
+    if (isLinkedSlipCompanion) {
+      return getSlipOperationBoundsVisual({
+        item: previewBaseItem,
+        fps,
+        frameToPixels,
+        constraintEdge: null,
+        constrained: false,
         currentLeftPx,
         currentRightPx,
       });
@@ -1054,7 +1203,24 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     visualLeft,
     visualWidth,
     contentPreviewItem,
+    isLinkedSlipCompanion,
+    isLinkedSlideCompanion,
+    previewBaseItem,
   ]);
+
+  // Active edge state for halo rendering (trim, roll, slip, slide, stretch)
+  const activeEdges: ActiveEdgeState | null =
+    isTrimming && trimHandle
+      ? { start: trimHandle === 'start', end: trimHandle === 'end', constrainedEdge: trimConstrained ? (isRollingEdit ? 'both' : trimHandle) : null }
+      : rollingEditHandle
+      ? { start: rollingEditHandle === 'end', end: rollingEditHandle === 'start', constrainedEdge: rollingEditConstrained ? 'both' : null }
+      : isSlipSlideActive
+      ? { start: true, end: true, constrainedEdge: slipSlideConstrained ? (slipSlideConstraintEdge ?? 'both') : null }
+      : isLinkedSlipCompanion || isLinkedSlideCompanion
+      ? { start: true, end: true, constrainedEdge: null }
+      : isStretching
+      ? { start: stretchHandle === 'start', end: stretchHandle === 'end', constrainedEdge: stretchConstrained ? stretchHandle : null }
+      : null;
 
   // Visibility detection for lazy filmstrip loading (shared viewport state)
   const clipVisibility = useClipVisibility(visualLeft, visualWidth);
@@ -1260,7 +1426,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const nextHoveredEdge = smartTrimIntentToHandle(nextIntent);
 
       if (smartTrimIntentRef.current !== nextIntent) {
+        const prevIntent = smartTrimIntentRef.current;
         syncSmartTrimIntent(nextIntent);
+        // Publish roll-hover neighbor so the adjacent item also shows its edge
+        if (nextIntent === 'roll-start') {
+          const neighbor = findHandleNeighborWithTransitions(item, 'start', items, transitions);
+          if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'end');
+        } else if (nextIntent === 'roll-end') {
+          const neighbor = findHandleNeighborWithTransitions(item, 'end', items, transitions);
+          if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'start');
+        } else if (prevIntent === 'roll-start' || prevIntent === 'roll-end') {
+          // Was rolling, no longer — clear
+          useRollHoverStore.getState().clearRollHover(item.id);
+        }
       }
       if (hoveredEdgeRef.current !== nextHoveredEdge) {
         syncHoveredEdge(nextHoveredEdge);
@@ -1412,6 +1590,24 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     () => getNeighbors(),
     [getNeighbors, neighborKey]
   );
+
+  // Gap detection: clip has empty space before it (no strictly adjacent left neighbor)
+  const hasGapBefore = item.from > 0 && !leftNeighbor;
+
+  // Gap width in pixels — used for track-push handle sizing.
+  // Uses getState() snapshot — acceptable because this only affects the push
+  // handle width, which is only visible during active gap interactions.
+  const gapBeforePx = useMemo(() => {
+    if (!hasGapBefore) return 0;
+    const trackItems = useItemsStore.getState().itemsByTrackId[item.trackId] ?? [];
+    let prevEnd = 0;
+    for (const ti of trackItems) {
+      if (ti.id === item.id) continue;
+      const end = ti.from + ti.durationInFrames;
+      if (end <= item.from && end > prevEnd) prevEnd = end;
+    }
+    return Math.round(frameToPixels(item.from - prevEnd));
+  }, [hasGapBefore, item.trackId, item.id, item.from, item.durationInFrames, frameToPixels]);
 
   // Action handlers
   const handleJoinSelected = useCallback(() => {
@@ -2643,7 +2839,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     syncHoveredEdge(null);
     syncSmartTrimIntent(null);
     syncSmartBodyIntent(null);
-  }, [syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent]);
+    useRollHoverStore.getState().clearRollHover(item.id);
+  }, [item.id, syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent]);
 
   const handleSmartTrimStart = useCallback((e: React.MouseEvent, handle: 'start' | 'end') => {
     const currentIntent = smartTrimIntentRef.current;
@@ -2978,8 +3175,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
           onDragLeave={handleEffectDragLeave}
           onDrop={handleEffectDrop}
         >
-          {/* Selection indicator */}
-          {isSelected && !trackLocked && (
+          {/* Selection indicator — hidden during active gestures to reduce clutter */}
+          {isSelected && !trackLocked && !isAnyGestureActive && (
             <div className="absolute inset-0 rounded pointer-events-none z-20 border border-primary" />
           )}
 
@@ -3154,7 +3351,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             trimHandle={trimHandle}
             activeTool={activeTool}
             hoveredEdge={hoveredEdge}
-            trimConstrained={trimConstrained}
+            smartTrimIntent={smartTrimIntent}
+            rollHoverEdge={rollHoverEdge}
+            activeEdges={activeEdges}
             startCursorClass={
               smartTrimIntent === 'ripple-start'
                 ? 'cursor-ripple-left'
@@ -3220,7 +3419,45 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
         </div>
       </ItemContextMenu>
 
+      {/* Track push handle — sits in the gap to the LEFT of the clip, outside contain:paint */}
+      <TrackPushHandle
+        enabled={hasGapBefore && !trackLocked && activeTool === 'trim-edit'}
+        isActive={isTrackPushActive}
+        clipLeftPx={visualLeft}
+        zonePx={getTrackPushZonePx(pixelsPerSecond, gapBeforePx)}
+        onMouseDown={handleTrackPushStart}
+      />
+
       <ToolOperationOverlay visual={toolOperationOverlay} />
+
+      {/* Active edge halos — top layer, above both clip and bounds box */}
+      {activeEdges && (
+        <div
+          className="absolute inset-y-0 pointer-events-none"
+          style={{ left: `${visualLeft}px`, width: `${visualWidth}px`, zIndex: 2 }}
+        >
+          {activeEdges.start && (() => {
+            const constrained = activeEdges.constrainedEdge === 'start' || activeEdges.constrainedEdge === 'both';
+            const colors = constrained ? CONSTRAINED_COLORS : FREE_COLORS;
+            return (
+              <>
+                <div className="absolute inset-y-0 left-0" style={{ width: '2px', background: colors.edge, boxShadow: colors.glow }} />
+                <div className="absolute inset-y-0" style={{ left: '2px', width: '8px', background: `linear-gradient(to right, ${colors.fade}, transparent)` }} />
+              </>
+            );
+          })()}
+          {activeEdges.end && (() => {
+            const constrained = activeEdges.constrainedEdge === 'end' || activeEdges.constrainedEdge === 'both';
+            const colors = constrained ? CONSTRAINED_COLORS : FREE_COLORS;
+            return (
+              <>
+                <div className="absolute inset-y-0 right-0" style={{ width: '2px', background: colors.edge, boxShadow: colors.glow }} />
+                <div className="absolute inset-y-0" style={{ right: '2px', width: '8px', background: `linear-gradient(to left, ${colors.fade}, transparent)` }} />
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {transitionDropGhost && (
         <div

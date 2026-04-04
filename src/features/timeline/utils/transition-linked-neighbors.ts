@@ -83,6 +83,41 @@ export function findEditNeighborsWithTransitions(
   };
 }
 
+/**
+ * Find the nearest same-track neighbors regardless of adjacency.
+ * Used by slide edit so that non-adjacent clips are still considered.
+ */
+export function findNearestNeighbors(
+  item: TimelineItem,
+  items: TimelineItem[],
+): NeighborPair {
+  const itemEnd = item.from + item.durationInFrames;
+  let leftNeighbor: TimelineItem | null = null;
+  let rightNeighbor: TimelineItem | null = null;
+
+  for (const other of items) {
+    if (other.id === item.id || other.trackId !== item.trackId) continue;
+
+    const otherEnd = other.from + other.durationInFrames;
+
+    // Nearest clip whose end is at or before our start
+    if (otherEnd <= item.from) {
+      if (!leftNeighbor || otherEnd > (leftNeighbor.from + leftNeighbor.durationInFrames)) {
+        leftNeighbor = other;
+      }
+    }
+
+    // Nearest clip whose start is at or after our end
+    if (other.from >= itemEnd) {
+      if (!rightNeighbor || other.from < rightNeighbor.from) {
+        rightNeighbor = other;
+      }
+    }
+  }
+
+  return { leftNeighbor, rightNeighbor };
+}
+
 export function findHandleNeighborWithTransitions(
   item: TimelineItem,
   handle: TrimHandle,

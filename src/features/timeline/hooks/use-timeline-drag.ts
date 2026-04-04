@@ -31,6 +31,51 @@ const logger = createLogger('TimelineDrag');
 export const dragOffsetRef = { current: { x: 0, y: 0 } };
 export const dragPreviewOffsetByItemRef = { current: {} as Record<string, { x: number; y: number }> };
 
+/**
+ * Clamp a proposed frame so the item doesn't visually overlap other items
+ * on the target track during drag preview. Returns the clamped frame.
+ * Excludes items in `excludeIds` (the dragged items themselves).
+ */
+function clampToTrackWalls(
+  proposedFrom: number,
+  durationInFrames: number,
+  trackId: string,
+  excludeIds: ReadonlySet<string>,
+  allItems: ReadonlyArray<TimelineItem>,
+): number {
+  const proposedEnd = proposedFrom + durationInFrames;
+  let leftWall = 0;       // rightmost end of items to the left
+  let rightWall = Infinity; // leftmost start of items to the right
+
+  for (const other of allItems) {
+    if (excludeIds.has(other.id) || other.trackId !== trackId) continue;
+    const otherEnd = other.from + other.durationInFrames;
+
+    if (otherEnd <= proposedFrom) {
+      // Item fully to the left — track its right edge as potential wall
+      if (otherEnd > leftWall) leftWall = otherEnd;
+    } else if (other.from >= proposedEnd) {
+      // Item fully to the right — track its left edge as potential wall
+      if (other.from < rightWall) rightWall = other.from;
+    } else {
+      // Item overlaps the proposed position — find which side is closer
+      // and use the tighter wall
+      const distToLeft = proposedFrom - other.from;
+      const distToRight = otherEnd - proposedFrom;
+      if (distToLeft >= 0 && distToLeft <= distToRight) {
+        // We're overlapping from the right side of other
+        if (otherEnd > leftWall) leftWall = otherEnd;
+      } else {
+        // We're overlapping from the left side of other
+        if (other.from < rightWall) rightWall = other.from;
+      }
+    }
+  }
+
+  const maxFrom = rightWall - durationInFrames;
+  return Math.max(leftWall, Math.min(maxFrom, proposedFrom));
+}
+
 const DRAG_CURSOR_CLASS_BY_MODE = {
   grabbing: 'timeline-item-drag-cursor-grabbing',
   copy: 'timeline-item-drag-cursor-copy',
@@ -777,6 +822,34 @@ export function useTimelineDrag(
           durationInFrames: number;
         }>;
 
+        // Wall-clamp the group: find tightest constraint across all items,
+        // then shift the entire group by the same delta so they stay together.
+        if (!isAltDragRef.current) {
+          const groupExcludeIds = new Set(previewMovedItems.map((m) => m.id));
+          let wallClampDelta = 0;
+          for (const previewItem of previewMovedItems) {
+            const clamped = clampToTrackWalls(
+              previewItem.newFrom,
+              previewItem.durationInFrames,
+              previewItem.newTrackId,
+              groupExcludeIds,
+              currentItems,
+            );
+            const itemDelta = clamped - previewItem.newFrom;
+            // Pick the tightest (smallest magnitude) clamp in each direction
+            if (itemDelta < 0 && (wallClampDelta >= 0 || itemDelta > wallClampDelta)) {
+              wallClampDelta = itemDelta;
+            } else if (itemDelta > 0 && (wallClampDelta <= 0 || itemDelta < wallClampDelta)) {
+              wallClampDelta = itemDelta;
+            }
+          }
+          if (wallClampDelta !== 0) {
+            for (const previewItem of previewMovedItems) {
+              previewItem.newFrom += wallClampDelta;
+            }
+          }
+        }
+
         previewOffsets = {};
         for (const previewItem of previewMovedItems) {
           const currentTop = previewVisualTopByTrackId.get(previewItem.initialTrackId);
@@ -799,7 +872,11 @@ export function useTimelineDrag(
         const previewProposedFrame = Math.max(0, snapResult.snappedFrame);
         const previewTargetTrackId = previewTrackTargets?.trackAssignments.get(dragStateRef.current.itemId)
           ?? previewAnchorTrackId;
-        const previewFinalFrame = previewProposedFrame;
+        // Clamp to track walls so the preview can't visually overlap other clips
+        const dragExcludeIds = new Set(draggedItems.map((d) => d.id));
+        const previewFinalFrame = isAltDragRef.current
+          ? previewProposedFrame
+          : clampToTrackWalls(previewProposedFrame, item.durationInFrames, previewTargetTrackId, dragExcludeIds, currentItems);
         const currentTop = previewVisualTopByTrackId.get(dragStateRef.current.startTrackId);
         const targetTop = previewVisualTopByTrackId.get(previewTargetTrackId);
         anchorPreviewOffset = {
@@ -974,7 +1051,8 @@ export function useTimelineDrag(
           ? currentItems
           : currentItems.filter((i) => !draggedItemIds.includes(i.id));
 
-        let maxSnapForward = 0; // How many frames we need to move the whole group forward
+        let maxSnapForward = 0;  // largest positive shift needed
+        let maxSnapBackward = 0; // largest negative shift needed (stored as negative)
 
         for (const movedItem of movedItems) {
           const finalPosition = findNearestAvailableSpace(
@@ -1008,13 +1086,21 @@ export function useTimelineDrag(
           if (snapAmount > maxSnapForward) {
             maxSnapForward = snapAmount;
           }
+          if (snapAmount < maxSnapBackward) {
+            maxSnapBackward = snapAmount;
+          }
         }
+
+        // Pick whichever direction has the larger correction needed
+        const groupSnapDelta = Math.abs(maxSnapForward) >= Math.abs(maxSnapBackward)
+          ? maxSnapForward
+          : maxSnapBackward;
 
         if (isAltDrag) {
           // ALT-DRAG: Duplicate items at new positions
           const itemIds = movedItems.map((m) => m.id);
           const positions = movedItems.map((m) => ({
-            from: Math.round(m.newFrom + maxSnapForward),
+            from: Math.round(m.newFrom + groupSnapDelta),
             trackId: m.newTrackId,
           }));
 
@@ -1027,7 +1113,7 @@ export function useTimelineDrag(
           // Normal drag: Apply the snap to ALL items in the group
           const allUpdates = movedItems.map((m) => ({
             id: m.id,
-            from: Math.round(m.newFrom + maxSnapForward),
+            from: Math.round(m.newFrom + groupSnapDelta),
             trackId: m.newTrackId !== currentItems.find((i) => i.id === m.id)?.trackId
               ? m.newTrackId
               : undefined,

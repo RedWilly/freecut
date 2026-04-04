@@ -17,8 +17,8 @@ import {
   isMediaItem,
   timelineToSourceFrames,
 } from '../utils/source-calculations';
-import { clampTrimAmount } from '../utils/trim-utils';
-import { findEditNeighborsWithTransitions } from '../utils/transition-linked-neighbors';
+import { clampTrimAmount, clampToAdjacentItems } from '../utils/trim-utils';
+import { findEditNeighborsWithTransitions, findNearestNeighbors } from '../utils/transition-linked-neighbors';
 import { computeClampedSlipDelta } from '../utils/slip-utils';
 import {
   getMatchingSynchronizedLinkedCounterpart,
@@ -94,8 +94,8 @@ export function useTimelineSlipSlide(
   }, [item.id]);
 
   /**
-   * Find immediate edit neighbors on the same track.
-   * Prefers strict adjacency, falls back to transition-linked neighbors.
+   * Find immediate edit neighbors (strict adjacency / transition-linked).
+   * Only adjacent neighbors get trimmed during slide.
    */
   const findNeighbors = useCallback(() => {
     const allItems = useTimelineStore.getState().items;
@@ -108,6 +108,7 @@ export function useTimelineSlipSlide(
     usePlaybackStore.getState().setPreviewFrame(null);
 
     const { leftNeighbor, rightNeighbor } = findNeighbors();
+    const currentItem = getItemFromStore();
 
     setDragState({
       isDragging: true,
@@ -127,7 +128,58 @@ export function useTimelineSlipSlide(
       constraintLabel: null,
     });
     latestDeltaRef.current = 0;
-  }, [findNeighbors, item.id, setDragState]);
+
+    // Seed preview stores immediately so linked companions show their
+    // overlays on the same frame as the primary clip (no 1-frame delay).
+    if (mode === 'slip') {
+      useSlipEditPreviewStore.getState().setPreview({
+        itemId: item.id,
+        trackId: currentItem.trackId,
+        slipDelta: 0,
+      });
+    } else {
+      // Compute the effective slide range (tightest across all tracks),
+      // incorporating transition constraints so the initial limit box matches
+      // the bounds used during dragging.
+      const allItems = useTimelineStore.getState().items;
+      const transitions = useTransitionsStore.getState().transitions;
+      const sourceMinDelta = clampSlideDelta(-1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
+      const sourceMaxDelta = clampSlideDelta(1_000_000_000, leftNeighbor?.id ?? null, rightNeighbor?.id ?? null);
+      const slideMinDelta = clampSlideDeltaToPreserveTransitions(
+        currentItem, sourceMinDelta, leftNeighbor ?? null, rightNeighbor ?? null,
+        allItems, transitions, fps,
+      );
+      const slideMaxDelta = clampSlideDeltaToPreserveTransitions(
+        currentItem, sourceMaxDelta, leftNeighbor ?? null, rightNeighbor ?? null,
+        allItems, transitions, fps,
+      );
+      useSlideEditPreviewStore.getState().setPreview({
+        itemId: item.id,
+        trackId: currentItem.trackId,
+        leftNeighborId: leftNeighbor?.id ?? null,
+        rightNeighborId: rightNeighbor?.id ?? null,
+        slideDelta: 0,
+        minDelta: slideMinDelta,
+        maxDelta: slideMaxDelta,
+      });
+    }
+
+    // Seed linked companion previews with zero-delta so their overlays appear immediately
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    if (linkedSelectionEnabled) {
+      const allItems = useTimelineStore.getState().items;
+      const companions = getSynchronizedLinkedItems(allItems, currentItem.id)
+        .filter((c) => c.id !== currentItem.id);
+      if (companions.length > 0) {
+        const updates: PreviewItemUpdate[] = companions.map((c) =>
+          mode === 'slip' ? applySlipPreview(c, 0) : applyMovePreview(c, 0),
+        );
+        useLinkedEditPreviewStore.getState().setUpdates(updates);
+      }
+    }
+  // Note: clampSlideDelta intentionally omitted — it reads fps from store at
+  // call time, and including it would cause a TDZ error (defined after this hook).
+  }, [findNeighbors, getItemFromStore, item.id, setDragState]);
 
   /**
    * Clamp slip delta to source boundaries.
@@ -142,7 +194,8 @@ export function useTimelineSlipSlide(
   }, [getItemFromStore]);
 
   /**
-   * Clamp slide delta to neighbor source boundaries and timeline start.
+   * Clamp slide delta to neighbor source boundaries, timeline start,
+   * and non-adjacent clip boundaries (can't overlap clips across a gap).
    */
   const clampSlideDelta = useCallback((delta: number, leftNeighborId: string | null, rightNeighborId: string | null): number => {
     const currentItem = getItemFromStore();
@@ -154,8 +207,9 @@ export function useTimelineSlipSlide(
     }
 
     const allItems = useTimelineStore.getState().items;
+    const slideItemIds = new Set([item.id, leftNeighborId, rightNeighborId].filter(Boolean) as string[]);
 
-    // Left neighbor: clamp by how much its end can extend/shrink
+    // Adjacent neighbors: clamp by source limits (standard slide behavior)
     if (leftNeighborId) {
       const leftNeighbor = allItems.find((i) => i.id === leftNeighborId);
       if (leftNeighbor) {
@@ -163,10 +217,13 @@ export function useTimelineSlipSlide(
         if (Math.abs(clampedAmount) < Math.abs(clamped)) {
           clamped = clampedAmount;
         }
+        const adjacentClamped = clampToAdjacentItems(leftNeighbor, 'end', clamped, allItems, slideItemIds);
+        if (Math.abs(adjacentClamped) < Math.abs(clamped)) {
+          clamped = adjacentClamped;
+        }
       }
     }
 
-    // Right neighbor: clamp by how much its start can extend/shrink
     if (rightNeighborId) {
       const rightNeighbor = allItems.find((i) => i.id === rightNeighborId);
       if (rightNeighbor) {
@@ -174,11 +231,77 @@ export function useTimelineSlipSlide(
         if (Math.abs(clampedAmount) < Math.abs(clamped)) {
           clamped = clampedAmount;
         }
+        const adjacentClamped = clampToAdjacentItems(rightNeighbor, 'start', clamped, allItems, slideItemIds);
+        if (Math.abs(adjacentClamped) < Math.abs(clamped)) {
+          clamped = adjacentClamped;
+        }
+      }
+    }
+
+    // Clamp by linked companions' adjacent neighbors' source limits and
+    // treat non-adjacent clips across all participant tracks as walls.
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    const participants = linkedSelectionEnabled
+      ? getSynchronizedLinkedItems(allItems, currentItem.id)
+      : [currentItem];
+
+    for (const participant of participants) {
+      if (participant.id === currentItem.id) continue; // primary already handled above
+
+      const pEnd = participant.from + participant.durationInFrames;
+      const participantExcludeIds = new Set<string>(slideItemIds);
+      for (const p of participants) participantExcludeIds.add(p.id);
+
+      // Find this companion's own adjacent neighbors and clamp by their source limits
+      for (const other of allItems) {
+        if (other.trackId !== participant.trackId || other.id === participant.id) continue;
+        const otherEnd = other.from + other.durationInFrames;
+        if (otherEnd === participant.from) {
+          // Left-adjacent neighbor on companion's track
+          participantExcludeIds.add(other.id);
+          const { clampedAmount } = clampTrimAmount(other, 'end', clamped, fps);
+          if (Math.abs(clampedAmount) < Math.abs(clamped)) clamped = clampedAmount;
+        }
+        if (other.from === pEnd) {
+          // Right-adjacent neighbor on companion's track
+          participantExcludeIds.add(other.id);
+          const { clampedAmount } = clampTrimAmount(other, 'start', clamped, fps);
+          if (Math.abs(clampedAmount) < Math.abs(clamped)) clamped = clampedAmount;
+        }
+      }
+
+      // Non-adjacent clips on this companion's track act as walls
+      const nearest = findNearestNeighbors(participant, allItems);
+      if (nearest.leftNeighbor && !participantExcludeIds.has(nearest.leftNeighbor.id)) {
+        const wallRight = nearest.leftNeighbor.from + nearest.leftNeighbor.durationInFrames;
+        const maxLeft = -(participant.from - wallRight);
+        if (clamped < maxLeft) clamped = maxLeft;
+      }
+      if (nearest.rightNeighbor && !participantExcludeIds.has(nearest.rightNeighbor.id)) {
+        const wallLeft = nearest.rightNeighbor.from;
+        const maxRight = wallLeft - pEnd;
+        if (clamped > maxRight) clamped = maxRight;
+      }
+    }
+
+    // Also check the primary clip's track for non-adjacent walls
+    {
+      const primaryEnd = currentItem.from + currentItem.durationInFrames;
+      const nearest = findNearestNeighbors(currentItem, allItems);
+      if (nearest.leftNeighbor && !slideItemIds.has(nearest.leftNeighbor.id)) {
+        const wallRight = nearest.leftNeighbor.from + nearest.leftNeighbor.durationInFrames;
+        const maxLeft = -(currentItem.from - wallRight);
+        if (clamped < maxLeft) clamped = maxLeft;
+      }
+      if (nearest.rightNeighbor && !slideItemIds.has(nearest.rightNeighbor.id)) {
+        const wallLeft = nearest.rightNeighbor.from;
+        const maxRight = wallLeft - primaryEnd;
+        if (clamped > maxRight) clamped = maxRight;
       }
     }
 
     return clamped;
-  }, [getItemFromStore, fps]);
+  }, [getItemFromStore, fps, item.id]);
 
   // Mouse move handler
   const handleMouseMove = useCallback(
@@ -191,11 +314,13 @@ export function useTimelineSlipSlide(
       const mode = stateRef.current.mode;
 
       if (mode === 'slip') {
-        // Convert timeline frame delta to source frame delta
+        // Convert timeline frame delta to source frame delta.
+        // Inverted: drag right → source window moves left (reveals earlier content),
+        // matching DaVinci Resolve convention.
         const currentItem = getItemFromStore();
         const { speed, sourceFps } = getSourceProperties(currentItem);
         const effectiveSourceFps = sourceFps ?? fps;
-        const sourceFramesDelta = timelineToSourceFrames(deltaFrames, speed, fps, effectiveSourceFps);
+        const sourceFramesDelta = -timelineToSourceFrames(deltaFrames, speed, fps, effectiveSourceFps);
 
         const sourceClamped = clampSlipDelta(sourceFramesDelta);
         const transitionClamped = clampSlipDeltaToPreserveTransitions(

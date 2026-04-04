@@ -351,9 +351,10 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
             neighborItemId: neighborId,
             handle: handle!,
             neighborDelta: deltaFrames,
+            constrained: isConstrained,
           });
-        } else if (previewStore.neighborDelta !== deltaFrames) {
-          previewStore.setNeighborDelta(deltaFrames);
+        } else if (previewStore.neighborDelta !== deltaFrames || previewStore.constrained !== isConstrained) {
+          previewStore.setNeighborDelta(deltaFrames, isConstrained);
         }
       } else {
         // Clear preview when Alt is released or no neighbor found
@@ -670,6 +671,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
+        useRollingEditPreviewStore.getState().clearPreview();
         useTransitionBreakPreviewStore.getState().clearPreview();
         useLinkedEditPreviewStore.getState().clear();
       };
@@ -739,6 +741,15 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         constraintLabel: null,
         destroyTransitionAtHandle,
       });
+
+      if (wantsRolling && neighborId) {
+        useRollingEditPreviewStore.getState().setPreview({
+          trimmedItemId: item.id,
+          neighborItemId: neighborId,
+          handle,
+          neighborDelta: 0,
+        });
+      }
 
       if (destroyTransitionAtHandle) {
         useTransitionBreakPreviewStore.getState().setPreview({

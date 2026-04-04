@@ -418,6 +418,9 @@ export function rippleDeleteItems(ids: string[]): void {
   const remainingItems = items.filter((item) => !idsToDelete.has(item.id));
   const baseShiftByItemId = new Map<string, number>();
 
+  // Per-track: shift downstream items on the same track as each deleted item.
+  // Linked counterparts on other tracks shift via buildLinkedLeftShiftUpdates.
+  // Solo clips on unrelated tracks are left in place.
   for (const item of remainingItems) {
     const shiftAmount = items
       .filter((candidate) => idsToDelete.has(candidate.id))
@@ -431,18 +434,52 @@ export function rippleDeleteItems(ids: string[]): void {
 
   const updates = buildLinkedLeftShiftUpdates(remainingItems, baseShiftByItemId);
 
+  // Detect non-shifted items that would be overlapped by shifted items.
+  // These get deleted rather than creating overlaps.
+  const shiftedById = new Map(updates.map((u) => [u.id, u.from]));
+  const coveredIds: string[] = [];
+  for (const item of remainingItems) {
+    if (shiftedById.has(item.id) || idsToDelete.has(item.id)) continue;
+    const itemEnd = item.from + item.durationInFrames;
+    // Check if any shifted item on the same track would overlap this item
+    for (const other of remainingItems) {
+      const newFrom = shiftedById.get(other.id);
+      if (newFrom === undefined || other.trackId !== item.trackId) continue;
+      const newEnd = newFrom + other.durationInFrames;
+      if (newFrom < itemEnd && newEnd > item.from) {
+        coveredIds.push(item.id);
+        break;
+      }
+    }
+  }
+
+  // Expand covered IDs with linked companions so we don't orphan them
+  const expandedCoveredIds = expandIdsWithLinkedItems(coveredIds);
+  const allRemoveIds = [...expandedIds, ...expandedCoveredIds];
+
+  // Filter out updates for items that were removed as covered (including their linked companions)
+  const coveredSet = new Set(expandedCoveredIds);
+  const filteredUpdates = coveredSet.size > 0
+    ? updates.filter((u) => !coveredSet.has(u.id))
+    : updates;
+
   execute('RIPPLE_DELETE_ITEMS', () => {
-    useItemsStore.getState()._removeItems(expandedIds);
-    if (updates.length > 0) {
-      useItemsStore.getState()._moveItems(updates);
+    useItemsStore.getState()._removeItems(allRemoveIds);
+    if (filteredUpdates.length > 0) {
+      useItemsStore.getState()._moveItems(filteredUpdates);
     }
 
     // Cascade: Remove transitions and keyframes
-    useTransitionsStore.getState()._removeTransitionsForItems(expandedIds);
-    useKeyframesStore.getState()._removeKeyframesForItems(expandedIds);
+    useTransitionsStore.getState()._removeTransitionsForItems(allRemoveIds);
+    useKeyframesStore.getState()._removeKeyframesForItems(allRemoveIds);
+
+    // Repair transitions on moved clips (they may now overlap or gap differently)
+    if (filteredUpdates.length > 0) {
+      applyTransitionRepairs(filteredUpdates.map((u) => u.id));
+    }
 
     useTimelineSettingsStore.getState().markDirty();
-  }, { ids: expandedIds });
+  }, { ids: allRemoveIds });
 }
 
 export function closeGapAtPosition(trackId: string, frame: number): void {
@@ -470,7 +507,8 @@ export function closeGapAtPosition(trackId: string, frame: number): void {
   const gapSize = gapEnd - gapStart;
   const baseShiftByItemId = new Map<string, number>();
   for (const item of items) {
-    if (item.trackId === trackId && item.from >= gapEnd) {
+    // Shift ALL items at or after the gap end across every track
+    if (item.from >= gapEnd) {
       baseShiftByItemId.set(item.id, gapSize);
     }
   }
@@ -478,7 +516,29 @@ export function closeGapAtPosition(trackId: string, frame: number): void {
   const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId);
   if (updates.length === 0) return;
 
+  // Detect non-shifted items that would be overlapped by shifted items — delete them.
+  const shiftedById = new Map(updates.map((u) => [u.id, u.from]));
+  const coveredIds: string[] = [];
+  for (const item of items) {
+    if (shiftedById.has(item.id)) continue;
+    const itemEnd = item.from + item.durationInFrames;
+    for (const other of items) {
+      const newFrom = shiftedById.get(other.id);
+      if (newFrom === undefined || other.trackId !== item.trackId) continue;
+      const newEnd = newFrom + other.durationInFrames;
+      if (newFrom < itemEnd && newEnd > item.from) {
+        coveredIds.push(item.id);
+        break;
+      }
+    }
+  }
+
   execute('CLOSE_GAP', () => {
+    if (coveredIds.length > 0) {
+      useItemsStore.getState()._removeItems(coveredIds);
+      useTransitionsStore.getState()._removeTransitionsForItems(coveredIds);
+      useKeyframesStore.getState()._removeKeyframesForItems(coveredIds);
+    }
     useItemsStore.getState()._moveItems(updates);
 
     applyTransitionRepairs(updates.map((update) => update.id));
@@ -514,6 +574,38 @@ export function closeAllGapsOnTrack(trackId: string): void {
     applyTransitionRepairs(updates.map((update) => update.id));
     useTimelineSettingsStore.getState().markDirty();
   }, { trackId });
+}
+
+/**
+ * Track push: move ALL items at or after the anchor clip's position — across
+ * every track — by the given frame delta.  This is a multi-track ripple
+ * move that closes or opens a gap at the anchor point.
+ * Commits as a single undo entry.
+ */
+export function trackPushItems(anchorId: string, delta: number): void {
+  if (delta === 0) return;
+
+  const items = useItemsStore.getState().items;
+  const anchor = items.find((i) => i.id === anchorId);
+  if (!anchor) return;
+
+  const cutFrame = anchor.from;
+
+  // Every item whose start is at or after the cut frame gets shifted
+  const updates: Array<{ id: string; from: number }> = [];
+  for (const ti of items) {
+    if (ti.from >= cutFrame) {
+      updates.push({ id: ti.id, from: Math.max(0, ti.from + delta) });
+    }
+  }
+
+  if (updates.length === 0) return;
+
+  execute('TRACK_PUSH', () => {
+    useItemsStore.getState()._moveItems(updates);
+    applyTransitionRepairs(updates.map((u) => u.id));
+    useTimelineSettingsStore.getState().markDirty();
+  }, { anchorId, delta });
 }
 
 export function moveItem(id: string, newFrom: number, newTrackId?: string): void {
@@ -1730,7 +1822,7 @@ export function slideItem(
       useTimelineSettingsStore.getState().fps,
     );
 
-    // Adjust neighbors (order: shrink first, then extend â€” same as rolling edit)
+    // Adjust neighbors (order: shrink first, then extend — same as rolling edit)
     if (clampedSlideDelta > 0) {
       // Sliding right: right neighbor shrinks start (frees space), left neighbor extends end
       if (rightNeighborId) {
@@ -1768,20 +1860,40 @@ export function slideItem(
       ? updatedItem.sourceStart - itemSourceStartBefore
       : 0;
 
+    // Find the companion's own adjacent neighbors — may differ from the
+    // primary's linked counterparts (e.g. a solo audio clip next to the
+    // companion that has no video counterpart).
+    let cpLeftAdj: TimelineItem | null = null;
+    let cpRightAdj: TimelineItem | null = null;
+    if (synchronizedCounterpart) {
+      const cpEnd = synchronizedCounterpart.from + synchronizedCounterpart.durationInFrames;
+      const freshItems = useItemsStore.getState().items;
+      cpLeftAdj = freshItems.find((i) =>
+        i.trackId === synchronizedCounterpart.trackId
+        && i.id !== synchronizedCounterpart.id
+        && i.from + i.durationInFrames === synchronizedCounterpart.from
+      ) ?? leftCounterpart;
+      cpRightAdj = freshItems.find((i) =>
+        i.trackId === synchronizedCounterpart.trackId
+        && i.id !== synchronizedCounterpart.id
+        && i.from === cpEnd
+      ) ?? rightCounterpart;
+    }
+
     if (synchronizedCounterpart && actualSlideDelta !== 0) {
       if (actualSlideDelta > 0) {
-        if (rightCounterpart) {
-          itemsStore._trimItemStart(rightCounterpart.id, actualSlideDelta, { skipAdjacentClamp: true });
+        if (cpRightAdj) {
+          itemsStore._trimItemStart(cpRightAdj.id, actualSlideDelta, { skipAdjacentClamp: true });
         }
-        if (leftCounterpart) {
-          itemsStore._trimItemEnd(leftCounterpart.id, actualSlideDelta, { skipAdjacentClamp: true });
+        if (cpLeftAdj) {
+          itemsStore._trimItemEnd(cpLeftAdj.id, actualSlideDelta, { skipAdjacentClamp: true });
         }
       } else {
-        if (leftCounterpart) {
-          itemsStore._trimItemEnd(leftCounterpart.id, actualSlideDelta, { skipAdjacentClamp: true });
+        if (cpLeftAdj) {
+          itemsStore._trimItemEnd(cpLeftAdj.id, actualSlideDelta, { skipAdjacentClamp: true });
         }
-        if (rightCounterpart) {
-          itemsStore._trimItemStart(rightCounterpart.id, actualSlideDelta, { skipAdjacentClamp: true });
+        if (cpRightAdj) {
+          itemsStore._trimItemStart(cpRightAdj.id, actualSlideDelta, { skipAdjacentClamp: true });
         }
       }
 
@@ -1802,9 +1914,11 @@ export function slideItem(
     const affectedIds = [id];
     if (leftNeighborId) affectedIds.push(leftNeighborId);
     if (rightNeighborId) affectedIds.push(rightNeighborId);
-    if (synchronizedCounterpart) affectedIds.push(synchronizedCounterpart.id);
-    if (leftCounterpart) affectedIds.push(leftCounterpart.id);
-    if (rightCounterpart) affectedIds.push(rightCounterpart.id);
+    if (synchronizedCounterpart) {
+      affectedIds.push(synchronizedCounterpart.id);
+      if (cpLeftAdj) affectedIds.push(cpLeftAdj.id);
+      if (cpRightAdj) affectedIds.push(cpRightAdj.id);
+    }
     applyTransitionRepairs(affectedIds);
 
     useTimelineSettingsStore.getState().markDirty();

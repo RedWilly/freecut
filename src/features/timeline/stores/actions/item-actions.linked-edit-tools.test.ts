@@ -318,6 +318,39 @@ describe('linked edit tools', () => {
     expect(itemById['audio-right']).toMatchObject({ from: 140, durationInFrames: 40 });
   });
 
+  it('slide trims companion-only adjacent neighbors (solo audio next to companion)', () => {
+    useItemsStore.getState().setItems([
+      // Video track: [video-left][video-middle] — no video-right neighbor
+      makeVideoItem({ id: 'video-left', linkedGroupId: 'group-left' }),
+      makeAudioItem({ id: 'audio-left', linkedGroupId: 'group-left' }),
+      makeVideoItem({ id: 'video-middle', from: 60, linkedGroupId: 'group-middle', mediaId: 'media-2' }),
+      makeAudioItem({ id: 'audio-middle', from: 60, linkedGroupId: 'group-middle', mediaId: 'media-2' }),
+      // Solo audio adjacent to audio-middle on the right (no video counterpart)
+      makeAudioItem({
+        id: 'solo-audio',
+        from: 120,
+        durationInFrames: 60,
+        linkedGroupId: undefined,
+        originId: 'origin-solo',
+        mediaId: 'media-solo',
+        sourceStart: 30,
+        sourceEnd: 90,
+        sourceDuration: 200,
+        sourceFps: 30,
+      }),
+    ]);
+
+    // Slide video-middle right by 10: audio-middle also moves right,
+    // solo-audio should be trimmed from start (shrink start by 10)
+    slideItem('video-middle', 10, 'video-left', null);
+
+    const itemById = useItemsStore.getState().itemById;
+    expect(itemById['video-middle']).toMatchObject({ from: 70 });
+    expect(itemById['audio-middle']).toMatchObject({ from: 70 });
+    // Solo audio: start trimmed by 10 (from 120 to 130, duration 50)
+    expect(itemById['solo-audio']).toMatchObject({ from: 130, durationInFrames: 50 });
+  });
+
   it('clamps slide edits before they break an existing transition on split segments', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({ id: 'video-left', durationInFrames: 60, sourceStart: 0, sourceEnd: 60, sourceDuration: 66, linkedGroupId: 'group-left' }),

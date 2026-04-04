@@ -106,8 +106,8 @@ describe('TransitionItem preview bridge motion', () => {
 
     const overlay = screen.getByTitle('Fade (0.7s)');
     expect(overlay.className).toContain('inset-y-0');
-    expect(overlay.style.top).toBe('var(--editor-timeline-clip-label-row-height)');
-    expect(overlay.style.bottom).toBe('0px');
+    expect(overlay.style.top).toBe('calc(var(--editor-timeline-clip-label-row-height) + 1px)');
+    expect(overlay.style.bottom).toBe('1px');
   });
 
   it('keeps a minimum-width bridge inside the previewed right clip during slide on a speed-adjusted segment', () => {

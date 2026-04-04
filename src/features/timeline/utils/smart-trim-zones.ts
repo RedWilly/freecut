@@ -1,4 +1,4 @@
-export type SmartTrimIntent = 'trim-start' | 'trim-end' | 'ripple-start' | 'ripple-end' | 'roll-start' | 'roll-end' | null;
+export type SmartTrimIntent = 'trim-start' | 'trim-end' | 'ripple-start' | 'ripple-end' | 'roll-start' | 'roll-end' | 'track-push' | null;
 export type SmartBodyIntent = 'slip-body' | 'slide-body' | null;
 
 export const SMART_TRIM_EDGE_ZONE_PX = 12;
@@ -95,7 +95,7 @@ export function resolveSmartTrimIntent({
 }
 
 export function smartTrimIntentToHandle(intent: SmartTrimIntent): 'start' | 'end' | null {
-  if (intent === 'trim-start' || intent === 'ripple-start' || intent === 'roll-start') return 'start';
+  if (intent === 'trim-start' || intent === 'ripple-start' || intent === 'roll-start' || intent === 'track-push') return 'start';
   if (intent === 'trim-end' || intent === 'ripple-end' || intent === 'roll-end') return 'end';
   return null;
 }

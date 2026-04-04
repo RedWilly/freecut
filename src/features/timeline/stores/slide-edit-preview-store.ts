@@ -11,6 +11,10 @@ interface SlideEditPreviewState {
   rightNeighborId: string | null;
   /** Delta in timeline frames (positive = slide right, negative = slide left) */
   slideDelta: number;
+  /** Max leftward slide delta (negative), combining all track constraints */
+  minDelta: number;
+  /** Max rightward slide delta (positive), combining all track constraints */
+  maxDelta: number;
 }
 
 interface SlideEditPreviewActions {
@@ -20,8 +24,11 @@ interface SlideEditPreviewActions {
     leftNeighborId: string | null;
     rightNeighborId: string | null;
     slideDelta: number;
+    minDelta?: number;
+    maxDelta?: number;
   }) => void;
   setSlideDelta: (slideDelta: number) => void;
+  setSlideRange: (minDelta: number, maxDelta: number) => void;
   clearPreview: () => void;
 }
 
@@ -33,8 +40,15 @@ export const useSlideEditPreviewStore = create<
   leftNeighborId: null,
   rightNeighborId: null,
   slideDelta: 0,
-  setPreview: (params) => set(params),
+  minDelta: 0,
+  maxDelta: 0,
+  setPreview: (params) => set({
+    ...params,
+    minDelta: params.minDelta ?? 0,
+    maxDelta: params.maxDelta ?? 0,
+  }),
   setSlideDelta: (slideDelta) => set({ slideDelta }),
+  setSlideRange: (minDelta, maxDelta) => set({ minDelta, maxDelta }),
   clearPreview: () =>
     set({
       itemId: null,
@@ -42,5 +56,7 @@ export const useSlideEditPreviewStore = create<
       leftNeighborId: null,
       rightNeighborId: null,
       slideDelta: 0,
+      minDelta: 0,
+      maxDelta: 0,
     }),
 }));

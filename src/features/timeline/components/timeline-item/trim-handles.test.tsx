@@ -13,7 +13,9 @@ describe('TrimHandles', () => {
     trimHandle: null as 'start' | 'end' | null,
     activeTool: 'trim-edit',
     hoveredEdge: null as 'start' | 'end' | null,
-    trimConstrained: false,
+    smartTrimIntent: null as import('../../utils/smart-trim-zones').SmartTrimIntent,
+    rollHoverEdge: null as 'start' | 'end' | null,
+    activeEdges: null as import('./trim-handles').ActiveEdgeState | null,
     startCursorClass: 'cursor-trim-left',
     endCursorClass: 'cursor-trim-right',
     startTone: 'default' as const,
@@ -184,7 +186,9 @@ describe('overlay containers must not block trim handle events', () => {
           trimHandle={null}
           activeTool="trim-edit"
           hoveredEdge="start"
-          trimConstrained={false}
+          smartTrimIntent={null}
+          rollHoverEdge={null}
+          activeEdges={null}
           startCursorClass="cursor-trim-left"
           endCursorClass="cursor-trim-right"
           startTone="default"
