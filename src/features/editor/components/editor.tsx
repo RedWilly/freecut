@@ -11,7 +11,6 @@ import { Toolbar } from './toolbar';
 import { MediaSidebar } from './media-sidebar';
 import { PropertiesSidebar } from './properties-sidebar';
 import { PreviewArea } from './preview-area';
-import { ProjectDebugPanel } from './project-debug-panel';
 import { InteractionLockRegion } from './interaction-lock-region';
 import { AudioMeterPanel } from './audio-meter-panel';
 import { Timeline, BentoLayoutDialog } from '@/features/editor/deps/timeline-ui';
@@ -518,8 +517,6 @@ export const LoadedEditor = memo(function LoadedEditor({
       {/* TTS Generate from Text Dialog */}
       <TtsGenerateDialog />
 
-      {/* Debug Panel (dev mode only) */}
-      {!isMaskEditingActive ? <ProjectDebugPanel projectId={projectId} /> : null}
     </div>
   );
 });

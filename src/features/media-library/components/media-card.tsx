@@ -391,7 +391,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
         {/* Thumbnail */}
         <div
           ref={thumbnailContainerRef}
-          className="w-16 h-12 bg-secondary rounded overflow-hidden flex-shrink-0 relative"
+          className="w-12 h-9 bg-secondary rounded overflow-hidden flex-shrink-0 relative"
           onPointerEnter={handleThumbnailPointerEnter}
           onPointerMove={handleThumbnailPointerMove}
           onPointerLeave={handleThumbnailPointerLeave}
@@ -459,32 +459,26 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
           )}
         </div>
 
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <h3 className="text-xs font-medium text-foreground truncate">
-            {media.fileName}
-          </h3>
+        {/* Info — single row: icon + name + duration */}
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
           {isImporting ? (
-            /* Importing indicator for list view */
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] text-muted-foreground">Importing...</span>
-            </div>
+            <span className="text-[10px] text-muted-foreground">Importing...</span>
           ) : (
-            <div className="flex items-center gap-2 mt-0.5">
-              {/* Type badge inline */}
+            <>
               <div className="p-0.5 rounded bg-primary/90 text-primary-foreground flex-shrink-0">
                 {mediaType === 'video' && <Video className="w-2.5 h-2.5" />}
                 {mediaType === 'audio' && <FileAudio className="w-2.5 h-2.5" />}
                 {mediaType === 'image' && <ImageIcon className="w-2.5 h-2.5" />}
               </div>
-
-              {/* Duration only */}
+              <h3 className="text-xs font-medium text-foreground truncate">
+                {media.fileName}
+              </h3>
               {(mediaType === 'video' || mediaType === 'audio') && media.duration > 0 && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[10px] text-muted-foreground flex-shrink-0">
                   {formatDuration(media.duration)}
                 </span>
               )}
-            </div>
+            </>
           )}
         </div>
 

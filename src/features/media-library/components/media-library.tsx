@@ -49,6 +49,8 @@ import { proxyService } from '../services/proxy-service';
 import { mediaLibraryService } from '../services/media-library-service';
 import { extractValidMediaFileEntriesFromDataTransfer } from '../utils/file-drop';
 import { getSharedProxyKey } from '../utils/proxy-key';
+import { getMediaType } from '../utils/validation';
+import type { MediaMetadata } from '@/types/storage';
 import { isMarqueeJustFinished, useMarqueeSelection, type MarqueeItem } from '@/hooks/use-marquee-selection';
 
 function CopyButton({ text }: { text: string }) {
@@ -69,6 +71,58 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+const GROUP_ICONS = {
+  video: Video,
+  audio: FileAudio,
+  image: ImageIcon,
+  gif: Film,
+} as const;
+
+interface MediaTypeGroupProps {
+  groupKey: string;
+  label: string;
+  icon: keyof typeof GROUP_ICONS;
+  items: MediaMetadata[];
+  isOpen: boolean;
+  onToggle: (key: string, open: boolean) => void;
+  onMediaSelect?: (mediaId: string) => void;
+  viewMode: 'grid' | 'list';
+  itemSize: number;
+}
+
+const MediaTypeGroup = memo(function MediaTypeGroup({
+  groupKey, label, icon, items, isOpen, onToggle, onMediaSelect, viewMode, itemSize,
+}: MediaTypeGroupProps) {
+  const Icon = GROUP_ICONS[icon];
+  return (
+    <Collapsible open={isOpen} onOpenChange={(open) => onToggle(groupKey, open)}>
+      <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 hover:bg-secondary/50 rounded-md px-2 -mx-2 transition-colors">
+        <ChevronRight
+          className={cn(
+            'w-3 h-3 text-muted-foreground transition-transform',
+            isOpen && 'rotate-90'
+          )}
+        />
+        <Icon className="w-3 h-3 text-muted-foreground" />
+        <span className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-[10px] tabular-nums text-muted-foreground/60">
+          {items.length}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-1 pb-2">
+        <MediaGrid
+          items={items}
+          onMediaSelect={onMediaSelect}
+          viewMode={viewMode}
+          itemSize={itemSize}
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+});
+
 interface MediaLibraryProps {
   onMediaSelect?: (mediaId: string) => void;
 }
@@ -84,7 +138,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const isFocusedRef = useRef(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingLibraryDeletion>({ mediaIds: [], compositionIds: [] });
-  const [mediaOpen, setMediaOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(['video', 'audio', 'image', 'gif']));
   const [isDragging, setIsDragging] = useState(false);
 
   // Store selectors
@@ -108,7 +162,6 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
   const selectedCompositionIds = useMediaLibraryStore((s) => s.selectedCompositionIds);
   const setSelection = useMediaLibraryStore((s) => s.setSelection);
-  const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
   const mediaById = useMediaLibraryStore((s) => s.mediaById);
   const clearSelection = useMediaLibraryStore((s) => s.clearSelection);
   const error = useMediaLibraryStore((s) => s.error);
@@ -122,6 +175,28 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus);
   const proxyProgress = useMediaLibraryStore((s) => s.proxyProgress);
   const filteredMediaItems = useFilteredMediaItems();
+  const mediaGroups = useMemo(() => {
+    const groups: { key: string; label: string; icon: 'video' | 'audio' | 'image' | 'gif'; items: MediaMetadata[] }[] = [];
+    const videos: MediaMetadata[] = [];
+    const audio: MediaMetadata[] = [];
+    const gifs: MediaMetadata[] = [];
+    const images: MediaMetadata[] = [];
+    for (const item of filteredMediaItems) {
+      if (item.mimeType === 'image/gif') {
+        gifs.push(item);
+      } else {
+        const t = getMediaType(item.mimeType);
+        if (t === 'video') videos.push(item);
+        else if (t === 'audio') audio.push(item);
+        else images.push(item);
+      }
+    }
+    if (videos.length > 0) groups.push({ key: 'video', label: 'Videos', icon: 'video', items: videos });
+    if (audio.length > 0) groups.push({ key: 'audio', label: 'Audio', icon: 'audio', items: audio });
+    if (images.length > 0) groups.push({ key: 'image', label: 'Images', icon: 'image', items: images });
+    if (gifs.length > 0) groups.push({ key: 'gif', label: 'GIFs', icon: 'gif', items: gifs });
+    return groups;
+  }, [filteredMediaItems]);
   const compositions = useCompositionsStore((s) => s.compositions);
 
   // Composition navigation â€” show banner when inside a sub-comp
@@ -374,7 +449,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const handleGenerateSelectedProxies = async () => {
     const selectedItems = selectedMediaIds
       .map((id) => mediaById[id])
-      .filter((m): m is typeof mediaItems[number] =>
+      .filter((m): m is MediaMetadata =>
         m !== undefined
         && proxyService.needsProxy(m.width, m.height, m.mimeType, m.audioCodec)
         && proxyStatus.get(m.id) !== 'ready'
@@ -645,21 +720,23 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
         </div>
 
         {/* Filters and sort */}
-        <div className="flex items-center gap-1.5">
+        <div className="@container flex items-center gap-1.5 min-w-0">
           {/* Filter by type */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
-                className={`h-6 bg-secondary border text-[10px] px-2 ${
+                className={`h-6 bg-secondary border text-[10px] px-2 flex-shrink-0 ${
                   filterByType
                     ? 'border-primary text-primary hover:bg-primary/10'
                     : 'border-border text-muted-foreground hover:border-primary/50 hover:text-primary'
                 }`}
               >
-                <Filter className="w-2.5 h-2.5 mr-1" />
-                {filterByType ? filterByType.toUpperCase() : 'ALL'}
+                <Filter className="w-2.5 h-2.5" />
+                <span className="hidden @[280px]:inline ml-1">
+                  {filterByType ? filterByType.toUpperCase() : 'ALL'}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="bg-popover border border-border">
@@ -700,10 +777,12 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
               <Button
                 variant="outline"
                 size="sm"
-                className="h-6 bg-secondary border border-border text-muted-foreground hover:border-primary/50 hover:text-primary text-[10px] px-2"
+                className="h-6 bg-secondary border border-border text-muted-foreground hover:border-primary/50 hover:text-primary text-[10px] px-2 flex-shrink-0"
               >
-                <SortAsc className="w-2.5 h-2.5 mr-1" />
-                {sortBy === 'name' ? 'NAME' : sortBy === 'date' ? 'DATE' : 'SIZE'}
+                <SortAsc className="w-2.5 h-2.5" />
+                <span className="hidden @[280px]:inline ml-1">
+                  {sortBy === 'name' ? 'NAME' : sortBy === 'date' ? 'DATE' : 'SIZE'}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="bg-popover border border-border">
@@ -729,7 +808,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           </DropdownMenu>
 
           {/* View mode toggle + item size */}
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
             {viewMode === 'grid' && (
               <Slider
                 min={1}
@@ -737,11 +816,11 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                 step={1}
                 value={[mediaItemSize]}
                 onValueChange={([v]) => setMediaItemSize(v ?? 3)}
-                className="w-16"
+                className="flex-1 min-w-6 max-w-24"
                 aria-label="Grid item size"
               />
             )}
-            <div className="flex items-center border border-border rounded bg-secondary">
+            <div className="flex items-center border border-border rounded bg-secondary flex-shrink-0">
               <Button
                 variant="ghost"
                 size="sm"
@@ -802,31 +881,35 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           {/* Compositions section â€” collapsible, auto-hidden when empty */}
           <CompositionsSection />
 
-          {/* Media section â€” collapsible, matches compositions header style */}
-          <Collapsible open={mediaOpen} onOpenChange={setMediaOpen}>
-            <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 hover:bg-secondary/50 rounded-md px-2 -mx-2 transition-colors">
-              <ChevronRight
-                className={cn(
-                  'w-3 h-3 text-muted-foreground transition-transform',
-                  mediaOpen && 'rotate-90'
-                )}
-              />
-              <Film className="w-3 h-3 text-muted-foreground" />
-              <span className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">
-                Media
-              </span>
-              <span className="text-[10px] tabular-nums text-muted-foreground/60">
-                {mediaItems.length}
-              </span>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-1 pb-2">
-              <MediaGrid
-                onMediaSelect={onMediaSelect}
-                viewMode={viewMode}
-                itemSize={mediaItemSize}
-              />
-            </CollapsibleContent>
-          </Collapsible>
+          {/* Media sections â€” grouped by type */}
+          {mediaGroups.map((group) => (
+            <MediaTypeGroup
+              key={group.key}
+              groupKey={group.key}
+              label={group.label}
+              icon={group.icon}
+              items={group.items}
+              isOpen={openGroups.has(group.key)}
+              onToggle={(key, open) => setOpenGroups((prev) => {
+                const next = new Set(prev);
+                if (open) next.add(key);
+                else next.delete(key);
+                return next;
+              })}
+              onMediaSelect={onMediaSelect}
+              viewMode={viewMode}
+              itemSize={mediaItemSize}
+            />
+          ))}
+
+          {/* Loading / empty state when no groups to show */}
+          {mediaGroups.length === 0 && (
+            <MediaGrid
+              onMediaSelect={onMediaSelect}
+              viewMode={viewMode}
+              itemSize={mediaItemSize}
+            />
+          )}
         </div>
 
         {/* Drag overlay â€” absolute sibling, always covers the visible viewport */}

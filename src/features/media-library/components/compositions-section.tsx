@@ -34,7 +34,7 @@ import {
 } from '@/features/media-library/deps/timeline-stores';
 import { useMediaLibraryStore } from '../stores/media-library-store';
 import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache';
-import { GRID_COLS_BY_SIZE } from './media-grid-constants';
+import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants';
 import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles';
 import { compoundClipThumbnailService } from '../services/compound-clip-thumbnail-service';
 
@@ -157,10 +157,13 @@ export function CompositionsSection() {
             {compositions.length}
           </span>
         </CollapsibleTrigger>
-        <CollapsibleContent className={cn(
-          'pt-1 pb-2',
-          viewMode === 'grid' ? `grid ${GRID_COLS_BY_SIZE[mediaItemSize] ?? GRID_COLS_BY_SIZE[3]}` : 'space-y-2'
-        )}>
+        <CollapsibleContent
+          className={cn(
+            'pt-1 pb-2',
+            viewMode === 'grid' ? `grid ${GRID_GAP_BY_SIZE[mediaItemSize] ?? GRID_GAP_BY_SIZE[3]}` : 'space-y-1'
+          )}
+          style={viewMode === 'grid' ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[mediaItemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))` } : undefined}
+        >
           {compositions.map((comp) => (
             <CompositionCard
               key={comp.id}

@@ -5,6 +5,10 @@ interface DebugState {
   showVideoDebugOverlay: boolean;
   setShowVideoDebugOverlay: (show: boolean) => void;
   toggleVideoDebugOverlay: () => void;
+  /** Debug panel open state */
+  debugPanelOpen: boolean;
+  setDebugPanelOpen: (open: boolean) => void;
+  toggleDebugPanel: () => void;
 }
 
 /**
@@ -23,9 +27,15 @@ export const useDebugStore = isDev
       showVideoDebugOverlay: false,
       setShowVideoDebugOverlay: (show) => set({ showVideoDebugOverlay: show }),
       toggleVideoDebugOverlay: () => set((s) => ({ showVideoDebugOverlay: !s.showVideoDebugOverlay })),
+      debugPanelOpen: false,
+      setDebugPanelOpen: (open) => set({ debugPanelOpen: open }),
+      toggleDebugPanel: () => set((s) => ({ debugPanelOpen: !s.debugPanelOpen })),
     }))
   : create<DebugState>(() => ({
       showVideoDebugOverlay: false,
       setShowVideoDebugOverlay: () => {},
       toggleVideoDebugOverlay: () => {},
+      debugPanelOpen: false,
+      setDebugPanelOpen: () => {},
+      toggleDebugPanel: () => {},
     }));

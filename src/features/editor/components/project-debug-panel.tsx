@@ -1,8 +1,8 @@
 ﻿/**
  * Project Debug Panel
  *
- * Floating debug panel for project data operations.
- * Only visible in development mode.
+ * Project data operations UI rendered inside the toolbar popover.
+ * Visibility is controlled by the parent DebugPopover component.
  */
 
 import { useState, useCallback, useEffect } from 'react';
@@ -32,7 +32,6 @@ import {
   CheckCircle,
   XCircle,
   ChevronDown,
-  X,
   FlaskConical,
   Play,
   Eye,
@@ -60,7 +59,6 @@ interface ProjectDebugPanelProps {
 }
 
 export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
-  const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [status, setStatus] = useState<{
     type: 'idle' | 'loading' | 'success' | 'error';
@@ -83,11 +81,6 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
       });
     }
   }, []);
-
-  // Only show in dev mode, can be disabled with VITE_SHOW_DEBUG_PANEL=false
-  if (!import.meta.env.DEV || import.meta.env.VITE_SHOW_DEBUG_PANEL === 'false') {
-    return null;
-  }
 
   const showStatus = (type: 'success' | 'error', message: string) => {
     setStatus({ type, message });
@@ -256,42 +249,11 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
   );
 
   return (
-    <>
-      {/* Floating Toggle Button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          'fixed bottom-4 left-4 z-50 p-2.5 rounded-full shadow-lg transition-all',
-          'bg-amber-500 hover:bg-amber-600 text-white',
-          'focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2',
-          isOpen && 'rotate-180'
-        )}
-        title="Toggle Debug Panel"
-      >
-        <Bug className="h-5 w-5" />
-      </button>
-
-      {/* Debug Panel */}
-      {isOpen && (
-        <div
-          className={cn(
-            'fixed bottom-16 left-4 z-50 w-64',
-            'bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl',
-            'text-zinc-100 text-sm'
-          )}
-        >
+    <div className="text-sm">
           {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700">
-            <div className="flex items-center gap-2">
-              <Bug className="h-4 w-4 text-amber-500" />
-              <span className="font-medium">Debug Panel</span>
-            </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="p-1 hover:bg-zinc-800 rounded"
-            >
-              <X className="h-4 w-4" />
-            </button>
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-700">
+            <Bug className="h-4 w-4 text-amber-500" />
+            <span className="font-medium">Debug Panel</span>
           </div>
 
           {/* Status Bar */}
@@ -467,8 +429,6 @@ export function ProjectDebugPanel({ projectId }: ProjectDebugPanelProps) {
               </div>
             </CollapsibleContent>
           </Collapsible>
-        </div>
-      )}
-    </>
+    </div>
   );
 }

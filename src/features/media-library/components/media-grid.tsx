@@ -5,6 +5,7 @@ import { createLogger } from '@/shared/logging/logger';
 const logger = createLogger('MediaGrid');
 import { MediaCard } from './media-card';
 import { useMediaLibraryStore, useFilteredMediaItems } from '../stores/media-library-store';
+import type { MediaMetadata } from '@/types/storage';
 import {
   getMediaDeletionImpact,
   removeProjectItems,
@@ -21,21 +22,24 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-import { GRID_COLS_BY_SIZE } from './media-grid-constants';
+import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants';
 
 interface MediaGridProps {
   onMediaSelect?: (mediaId: string) => void;
   viewMode?: 'grid' | 'list';
   /** Grid item size (1 = largest, 5 = smallest) */
   itemSize?: number;
+  /** When provided, renders these items instead of pulling from the store */
+  items?: MediaMetadata[];
 }
 
-export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'grid', itemSize = 3 }: MediaGridProps) {
+export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'grid', itemSize = 3, items }: MediaGridProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [mediaIdToDelete, setMediaIdToDelete] = useState<string | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
 
-  const filteredItems = useFilteredMediaItems();
+  const allFilteredItems = useFilteredMediaItems();
+  const filteredItems = items ?? allFilteredItems;
   const isLoading = useMediaLibraryStore((s) => s.isLoading);
   const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
   const selectedCompositionIds = useMediaLibraryStore((s) => s.selectedCompositionIds);
@@ -160,7 +164,7 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
   return (
     <div>
       {/* Content */}
-      {isLoading ? (
+      {!items && isLoading ? (
         <div className="flex items-center justify-center py-24">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
@@ -173,7 +177,7 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
             </div>
           </div>
         </div>
-      ) : filteredItems.length === 0 ? (
+      ) : !items && filteredItems.length === 0 ? (
         <div className="flex items-center justify-center py-24">
           <div className="text-center max-w-md">
             <div
@@ -198,7 +202,10 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
           </div>
         </div>
       ) : (
-        <div className={viewMode === 'grid' ? `grid ${GRID_COLS_BY_SIZE[itemSize] ?? GRID_COLS_BY_SIZE[3]}` : 'space-y-2'}>
+        <div
+          className={viewMode === 'grid' ? `grid ${GRID_GAP_BY_SIZE[itemSize] ?? GRID_GAP_BY_SIZE[3]}` : 'space-y-1'}
+          style={viewMode === 'grid' ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[itemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))` } : undefined}
+        >
           {filteredItems.map((media) => (
             <div
               key={media.id}

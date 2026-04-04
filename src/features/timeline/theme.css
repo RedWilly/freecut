@@ -156,6 +156,15 @@ body.timeline-item-drag-cursor-not-allowed * {
   height: 0;
 }
 
+/* Hide track section vertical scrollbars so they don't shrink content width,
+   matching the .timeline-container horizontal scrollbar pattern */
+[data-track-section-scroll] {
+  scrollbar-width: none;
+}
+[data-track-section-scroll]::-webkit-scrollbar {
+  width: 0;
+}
+
 /* Waveform gradient background - darker edges, dark center */
 .bg-waveform-gradient {
   background: linear-gradient(
