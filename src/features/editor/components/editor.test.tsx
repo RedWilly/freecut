@@ -151,13 +151,11 @@ vi.mock('@/features/editor/deps/settings', () => ({
   useSettingsStore: (
     selector: (state: {
       editorDensity: string;
-      previewQuality: 'low' | 'medium' | 'high';
       snapEnabled: boolean;
     }) => unknown
   ) =>
     selector({
       editorDensity: 'comfortable',
-      previewQuality: 'high',
       snapEnabled: true,
     }),
 }));
