@@ -974,7 +974,8 @@ export function useTimelineDrag(
           ? currentItems
           : currentItems.filter((i) => !draggedItemIds.includes(i.id));
 
-        let maxSnapForward = 0; // How many frames we need to move the whole group forward
+        let maxSnapForward = 0;  // largest positive shift needed
+        let maxSnapBackward = 0; // largest negative shift needed (stored as negative)
 
         for (const movedItem of movedItems) {
           const finalPosition = findNearestAvailableSpace(
@@ -1008,13 +1009,21 @@ export function useTimelineDrag(
           if (snapAmount > maxSnapForward) {
             maxSnapForward = snapAmount;
           }
+          if (snapAmount < maxSnapBackward) {
+            maxSnapBackward = snapAmount;
+          }
         }
+
+        // Pick whichever direction has the larger correction needed
+        const groupSnapDelta = Math.abs(maxSnapForward) >= Math.abs(maxSnapBackward)
+          ? maxSnapForward
+          : maxSnapBackward;
 
         if (isAltDrag) {
           // ALT-DRAG: Duplicate items at new positions
           const itemIds = movedItems.map((m) => m.id);
           const positions = movedItems.map((m) => ({
-            from: Math.round(m.newFrom + maxSnapForward),
+            from: Math.round(m.newFrom + groupSnapDelta),
             trackId: m.newTrackId,
           }));
 
@@ -1027,7 +1036,7 @@ export function useTimelineDrag(
           // Normal drag: Apply the snap to ALL items in the group
           const allUpdates = movedItems.map((m) => ({
             id: m.id,
-            from: Math.round(m.newFrom + maxSnapForward),
+            from: Math.round(m.newFrom + groupSnapDelta),
             trackId: m.newTrackId !== currentItems.find((i) => i.id === m.id)?.trackId
               ? m.newTrackId
               : undefined,

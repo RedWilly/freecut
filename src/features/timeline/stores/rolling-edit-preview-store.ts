@@ -7,11 +7,10 @@ interface RollingEditPreviewState {
   neighborItemId: string | null;
   /** Which handle on the trimmed item: 'start' or 'end' */
   handle: 'start' | 'end' | null;
-  /** Delta in frames applied to the neighbor (positive = extend, negative = shrink).
-   *  For the neighbor:
-   *    - If trimmedItem's end handle is dragged right → neighbor's start moves right (neighborDelta > 0 means shrink start)
-   *    - Convention: neighborDelta matches the trimmed item's delta sign convention from use-timeline-trim */
+  /** Delta in frames applied to the neighbor */
   neighborDelta: number;
+  /** Whether the rolling edit is constrained (from either clip's source limit) */
+  constrained: boolean;
 }
 
 interface RollingEditPreviewActions {
@@ -20,8 +19,9 @@ interface RollingEditPreviewActions {
     neighborItemId: string;
     handle: 'start' | 'end';
     neighborDelta: number;
+    constrained?: boolean;
   }) => void;
-  setNeighborDelta: (neighborDelta: number) => void;
+  setNeighborDelta: (neighborDelta: number, constrained?: boolean) => void;
   clearPreview: () => void;
 }
 
@@ -32,13 +32,15 @@ export const useRollingEditPreviewStore = create<
   neighborItemId: null,
   handle: null,
   neighborDelta: 0,
-  setPreview: (params) => set(params),
-  setNeighborDelta: (neighborDelta) => set({ neighborDelta }),
+  constrained: false,
+  setPreview: (params) => set({ ...params, constrained: params.constrained ?? false }),
+  setNeighborDelta: (neighborDelta, constrained) => set({ neighborDelta, constrained: constrained ?? false }),
   clearPreview: () =>
     set({
       trimmedItemId: null,
       neighborItemId: null,
       handle: null,
       neighborDelta: 0,
+      constrained: false,
     }),
 }));

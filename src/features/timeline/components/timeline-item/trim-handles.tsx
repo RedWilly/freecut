@@ -1,4 +1,4 @@
-﻿import { memo } from 'react';
+import { memo } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -7,6 +7,50 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/shared/ui/cn';
+import type { SmartTrimIntent } from '../../utils/smart-trim-zones';
+
+interface EdgeColors {
+  edge: string;
+  glow: string;
+  fade: string;
+}
+
+const TRIM_COLORS: EdgeColors = {
+  edge: 'rgba(255, 255, 255, 0.85)',
+  glow: '0 0 6px rgba(255, 255, 255, 0.3)',
+  fade: 'rgba(255, 255, 255, 0.2)',
+};
+
+const RIPPLE_COLORS: EdgeColors = {
+  edge: 'rgba(251, 191, 36, 0.95)',
+  glow: '0 0 8px rgba(251, 191, 36, 0.5)',
+  fade: 'rgba(251, 191, 36, 0.3)',
+};
+
+const ROLL_COLORS: EdgeColors = {
+  edge: 'rgba(251, 191, 36, 0.9)',
+  glow: '0 0 8px rgba(251, 191, 36, 0.6)',
+  fade: 'rgba(251, 191, 36, 0.35)',
+};
+
+const CONSTRAINED_COLORS: EdgeColors = {
+  edge: 'rgba(239, 68, 68, 0.9)',
+  glow: '0 0 8px rgba(239, 68, 68, 0.5)',
+  fade: 'rgba(239, 68, 68, 0.3)',
+};
+
+const FREE_COLORS: EdgeColors = {
+  edge: 'rgba(74, 222, 128, 0.9)',
+  glow: '0 0 8px rgba(74, 222, 128, 0.5)',
+  fade: 'rgba(74, 222, 128, 0.3)',
+};
+
+/** Describes which edges are actively being operated on and their constraint state */
+export interface ActiveEdgeState {
+  start: boolean;
+  end: boolean;
+  constrainedEdge: 'start' | 'end' | 'both' | null;
+}
 
 interface TrimHandlesProps {
   trackLocked: boolean;
@@ -15,7 +59,10 @@ interface TrimHandlesProps {
   trimHandle: 'start' | 'end' | null;
   activeTool: string;
   hoveredEdge: 'start' | 'end' | null;
-  trimConstrained: boolean;
+  smartTrimIntent: SmartTrimIntent;
+  rollHoverEdge: 'start' | 'end' | null;
+  /** Active edge state from any gesture (trim, roll-neighbor, slip, slide, stretch) */
+  activeEdges: ActiveEdgeState | null;
   startCursorClass: string;
   endCursorClass: string;
   startTone: 'default' | 'ripple';
@@ -27,9 +74,23 @@ interface TrimHandlesProps {
   onJoinRight: () => void;
 }
 
+function resolveEdgeColors(
+  tone: 'default' | 'ripple',
+  isRolling: boolean,
+  isActiveHandle: boolean,
+  isConstrained: boolean,
+): EdgeColors {
+  if (isActiveHandle) return isConstrained ? CONSTRAINED_COLORS : FREE_COLORS;
+  if (isRolling) return ROLL_COLORS;
+  if (tone === 'ripple') return RIPPLE_COLORS;
+  return TRIM_COLORS;
+}
+
 /**
- * Trim handles for timeline items
- * Renders left and right trim handles with context menus for joining
+ * Trim handles for timeline items.
+ * All modes (trim, ripple, roll, slip, slide) use a solid edge + gradient fade halo.
+ * During active operations the halo turns green (free) or red (constrained).
+ * Roll mode additionally renders a double-edge across the edit point.
  */
 export const TrimHandles = memo(function TrimHandles({
   trackLocked,
@@ -38,7 +99,9 @@ export const TrimHandles = memo(function TrimHandles({
   trimHandle,
   activeTool,
   hoveredEdge,
-  trimConstrained,
+  smartTrimIntent,
+  rollHoverEdge,
+  activeEdges,
   startCursorClass,
   endCursorClass,
   startTone,
@@ -49,19 +112,42 @@ export const TrimHandles = memo(function TrimHandles({
   onJoinLeft,
   onJoinRight,
 }: TrimHandlesProps) {
+  const isRollingStart = smartTrimIntent === 'roll-start';
+  const isRollingEnd = smartTrimIntent === 'roll-end';
+  const isNeighborRollStart = rollHoverEdge === 'start';
+  const isNeighborRollEnd = rollHoverEdge === 'end';
+
+  const leftActive = activeEdges?.start ?? false;
+  const rightActive = activeEdges?.end ?? false;
+  const leftConstrained = !!activeEdges && leftActive && (activeEdges.constrainedEdge === 'start' || activeEdges.constrainedEdge === 'both');
+  const rightConstrained = !!activeEdges && rightActive && (activeEdges.constrainedEdge === 'end' || activeEdges.constrainedEdge === 'both');
+
   const showLeftHandle = !trackLocked &&
-    (!isAnyDragActive || isTrimming) &&
+    (!isAnyDragActive || isTrimming || leftActive) &&
     (activeTool === 'select' || activeTool === 'trim-edit') &&
-    (hoveredEdge === 'start' || (isTrimming && trimHandle === 'start'));
+    (hoveredEdge === 'start' || (isTrimming && trimHandle === 'start') || isNeighborRollStart || leftActive);
 
   const showRightHandle = !trackLocked &&
-    (!isAnyDragActive || isTrimming) &&
+    (!isAnyDragActive || isTrimming || rightActive) &&
     (activeTool === 'select' || activeTool === 'trim-edit') &&
-    (hoveredEdge === 'end' || (isTrimming && trimHandle === 'end'));
+    (hoveredEdge === 'end' || (isTrimming && trimHandle === 'end') || isNeighborRollEnd || rightActive);
+
+  const leftColors = resolveEdgeColors(
+    startTone,
+    isRollingStart || isNeighborRollStart,
+    (isTrimming && trimHandle === 'start') || leftActive,
+    leftConstrained,
+  );
+  const rightColors = resolveEdgeColors(
+    endTone,
+    isRollingEnd || isNeighborRollEnd,
+    (isTrimming && trimHandle === 'end') || rightActive,
+    rightConstrained,
+  );
 
   return (
     <>
-      {/* Left trim handle: wider hit area, thin visible indicator */}
+      {/* Left trim handle */}
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={trackLocked || !hasJoinableLeft}>
           <div
@@ -72,12 +158,29 @@ export const TrimHandles = memo(function TrimHandles({
             )}
             onMouseDown={(e) => onTrimStart(e, 'start')}
           >
-            <div className={cn(
-              'absolute inset-y-0 left-0 w-px rounded-l-sm bg-primary/80 shadow-[0_0_0_1px_rgba(255,255,255,0.12)]',
-              isTrimming && trimHandle === 'start' && 'opacity-0',
-              startTone === 'ripple' && 'bg-amber-300/95 shadow-[0_0_0_1px_rgba(253,224,71,0.34),0_0_12px_rgba(251,191,36,0.3)]',
-              trimConstrained && trimHandle === 'start' && 'bg-red-300/95 shadow-[0_0_0_1px_rgba(252,165,165,0.35)]'
-            )} />
+            {/* Solid edge at boundary */}
+            <div
+              className="absolute inset-y-0 left-0"
+              style={{ width: '2px', background: leftColors.edge, boxShadow: leftColors.glow }}
+            />
+            {/* Inward fade into this clip */}
+            <div
+              className="absolute inset-y-0"
+              style={{ left: '2px', width: '8px', background: `linear-gradient(to right, ${leftColors.fade}, transparent)` }}
+            />
+            {/* Outer edge + outward fade (roll mode, actively-hovered item only) */}
+            {isRollingStart && (
+              <>
+                <div
+                  className="absolute inset-y-0"
+                  style={{ left: '-2px', width: '2px', background: leftColors.edge, boxShadow: leftColors.glow }}
+                />
+                <div
+                  className="absolute inset-y-0"
+                  style={{ left: '-10px', width: '8px', background: `linear-gradient(to left, ${leftColors.fade}, transparent)` }}
+                />
+              </>
+            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -88,7 +191,7 @@ export const TrimHandles = memo(function TrimHandles({
         </ContextMenuContent>
       </ContextMenu>
 
-      {/* Right trim handle: wider hit area, thin visible indicator */}
+      {/* Right trim handle */}
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={trackLocked || !hasJoinableRight}>
           <div
@@ -99,12 +202,29 @@ export const TrimHandles = memo(function TrimHandles({
             )}
             onMouseDown={(e) => onTrimStart(e, 'end')}
           >
-            <div className={cn(
-              'absolute inset-y-0 right-0 w-px rounded-r-sm bg-primary/80 shadow-[0_0_0_1px_rgba(255,255,255,0.12)]',
-              isTrimming && trimHandle === 'end' && 'opacity-0',
-              endTone === 'ripple' && 'bg-amber-300/95 shadow-[0_0_0_1px_rgba(253,224,71,0.34),0_0_12px_rgba(251,191,36,0.3)]',
-              trimConstrained && trimHandle === 'end' && 'bg-red-300/95 shadow-[0_0_0_1px_rgba(252,165,165,0.35)]'
-            )} />
+            {/* Solid edge at boundary */}
+            <div
+              className="absolute inset-y-0 right-0"
+              style={{ width: '2px', background: rightColors.edge, boxShadow: rightColors.glow }}
+            />
+            {/* Inward fade into this clip */}
+            <div
+              className="absolute inset-y-0"
+              style={{ right: '2px', width: '8px', background: `linear-gradient(to left, ${rightColors.fade}, transparent)` }}
+            />
+            {/* Outer edge + outward fade (roll mode, actively-hovered item only) */}
+            {isRollingEnd && (
+              <>
+                <div
+                  className="absolute inset-y-0"
+                  style={{ right: '-2px', width: '2px', background: rightColors.edge, boxShadow: rightColors.glow }}
+                />
+                <div
+                  className="absolute inset-y-0"
+                  style={{ right: '-10px', width: '8px', background: `linear-gradient(to right, ${rightColors.fade}, transparent)` }}
+                />
+              </>
+            )}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>

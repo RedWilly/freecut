@@ -111,6 +111,7 @@ import {
   dissolvePreComp,
 } from '../../stores/actions/composition-actions';
 import { useTimelineItemOverlayStore } from '../../stores/timeline-item-overlay-store';
+import { useRollHoverStore } from '../../stores/roll-hover-store';
 import { timelineToSourceFrames } from '../../utils/source-calculations';
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
 import { getTransitionBridgeBounds } from '../../utils/transition-preview-geometry';
@@ -261,6 +262,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
 
   // Use refs for actions to avoid selector re-renders - read from store in callbacks
   const activeTool = useSelectionStore((s) => s.activeTool);
+  const isAnyGestureActive = useSelectionStore((s) => !!s.dragState?.isDragging);
 
   // Use ref for activeTool to avoid callback recreation on mode changes (prevents playback lag)
   const activeToolRef = useRef(activeTool);
@@ -270,6 +272,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const [hoveredEdge, setHoveredEdge] = useState<'start' | 'end' | null>(null);
   const [smartTrimIntent, setSmartTrimIntent] = useState<SmartTrimIntent>(null);
   const [smartBodyIntent, setSmartBodyIntent] = useState<SmartBodyIntent>(null);
+
+  // Clear stale hover state when the active tool changes (mouse may be stationary)
+  useEffect(() => {
+    setHoveredEdge(null);
+    setSmartTrimIntent(null);
+    setSmartBodyIntent(null);
+    useRollHoverStore.getState().clearRollHover(item.id);
+  }, [activeTool, item.id]);
+
+  // When an adjacent item enters roll mode, this item's edge should glow too
+  const rollHoverEdge = useRollHoverStore(
+    useCallback((s) => (s.neighborItemId === item.id ? s.neighborEdge : null), [item.id])
+  );
   const isSingleEffectDropTarget = useEffectDropPreviewStore(
     useCallback((state) => state.targetItemIds.length === 1 && state.targetItemIds[0] === item.id, [item.id])
   );
@@ -648,6 +663,9 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       return s.handle;
     }, [item.id])
   );
+  const rollingEditConstrained = useRollingEditPreviewStore(
+    useCallback((s) => s.neighborItemId === item.id && s.constrained, [item.id])
+  );
 
   // Ripple edit preview: downstream items shift by delta during ripple trim
   const rippleEditOffset = useRippleEditPreviewStore(
@@ -780,7 +798,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const right = Math.round(timeToPixels((previewBaseItem.from + previewBaseItem.durationInFrames + slideDurationOffset + slideFromOffset + rippleEditOffset) / fps));
   const width = right - left;
 
-  // Source FPS for converting source frames â†’ timeline frames (sourceStart etc. are in source-native FPS)
+  // Source FPS for converting source frames â†' timeline frames (sourceStart etc. are in source-native FPS)
   const effectiveSourceFps = previewBaseItem.sourceFps ?? fps;
 
   // Preview item for clip internals (filmstrip/waveform) during edit drags.
@@ -928,19 +946,18 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     }
 
     // Rolling edit neighbor visual feedback
+    // Compute the shared boundary from absolute frame position (same path as anchor)
+    // to avoid sub-pixel divergence between the two clips.
     if (rollingEditDelta !== 0) {
       if (rollingEditHandle === 'end') {
-        // Trimmed item's end handle was dragged â†’ this neighbor's start adjusts
-        // Positive delta = edit point moved right = neighbor shrinks from left
-        const deltaPixels = Math.round(timeToPixels(rollingEditDelta / fps));
-        trimVisualLeft += deltaPixels;
-        trimVisualWidth -= deltaPixels;
+        // Trimmed item's end handle was dragged -- this neighbor's start adjusts
+        const newLeft = Math.round(frameToPixels(previewBaseItem.from + rollingEditDelta));
+        trimVisualWidth -= (newLeft - trimVisualLeft);
+        trimVisualLeft = newLeft;
       } else if (rollingEditHandle === 'start') {
-        // Trimmed item's start handle was dragged â†’ this neighbor's end adjusts
-        // Positive delta = edit point moved right â†’ neighbor extends from right
-        // Negative delta = edit point moved left â†’ neighbor shrinks from right
-        const deltaPixels = Math.round(timeToPixels(rollingEditDelta / fps));
-        trimVisualWidth += deltaPixels;
+        // Trimmed item's start handle was dragged -- this neighbor's end adjusts
+        const newRight = Math.round(frameToPixels(previewBaseItem.from + previewBaseItem.durationInFrames + rollingEditDelta));
+        trimVisualWidth = newRight - trimVisualLeft;
       }
     }
 
@@ -1260,7 +1277,19 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       const nextHoveredEdge = smartTrimIntentToHandle(nextIntent);
 
       if (smartTrimIntentRef.current !== nextIntent) {
+        const prevIntent = smartTrimIntentRef.current;
         syncSmartTrimIntent(nextIntent);
+        // Publish roll-hover neighbor so the adjacent item also shows its edge
+        if (nextIntent === 'roll-start') {
+          const neighbor = findHandleNeighborWithTransitions(item, 'start', items, transitions);
+          if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'end');
+        } else if (nextIntent === 'roll-end') {
+          const neighbor = findHandleNeighborWithTransitions(item, 'end', items, transitions);
+          if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'start');
+        } else if (prevIntent === 'roll-start' || prevIntent === 'roll-end') {
+          // Was rolling, no longer — clear
+          useRollHoverStore.getState().clearRollHover(item.id);
+        }
       }
       if (hoveredEdgeRef.current !== nextHoveredEdge) {
         syncHoveredEdge(nextHoveredEdge);
@@ -2643,7 +2672,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     syncHoveredEdge(null);
     syncSmartTrimIntent(null);
     syncSmartBodyIntent(null);
-  }, [syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent]);
+    useRollHoverStore.getState().clearRollHover(item.id);
+  }, [item.id, syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent]);
 
   const handleSmartTrimStart = useCallback((e: React.MouseEvent, handle: 'start' | 'end') => {
     const currentIntent = smartTrimIntentRef.current;
@@ -2978,8 +3008,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
           onDragLeave={handleEffectDragLeave}
           onDrop={handleEffectDrop}
         >
-          {/* Selection indicator */}
-          {isSelected && !trackLocked && (
+          {/* Selection indicator — hidden during active gestures to reduce clutter */}
+          {isSelected && !trackLocked && !isAnyGestureActive && (
             <div className="absolute inset-0 rounded pointer-events-none z-20 border border-primary" />
           )}
 
@@ -3154,7 +3184,28 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
             trimHandle={trimHandle}
             activeTool={activeTool}
             hoveredEdge={hoveredEdge}
-            trimConstrained={trimConstrained}
+            smartTrimIntent={smartTrimIntent}
+            rollHoverEdge={rollHoverEdge}
+            activeEdges={
+              isTrimming && trimHandle
+                ? {
+                    start: trimHandle === 'start',
+                    end: trimHandle === 'end',
+                    // Rolling edit: both clips are stuck when constrained (constraint may come from either clip)
+                    constrainedEdge: trimConstrained ? (isRollingEdit ? 'both' : trimHandle) : null,
+                  }
+                : rollingEditHandle
+                ? {
+                    start: rollingEditHandle === 'end',
+                    end: rollingEditHandle === 'start',
+                    constrainedEdge: rollingEditConstrained ? 'both' : null,
+                  }
+                : isSlipSlideActive
+                ? { start: true, end: true, constrainedEdge: slipSlideConstrained ? (slipSlideConstraintEdge ?? 'both') : null }
+                : isStretching
+                ? { start: stretchHandle === 'start', end: stretchHandle === 'end', constrainedEdge: stretchConstrained ? stretchHandle : null }
+                : null
+            }
             startCursorClass={
               smartTrimIntent === 'ripple-start'
                 ? 'cursor-ripple-left'

@@ -84,15 +84,20 @@ export function TimelinePreviewScrubber({ inRuler = false, maxFrame }: TimelineP
     const updateColor = (tool: string) => {
       const isRazor = tool === 'razor';
       const isRateStretch = tool === 'rate-stretch';
+      const isTrimEdit = tool === 'trim-edit';
       const lineColor = isRazor
         ? 'rgba(239, 68, 68, 0.7)'
         : isRateStretch
         ? 'rgba(168, 85, 247, 0.7)'
+        : isTrimEdit
+        ? 'rgba(234, 179, 8, 0.7)'
         : 'rgba(255, 255, 255, 0.3)';
       const diamondColor = isRazor
         ? 'rgba(239, 68, 68, 0.8)'
         : isRateStretch
         ? 'rgba(168, 85, 247, 0.8)'
+        : isTrimEdit
+        ? 'rgba(234, 179, 8, 0.8)'
         : 'rgba(255, 255, 255, 0.4)';
 
       if (lineRef.current) lineRef.current.style.backgroundColor = lineColor;
