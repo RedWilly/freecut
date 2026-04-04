@@ -2,6 +2,7 @@ import { memo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
+  Bug,
   ChevronDown,
   Download,
   FolderArchive,
@@ -18,12 +19,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { LocalInferenceStatusPill } from './local-inference-status-pill';
+import { ProjectDebugPanel } from './project-debug-panel';
 import { SettingsDialog } from './settings-dialog';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { UnsavedChangesDialog } from './unsaved-changes-dialog';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { useDebugStore } from '@/features/editor/stores/debug-store';
 
 interface ToolbarProps {
   projectId: string;
@@ -41,6 +45,7 @@ interface ToolbarProps {
 }
 
 export const Toolbar = memo(function Toolbar({
+  projectId,
   project,
   isDirty = false,
   onSave,
@@ -120,13 +125,16 @@ export const Toolbar = memo(function Toolbar({
       />
 
       <div className="flex items-center gap-1.5">
+        {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEBUG_PANEL !== 'false' && (
+          <DebugPopover projectId={projectId} />
+        )}
         <Button
           variant="outline"
           size="icon"
           className="h-7 w-7"
           onClick={() => setShowSettingsDialog(true)}
           data-tooltip="Settings"
-          data-tooltip-side="left"
+          data-tooltip-side="bottom"
           aria-label="Settings"
         >
           <Settings className="h-4 w-4" />
@@ -137,7 +145,7 @@ export const Toolbar = memo(function Toolbar({
           className="h-7 w-7"
           onClick={() => setShowShortcutsDialog(true)}
           data-tooltip="Keyboard Shortcuts"
-          data-tooltip-side="left"
+          data-tooltip-side="bottom"
           aria-label="Keyboard shortcuts"
         >
           <Keyboard className="h-4 w-4" />
@@ -153,7 +161,7 @@ export const Toolbar = memo(function Toolbar({
             target="_blank"
             rel="noopener noreferrer"
             data-tooltip="View on GitHub"
-            data-tooltip-side="left"
+            data-tooltip-side="bottom"
             aria-label="View on GitHub"
           >
             <Github className="h-4 w-4" />
@@ -198,3 +206,32 @@ export const Toolbar = memo(function Toolbar({
     </div>
   );
 });
+
+function DebugPopover({ projectId }: { projectId: string }) {
+  const debugPanelOpen = useDebugStore((s) => s.debugPanelOpen);
+  const setDebugPanelOpen = useDebugStore((s) => s.setDebugPanelOpen);
+
+  return (
+    <Popover open={debugPanelOpen} onOpenChange={setDebugPanelOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="icon"
+          className={`h-7 w-7 ${debugPanelOpen ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : ''}`}
+          data-tooltip={debugPanelOpen ? undefined : 'Debug Panel'}
+          data-tooltip-side="bottom"
+          aria-label="Debug panel"
+        >
+          <Bug className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="w-64 p-0 bg-zinc-900 border-zinc-700 text-zinc-100"
+      >
+        <ProjectDebugPanel projectId={projectId} />
+      </PopoverContent>
+    </Popover>
+  );
+}
