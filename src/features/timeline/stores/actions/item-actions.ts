@@ -418,6 +418,9 @@ export function rippleDeleteItems(ids: string[]): void {
   const remainingItems = items.filter((item) => !idsToDelete.has(item.id));
   const baseShiftByItemId = new Map<string, number>();
 
+  // Per-track: shift downstream items on the same track as each deleted item.
+  // Linked counterparts on other tracks shift via buildLinkedLeftShiftUpdates.
+  // Solo clips on unrelated tracks are left in place.
   for (const item of remainingItems) {
     const shiftAmount = items
       .filter((candidate) => idsToDelete.has(candidate.id))
@@ -470,7 +473,8 @@ export function closeGapAtPosition(trackId: string, frame: number): void {
   const gapSize = gapEnd - gapStart;
   const baseShiftByItemId = new Map<string, number>();
   for (const item of items) {
-    if (item.trackId === trackId && item.from >= gapEnd) {
+    // Shift ALL items at or after the gap end across every track
+    if (item.from >= gapEnd) {
       baseShiftByItemId.set(item.id, gapSize);
     }
   }

@@ -222,7 +222,7 @@ describe('linked timeline items', () => {
     expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 60 });
   });
 
-  it('close gap leaves linked companions in place when linked selection is off', () => {
+  it('close gap shifts all downstream items across tracks even when linked selection is off', () => {
     useEditorStore.setState({ linkedSelectionEnabled: false });
     useItemsStore.getState().setItems([
       makeVideoItem({
@@ -252,7 +252,7 @@ describe('linked timeline items', () => {
 
     const items = useItemsStore.getState().items;
     expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
-    expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 90 });
+    expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 60 });
   });
 
   it('close all gaps keeps linked clips aligned across tracks', () => {
