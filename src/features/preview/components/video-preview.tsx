@@ -1,7 +1,7 @@
 import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback, memo } from 'react';
 import { getDecoderPrewarmMetricsSnapshot } from '../utils/decoder-prewarm';
 import { Player, type PlayerRef } from '@/features/preview/deps/player-core';
-import type { CaptureOptions, PreviewQuality } from '@/shared/state/playback';
+import type { PreviewQuality } from '@/shared/state/playback';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge';
 import {
@@ -37,7 +37,6 @@ import type { ItemEffect } from '@/types/effects';
 import type { TimelineItem } from '@/types/timeline';
 import type { ResolvedTransform } from '@/types/transform';
 import { isMarqueeJustFinished } from '@/hooks/use-marquee-selection';
-import { createCompositionRenderer } from '@/features/preview/deps/export';
 import {
   resolveTransitionWindows,
   type ResolvedTransitionWindow,
@@ -62,11 +61,14 @@ import {
   useGpuEffectsOverlay,
 } from '../hooks/use-gpu-effects-overlay';
 import { useCustomPlayer } from '../hooks/use-custom-player';
-import { usePreviewCaptureBridge } from '../hooks/use-preview-capture-bridge';
 import { usePreviewMediaResolution } from '../hooks/use-preview-media-resolution';
 import { usePreviewMediaPreload } from '../hooks/use-preview-media-preload';
 import { usePreviewOverlayController } from '../hooks/use-preview-overlay-controller';
 import { usePreviewRenderPump } from '../hooks/use-preview-render-pump-controller';
+import {
+  usePreviewRendererController,
+  type PreviewCompositionRenderer,
+} from '../hooks/use-preview-renderer-controller';
 import { usePreviewSourceWarm } from '../hooks/use-preview-source-warm';
 import {
   usePreviewTransitionSessionController,
@@ -75,7 +77,6 @@ import {
 } from '../hooks/use-preview-transition-session-controller';
 import { createLogger } from '@/shared/logging/logger';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
-import { isFrameInRanges } from '@/shared/utils/frame-invalidation';
 
 // DEV-only: cached reference loaded via dynamic import so the module
 // is excluded from production bundles entirely.
@@ -87,7 +88,6 @@ if (import.meta.env.DEV) {
 }
 import {
   FAST_SCRUB_RENDERER_ENABLED,
-  FAST_SCRUB_PRELOAD_BUDGET_MS,
   PREVIEW_PERF_PUBLISH_INTERVAL_MS,
   PREVIEW_PERF_PANEL_STORAGE_KEY,
   PREVIEW_PERF_PANEL_QUERY_KEY,
@@ -99,13 +99,9 @@ import {
   toTrackFingerprint,
   getMediaResolveCost,
   parsePreviewPerfPanelQuery,
-  blobToDataUrl,
 } from '../utils/preview-constants';
-import { collectVisualInvalidationRanges } from '../utils/preview-frame-invalidation';
 
 const logger = createLogger('VideoPreview');
-
-type CompositionRenderer = Awaited<ReturnType<typeof createCompositionRenderer>>;
 
 interface VideoPreviewProps {
   project: {
@@ -143,9 +139,9 @@ export const VideoPreview = memo(function VideoPreview({
   const gpuEffectsCanvasRef = useRef<HTMLCanvasElement>(null);
   const scrubFrameDirtyRef = useRef(false);
   const bypassPreviewSeekRef = useRef(false);
-  const scrubRendererRef = useRef<CompositionRenderer | null>(null);
-  const ensureFastScrubRendererRef = useRef<() => Promise<CompositionRenderer | null>>(async () => null);
-  const scrubInitPromiseRef = useRef<Promise<CompositionRenderer | null> | null>(null);
+  const scrubRendererRef = useRef<PreviewCompositionRenderer | null>(null);
+  const ensureFastScrubRendererRef = useRef<() => Promise<PreviewCompositionRenderer | null>>(async () => null);
+  const scrubInitPromiseRef = useRef<Promise<PreviewCompositionRenderer | null> | null>(null);
   const scrubPreloadPromiseRef = useRef<Promise<void> | null>(null);
   const scrubOffscreenCanvasRef = useRef<OffscreenCanvas | null>(null);
   const scrubOffscreenCtxRef = useRef<OffscreenCanvasRenderingContext2D | null>(null);
@@ -156,8 +152,8 @@ export const VideoPreview = memo(function VideoPreview({
   // Dedicated background renderer for transition pre-rendering.
   // Separate from the main scrub renderer so pre-renders don't conflict
   // with the rAF pump's render loop (different canvas, different decoders).
-  const bgTransitionRendererRef = useRef<CompositionRenderer | null>(null);
-  const bgTransitionInitPromiseRef = useRef<Promise<CompositionRenderer | null> | null>(null);
+  const bgTransitionRendererRef = useRef<PreviewCompositionRenderer | null>(null);
+  const bgTransitionInitPromiseRef = useRef<Promise<PreviewCompositionRenderer | null> | null>(null);
   const bgTransitionRendererStructureKeyRef = useRef<string | null>(null);
   const bgTransitionRenderInFlightRef = useRef(false);
   const scrubPrewarmQueueRef = useRef<number[]>([]);
@@ -899,14 +895,6 @@ export const VideoPreview = memo(function VideoPreview({
   }, [
     keyframes,
   ]);
-  const previousFastScrubVisualStateRef = useRef<{
-    tracks: CompositionInputProps['tracks'];
-    keyframes: typeof fastScrubScaledKeyframes;
-  }>({
-    tracks: fastScrubScaledTracks,
-    keyframes: fastScrubScaledKeyframes,
-  });
-
   const fastScrubInputProps: CompositionInputProps = useMemo(() => ({
     fps,
     width: project.width,
@@ -1051,7 +1039,7 @@ export const VideoPreview = memo(function VideoPreview({
     )) ?? null;
   }, [getTransitionCooldownForWindow, playbackTransitionWindows]);
 
-  /** Like getTransitionWindowForFrame but without cooldown Ã¢â‚¬â€ true only in the active span. */
+  /** Like getTransitionWindowForFrame but without cooldown â€” true only in the active span. */
   const getActiveTransitionWindowForFrame = useCallback((frame: number) => {
     return playbackTransitionWindows.find((window) => (
       frame >= window.startFrame && frame < window.endFrame
@@ -1129,525 +1117,75 @@ export const VideoPreview = memo(function VideoPreview({
   preferPlayerForTextGizmoRef.current = preferPlayerForTextGizmo;
   preferPlayerForStyledTextScrubRef.current = preferPlayerForStyledTextScrub;
 
-  // Keep the on-screen scrub canvas at project resolution so quality toggles
-  // only change offscreen sampling, not display buffer geometry.
-  useLayoutEffect(() => {
-    const canvas = scrubCanvasRef.current;
-    if (!canvas) return;
-    if (canvas.width !== playerRenderSize.width) canvas.width = playerRenderSize.width;
-    if (canvas.height !== playerRenderSize.height) canvas.height = playerRenderSize.height;
-  }, [playerRenderSize.width, playerRenderSize.height]);
-
-  const disposeFastScrubRenderer = useCallback(() => {
-    clearPendingFastScrubHandoff();
-    scrubInitPromiseRef.current = null;
-    scrubPreloadPromiseRef.current = null;
-    scrubRequestedFrameRef.current = null;
-    scrubRenderInFlightRef.current = false;
-    scrubPrewarmQueueRef.current = [];
-    scrubPrewarmQueuedSetRef.current.clear();
-    scrubPrewarmedFramesRef.current = [];
-    scrubPrewarmedFrameSetRef.current.clear();
-    scrubPrewarmedSourcesRef.current.clear();
-    scrubPrewarmedSourceOrderRef.current = [];
-    scrubPrewarmedSourceTouchFrameRef.current.clear();
-    scrubOffscreenRenderedFrameRef.current = null;
-    playbackTransitionPreparePromiseRef.current = null;
-    playbackTransitionPreparingFrameRef.current = null;
-    deferredPlaybackTransitionPrepareFrameRef.current = null;
-    if (transitionPrepareTimeoutRef.current !== null) {
-      clearTimeout(transitionPrepareTimeoutRef.current);
-      transitionPrepareTimeoutRef.current = null;
-    }
-    clearTransitionPlaybackSession();
-    captureCanvasSourceInFlightRef.current = null;
-    previewPerfRef.current.fastScrubPrewarmedSources = 0;
-    bypassPreviewSeekRef.current = false;
-
-    if (scrubRendererRef.current) {
-      try {
-        scrubRendererRef.current.dispose();
-      } catch (error) {
-        logger.warn('Failed to dispose renderer:', error);
-      }
-      scrubRendererRef.current = null;
-    }
-    scrubRendererStructureKeyRef.current = null;
-
-    scrubOffscreenCanvasRef.current = null;
-    scrubOffscreenCtxRef.current = null;
-
-    if (bgTransitionRendererRef.current) {
-      try { bgTransitionRendererRef.current.dispose(); } catch { /* */ }
-      bgTransitionRendererRef.current = null;
-    }
-    bgTransitionRendererStructureKeyRef.current = null;
-    bgTransitionInitPromiseRef.current = null;
-    bgTransitionRenderInFlightRef.current = false;
-  }, [clearPendingFastScrubHandoff, clearTransitionPlaybackSession]);
-
-  // Background transition renderer Ã¢â‚¬â€ independent instance for pre-rendering
-  // transition frames without conflicting with the main rAF pump renderer.
-  const ensureBgTransitionRenderer = useCallback(async (): Promise<CompositionRenderer | null> => {
-    if (!FAST_SCRUB_RENDERER_ENABLED || typeof OffscreenCanvas === 'undefined' || isResolving) return null;
-    if (
-      bgTransitionRendererRef.current
-      && bgTransitionRendererStructureKeyRef.current !== fastScrubRendererStructureKey
-    ) {
-      disposeFastScrubRenderer();
-    }
-    if (bgTransitionRendererRef.current) return bgTransitionRendererRef.current;
-    if (bgTransitionInitPromiseRef.current) return bgTransitionInitPromiseRef.current;
-
-    bgTransitionInitPromiseRef.current = (async () => {
-      try {
-        const canvas = new OffscreenCanvas(renderSize.width, renderSize.height);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return null;
-        const renderer = await createCompositionRenderer(fastScrubInputProps, canvas, ctx, {
-          mode: 'preview',
-          getPreviewTransformOverride,
-          getPreviewEffectsOverride,
-          getPreviewCornerPinOverride,
-          getPreviewPathVerticesOverride,
-          getLiveItemSnapshot,
-          getLiveKeyframes,
-        });
-        if ('warmGpuPipeline' in renderer) {
-          void renderer.warmGpuPipeline();
-        }
-        bgTransitionRendererRef.current = renderer;
-        bgTransitionRendererStructureKeyRef.current = fastScrubRendererStructureKey;
-        return renderer;
-      } catch {
-        return null;
-      } finally {
-        bgTransitionInitPromiseRef.current = null;
-      }
-    })();
-    return bgTransitionInitPromiseRef.current;
-  }, [
-    disposeFastScrubRenderer,
-    fastScrubInputProps,
-    fastScrubRendererStructureKey,
-    getLiveItemSnapshot,
-    getLiveKeyframes,
-    getPreviewCornerPinOverride,
-    getPreviewEffectsOverride,
-    getPreviewPathVerticesOverride,
-    getPreviewTransformOverride,
-    isResolving,
-    renderSize.width,
-    renderSize.height,
-  ]);
-
-  const ensureFastScrubRenderer = useCallback(async (): Promise<CompositionRenderer | null> => {
-    if (!FAST_SCRUB_RENDERER_ENABLED) return null;
-    if (typeof OffscreenCanvas === 'undefined') return null;
-    if (isResolving) return null;
-    if (
-      scrubRendererRef.current
-      && scrubRendererStructureKeyRef.current !== fastScrubRendererStructureKey
-    ) {
-      disposeFastScrubRenderer();
-    }
-    if (scrubRendererRef.current) return scrubRendererRef.current;
-    if (scrubInitPromiseRef.current) return scrubInitPromiseRef.current;
-
-    scrubInitPromiseRef.current = (async () => {
-      try {
-        const offscreen = new OffscreenCanvas(renderSize.width, renderSize.height);
-        const offscreenCtx = offscreen.getContext('2d');
-        if (!offscreenCtx) return null;
-
-        const renderer = await createCompositionRenderer(fastScrubInputProps, offscreen, offscreenCtx, {
-          mode: 'preview',
-          getPreviewTransformOverride,
-          getPreviewEffectsOverride,
-          getPreviewCornerPinOverride,
-          getPreviewPathVerticesOverride,
-          getLiveItemSnapshot,
-          getLiveKeyframes,
-        });
-        const playbackState = usePlaybackStore.getState();
-        const runtimeSnapshot = getPreviewRuntimeSnapshotFromPlaybackState(
-          playbackState,
-          isGizmoInteractingRef.current,
-        );
-        const preloadPriorityFrame = runtimeSnapshot.anchorFrame;
-        const preloadPromise = renderer.preload({
-          priorityFrame: preloadPriorityFrame,
-          priorityWindowFrames: Math.max(12, Math.round(fps * 4)),
-        })
-          .catch((error) => {
-            logger.warn('Renderer preload failed:', error);
-          })
-          .finally(() => {
-            if (scrubPreloadPromiseRef.current === preloadPromise) {
-              scrubPreloadPromiseRef.current = null;
-            }
-          });
-        scrubPreloadPromiseRef.current = preloadPromise;
-
-        await Promise.race([
-          preloadPromise,
-          new Promise<void>((resolve) => {
-            setTimeout(resolve, FAST_SCRUB_PRELOAD_BUDGET_MS);
-          }),
-        ]);
-
-        scrubOffscreenCanvasRef.current = offscreen;
-        scrubOffscreenCtxRef.current = offscreenCtx;
-        scrubOffscreenRenderedFrameRef.current = null;
-        scrubRendererRef.current = renderer;
-        scrubRendererStructureKeyRef.current = fastScrubRendererStructureKey;
-        // Eagerly warm the GPU pipeline in the background so the first
-        // transition frame doesn't pay the ~100-150ms WebGPU init cost.
-        if ('warmGpuPipeline' in renderer) {
-          void renderer.warmGpuPipeline();
-        }
-        return renderer;
-      } catch (error) {
-        logger.warn('Failed to initialize renderer, falling back to Player seeks:', error);
-        scrubRendererRef.current = null;
-        scrubOffscreenCanvasRef.current = null;
-        scrubOffscreenCtxRef.current = null;
-        scrubOffscreenRenderedFrameRef.current = null;
-        return null;
-      } finally {
-        scrubInitPromiseRef.current = null;
-      }
-    })();
-
-    return scrubInitPromiseRef.current;
-  }, [
-    disposeFastScrubRenderer,
-    fastScrubInputProps,
-    fastScrubRendererStructureKey,
-    fps,
-    getLiveItemSnapshot,
-    getLiveKeyframes,
-    getPreviewTransformOverride,
-    getPreviewEffectsOverride,
-    getPreviewCornerPinOverride,
-    getPreviewPathVerticesOverride,
-    isResolving,
-    renderSize.height,
-    renderSize.width,
-  ]);
-  ensureFastScrubRendererRef.current = ensureFastScrubRenderer;
-
-  const renderOffscreenFrame = useCallback(async (targetFrame: number): Promise<OffscreenCanvas | null> => {
-    const offscreen = scrubOffscreenCanvasRef.current;
-    if (offscreen && scrubOffscreenRenderedFrameRef.current === targetFrame) {
-      return offscreen;
-    }
-
-    const renderer = await ensureFastScrubRenderer();
-    const nextOffscreen = scrubOffscreenCanvasRef.current;
-    if (!renderer || !nextOffscreen) return null;
-
-    if (scrubOffscreenRenderedFrameRef.current !== targetFrame) {
-      await renderer.renderFrame(targetFrame);
-      scrubOffscreenRenderedFrameRef.current = targetFrame;
-    }
-
-    return nextOffscreen;
-  }, [ensureFastScrubRenderer]);
-
-
-  // Dispose/recreate fast scrub renderer when composition inputs change.
-  useEffect(() => {
-    disposeFastScrubRenderer();
-  }, [disposeFastScrubRenderer, fastScrubRendererStructureKey, renderSize.height, renderSize.width]);
-
-  // Visual-only edits should keep the warm renderer alive. Invalidate cached
-  // frames and ask the overlay to repaint instead of rebuilding GPU/decoder state.
-  useEffect(() => {
-    const previousVisualState = previousFastScrubVisualStateRef.current;
-    previousFastScrubVisualStateRef.current = {
-      tracks: fastScrubScaledTracks,
-      keyframes: fastScrubScaledKeyframes,
-    };
-
-    const visualInvalidationRanges = collectVisualInvalidationRanges({
-      previousTracks: previousVisualState.tracks,
-      nextTracks: fastScrubScaledTracks,
-      previousKeyframes: previousVisualState.keyframes,
-      nextKeyframes: fastScrubScaledKeyframes,
-    });
-    if (visualInvalidationRanges.length === 0) {
-      return;
-    }
-
-    const scrubRenderer = scrubRendererRef.current;
-    const bgRenderer = bgTransitionRendererRef.current;
-    const scrubRendererMatchesStructure = (
-      scrubRendererStructureKeyRef.current === fastScrubRendererStructureKey
-    );
-    const bgRendererMatchesStructure = (
-      bgTransitionRendererStructureKeyRef.current === fastScrubRendererStructureKey
-    );
-
-    if (!scrubRendererMatchesStructure && !bgRendererMatchesStructure) {
-      return;
-    }
-
-    const invalidationRequest = { ranges: visualInvalidationRanges };
-    if (scrubRenderer && scrubRendererMatchesStructure) {
-      scrubRenderer.invalidateFrameCache(invalidationRequest);
-    }
-    if (bgRenderer && bgRendererMatchesStructure) {
-      bgRenderer.invalidateFrameCache(invalidationRequest);
-    }
-
-    const playbackState = usePlaybackStore.getState();
-    const targetFrame = playbackState.previewFrame ?? playbackState.currentFrame;
-    const currentFrameInvalidated = isFrameInRanges(targetFrame, visualInvalidationRanges);
-
-    if (
-      scrubOffscreenRenderedFrameRef.current !== null
-      && isFrameInRanges(scrubOffscreenRenderedFrameRef.current, visualInvalidationRanges)
-    ) {
-      scrubOffscreenRenderedFrameRef.current = null;
-    }
-
-    let removedBufferedFrame = false;
-    for (const frame of [...transitionSessionBufferedFramesRef.current.keys()]) {
-      if (!isFrameInRanges(frame, visualInvalidationRanges)) continue;
-      transitionSessionBufferedFramesRef.current.delete(frame);
-      removedBufferedFrame = true;
-    }
-    if (removedBufferedFrame) {
-      lastPausedPrearmTargetRef.current = null;
-    }
-
-    if (
-      scrubRenderer
-      && scrubRendererMatchesStructure
-      && currentFrameInvalidated
-      && (
-        forceFastScrubOverlay
-        || playbackState.previewFrame !== null
-        || showFastScrubOverlayRef.current
-        || showPlaybackTransitionOverlayRef.current
-      )
-    ) {
-      scrubRequestedFrameRef.current = targetFrame;
-      void resumeScrubLoopRef.current();
-    }
-  }, [
-    fastScrubInputProps,
-    fastScrubScaledKeyframes,
-    fastScrubScaledTracks,
-    fastScrubRendererStructureKey,
-    forceFastScrubOverlay,
-  ]);
-
-  const captureCurrentFrame = useCallback(async (options?: CaptureOptions): Promise<string | null> => {
-    if (captureInFlightRef.current) {
-      return captureInFlightRef.current;
-    }
-
-    const task = (async () => {
-      try {
-        const playback = usePlaybackStore.getState();
-        const targetFrame = playback.previewFrame ?? playback.currentFrame;
-        const offscreen = await renderOffscreenFrame(targetFrame);
-        if (!offscreen) return null;
-
-        const format = options?.format ?? 'image/jpeg';
-        const quality = options?.quality ?? 0.9;
-        const targetWidth = Math.max(2, Math.round(options?.width ?? offscreen.width));
-        const targetHeight = Math.max(2, Math.round(options?.height ?? offscreen.height));
-        const shouldScale = !options?.fullResolution
-          && (targetWidth !== offscreen.width || targetHeight !== offscreen.height);
-
-        if (!shouldScale) {
-          const blob = await offscreen.convertToBlob({
-            type: format,
-            quality,
-          });
-          return blobToDataUrl(blob);
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const ctx2d = canvas.getContext('2d');
-        if (!ctx2d) return null;
-
-        ctx2d.drawImage(offscreen, 0, 0, targetWidth, targetHeight);
-        const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob(resolve, format, quality);
-        });
-        if (!blob) return null;
-        return blobToDataUrl(blob);
-      } catch (error) {
-        logger.warn('Failed to capture frame:', error);
-        return null;
-      } finally {
-        captureInFlightRef.current = null;
-      }
-    })();
-
-    captureInFlightRef.current = task;
-    return task;
-  }, [renderOffscreenFrame]);
-
-  const captureCurrentFrameImageData = useCallback(async (options?: CaptureOptions): Promise<ImageData | null> => {
-    if (captureImageDataInFlightRef.current) {
-      return captureImageDataInFlightRef.current;
-    }
-
-    const task = (async () => {
-      try {
-        const playback = usePlaybackStore.getState();
-        const targetFrame = playback.previewFrame ?? playback.currentFrame;
-        const offscreen = await renderOffscreenFrame(targetFrame);
-        if (!offscreen) return null;
-
-        const targetWidth = Math.max(2, Math.round(options?.width ?? offscreen.width));
-        const targetHeight = Math.max(2, Math.round(options?.height ?? offscreen.height));
-        const shouldScale = !options?.fullResolution
-          && (targetWidth !== offscreen.width || targetHeight !== offscreen.height);
-
-        if (!shouldScale) {
-          const offscreenCtx = scrubOffscreenCtxRef.current
-            ?? offscreen.getContext('2d', { willReadFrequently: true });
-          if (!offscreenCtx) return null;
-          return offscreenCtx.getImageData(0, 0, offscreen.width, offscreen.height);
-        }
-
-        let scaleCanvas = captureScaleCanvasRef.current;
-        if (!scaleCanvas) {
-          scaleCanvas = document.createElement('canvas');
-          captureScaleCanvasRef.current = scaleCanvas;
-        }
-        if (scaleCanvas.width !== targetWidth || scaleCanvas.height !== targetHeight) {
-          scaleCanvas.width = targetWidth;
-          scaleCanvas.height = targetHeight;
-        }
-        const scaleCtx = scaleCanvas.getContext('2d', { willReadFrequently: true });
-        if (!scaleCtx) return null;
-
-        scaleCtx.clearRect(0, 0, targetWidth, targetHeight);
-        scaleCtx.drawImage(offscreen, 0, 0, targetWidth, targetHeight);
-        return scaleCtx.getImageData(0, 0, targetWidth, targetHeight);
-      } catch (error) {
-        logger.warn('Failed to capture raw frame:', error);
-        return null;
-      } finally {
-        captureImageDataInFlightRef.current = null;
-      }
-    })();
-
-    captureImageDataInFlightRef.current = task;
-    return task;
-  }, [renderOffscreenFrame]);
-
-  const captureCanvasSource = useCallback(async (): Promise<OffscreenCanvas | HTMLCanvasElement | null> => {
-    if (captureCanvasSourceInFlightRef.current) {
-      return captureCanvasSourceInFlightRef.current;
-    }
-
-    const task = (async () => {
-      try {
-        const playback = usePlaybackStore.getState();
-        const targetFrame = playback.previewFrame ?? playback.currentFrame;
-        return await renderOffscreenFrame(targetFrame);
-      } catch (error) {
-        logger.warn('Failed to capture canvas source:', error);
-        return null;
-      } finally {
-        captureCanvasSourceInFlightRef.current = null;
-      }
-    })();
-
-    captureCanvasSourceInFlightRef.current = task;
-    return task;
-  }, [renderOffscreenFrame]);
-
   const setCaptureCanvasSource = usePreviewBridgeStore((s) => s.setCaptureCanvasSource);
 
-  usePreviewCaptureBridge({
-    captureCurrentFrame,
-    captureCurrentFrameImageData,
-    captureCanvasSource,
+  const {
+    disposeFastScrubRenderer,
+    ensureFastScrubRenderer,
+    ensureBgTransitionRenderer,
+  } = usePreviewRendererController({
+    fps,
+    isResolving,
+    forceFastScrubOverlay,
+    playerRenderSize,
+    renderSize,
+    fastScrubInputProps,
+    fastScrubScaledTracks,
+    fastScrubScaledKeyframes,
+    fastScrubRendererStructureKey,
+    isGizmoInteractingRef,
+    bypassPreviewSeekRef,
+    showFastScrubOverlayRef,
+    showPlaybackTransitionOverlayRef,
+    scrubCanvasRef,
+    scrubRendererRef,
+    ensureFastScrubRendererRef,
+    scrubInitPromiseRef,
+    scrubPreloadPromiseRef,
+    scrubOffscreenCanvasRef,
+    scrubOffscreenCtxRef,
+    scrubRendererStructureKeyRef,
+    scrubRenderInFlightRef,
+    scrubRequestedFrameRef,
+    bgTransitionRendererRef,
+    bgTransitionInitPromiseRef,
+    bgTransitionRendererStructureKeyRef,
+    bgTransitionRenderInFlightRef,
+    scrubPrewarmQueueRef,
+    scrubPrewarmQueuedSetRef,
+    scrubPrewarmedFramesRef,
+    scrubPrewarmedFrameSetRef,
+    scrubPrewarmedSourcesRef,
+    scrubPrewarmedSourceOrderRef,
+    scrubPrewarmedSourceTouchFrameRef,
+    scrubOffscreenRenderedFrameRef,
+    playbackTransitionPreparePromiseRef,
+    playbackTransitionPreparingFrameRef,
+    deferredPlaybackTransitionPrepareFrameRef,
+    transitionPrepareTimeoutRef,
+    transitionSessionBufferedFramesRef,
+    captureCanvasSourceInFlightRef,
+    captureInFlightRef,
+    captureImageDataInFlightRef,
+    captureScaleCanvasRef,
+    resumeScrubLoopRef,
+    scrubMountedRef,
+    lastPausedPrearmTargetRef,
+    previewPerfRef,
+    getPreviewTransformOverride,
+    getPreviewEffectsOverride,
+    getPreviewCornerPinOverride,
+    getPreviewPathVerticesOverride,
+    getLiveItemSnapshot,
+    getLiveKeyframes,
+    clearPendingFastScrubHandoff,
+    clearTransitionPlaybackSession,
+    resetResolveRetryState,
     setCaptureFrame,
     setCaptureFrameImageData,
     setCaptureCanvasSource,
     setDisplayedFrame,
-    captureInFlightRef,
-    captureImageDataInFlightRef,
-    captureScaleCanvasRef,
   });
-
-  // Eager GPU warm-up on mount Ã¢â‚¬â€ request the WebGPU device BEFORE media
-  // finishes resolving. This is the most expensive single cold-start cost
-  // (~50-100ms for device request, plus ~100-400ms for shader compilation).
-  // The device is cached globally so the renderer reuses it instead of
-  // requesting a second one.
-  useEffect(() => {
-    if (!FAST_SCRUB_RENDERER_ENABLED) return;
-    void (async () => {
-      try {
-        const { EffectsPipeline } = await import('@/infrastructure/gpu/effects');
-        // requestCachedDevice warms the adapter + device. The subsequent
-        // EffectsPipeline.create() inside the renderer reuses it.
-        const device = await EffectsPipeline.requestCachedDevice();
-        if (device) {
-          // Pre-create a throwaway pipeline to compile all effect shaders.
-          // Shader binaries are cached by the GPU driver, so the renderer's
-          // own pipeline creation will be near-instant.
-          const warmPipeline = await EffectsPipeline.create();
-          if (warmPipeline) {
-            try {
-              const { TransitionPipeline } = await import('@/infrastructure/gpu/transitions');
-              TransitionPipeline.create(device)?.destroy();
-            } finally {
-              warmPipeline.destroy();
-            }
-          }
-        }
-      } catch {
-        // GPU not available Ã¢â‚¬â€ renderer will fall back to CPU path.
-      }
-    })();
-  }, []);
-
-  // Background warm-up of full renderer once media URLs are resolved.
-  useEffect(() => {
-    if (!FAST_SCRUB_RENDERER_ENABLED || isResolving) return;
-    if (scrubRendererRef.current || scrubInitPromiseRef.current) return;
-
-    let cancelled = false;
-    const warmup = () => {
-      if (cancelled || scrubRendererRef.current || scrubInitPromiseRef.current) return;
-      void ensureFastScrubRenderer();
-    };
-
-    let idleId: number | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      idleId = (window as Window & { requestIdleCallback: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number })
-        .requestIdleCallback(() => warmup(), { timeout: 400 });
-    } else {
-      timeoutId = setTimeout(warmup, 120);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        (window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(idleId);
-      }
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [ensureFastScrubRenderer, isResolving]);
-
   usePreviewRenderPump({
     playerRef,
     fps,
@@ -1749,13 +1287,6 @@ export const VideoPreview = memo(function VideoPreview({
     kickResolvePass,
   });
 
-  useEffect(() => {
-    return () => {
-      scrubMountedRef.current = false;
-      resetResolveRetryState();
-      disposeFastScrubRenderer();
-    };
-  }, [disposeFastScrubRenderer, resetResolveRetryState]);
 
   // Calculate player size based on zoom mode
   const playerSize = useMemo(() => {
@@ -1992,7 +1523,7 @@ export const VideoPreview = memo(function VideoPreview({
               />
             )}
 
-            {/* GPU effects overlay canvas Ã¢â‚¬â€ kept hidden. GPU effects are now
+            {/* GPU effects overlay canvas â€” kept hidden. GPU effects are now
                 applied per-item in the composition renderer. The canvas ref is
                 retained for API compatibility. */}
             <canvas
@@ -2109,7 +1640,7 @@ export const VideoPreview = memo(function VideoPreview({
                     </div>
                   )}
 
-                  {/* Transition session Ã¢â‚¬â€ only show when active or recent */}
+                  {/* Transition session â€” only show when active or recent */}
                   {(trActive || p.transitionSessionCount > 0) && (
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 3, paddingTop: 3 }}>
                       <div>
