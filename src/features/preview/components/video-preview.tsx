@@ -1,26 +1,10 @@
-import { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback, memo } from 'react';
-import { getDecoderPrewarmMetricsSnapshot } from '../utils/decoder-prewarm';
+import { useRef, useEffect, useState, useMemo, useCallback, memo } from 'react';
 import { type PlayerRef } from '@/features/preview/deps/player-core';
 import type { PreviewQuality } from '@/shared/state/playback';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge';
-import {
-  useTimelineStore,
-  useItemsStore,
-  useTransitionsStore,
-  useMediaDependencyStore,
-} from '@/features/preview/deps/timeline-store';
 import { resolveEffectiveTrackStates } from '@/features/preview/deps/timeline-utils';
-import {
-  useRollingEditPreviewStore,
-  useRippleEditPreviewStore,
-  useSlipEditPreviewStore,
-  useSlideEditPreviewStore,
-} from '@/features/preview/deps/timeline-edit-preview';
-import { useSelectionStore } from '@/shared/state/selection';
 import { resolveProxyUrl } from '../utils/media-resolver';
-import { useMediaLibraryStore } from '@/features/preview/deps/media-library';
-import { useBlobUrlVersion } from '@/infrastructure/browser/blob-url-manager';
 import { GizmoOverlay } from './gizmo-overlay';
 import { MaskEditorContainer } from './mask-editor-container';
 import { CornerPinContainer } from './corner-pin-container';
@@ -37,7 +21,6 @@ import type { CompositionInputProps } from '@/types/export';
 import type { ItemEffect } from '@/types/effects';
 import type { TimelineItem } from '@/types/timeline';
 import type { ResolvedTransform } from '@/types/transform';
-import { isMarqueeJustFinished } from '@/hooks/use-marquee-selection';
 import {
   resolveTransitionWindows,
   type ResolvedTransitionWindow,
@@ -46,13 +29,7 @@ import {
   getPreviewRuntimeSnapshotFromPlaybackState,
 } from '../utils/preview-state-coordinator';
 import {
-  recordSeekLatency,
-  recordSeekLatencyTimeout,
-  type SeekLatencyStats,
-} from '../utils/preview-perf-metrics';
-import {
   createAdaptivePreviewQualityState,
-  getEffectivePreviewQuality,
   getFrameBudgetMs,
   updateAdaptivePreviewQuality,
 } from '../utils/adaptive-preview-quality';
@@ -66,18 +43,19 @@ import { usePreviewMediaResolution } from '../hooks/use-preview-media-resolution
 import { usePreviewMediaPreload } from '../hooks/use-preview-media-preload';
 import { usePreviewOverlayController } from '../hooks/use-preview-overlay-controller';
 import { usePreviewPerfPanel } from '../hooks/use-preview-perf-panel';
+import { usePreviewPerfPublisher } from '../hooks/use-preview-perf-publisher';
 import { usePreviewRenderPump } from '../hooks/use-preview-render-pump-controller';
 import {
   usePreviewRendererController,
   type PreviewCompositionRenderer,
 } from '../hooks/use-preview-renderer-controller';
 import { usePreviewSourceWarm } from '../hooks/use-preview-source-warm';
+import { usePreviewViewModel } from '../hooks/use-preview-view-model';
 import {
   usePreviewTransitionSessionController,
   type TransitionPreviewSessionTrace,
   type TransitionPreviewTelemetry,
 } from '../hooks/use-preview-transition-session-controller';
-import { createLogger } from '@/shared/logging/logger';
 
 // DEV-only: cached reference loaded via dynamic import so the module
 // is excluded from production bundles entirely.
@@ -88,17 +66,12 @@ if (import.meta.env.DEV) {
   });
 }
 import {
-  PREVIEW_PERF_PUBLISH_INTERVAL_MS,
-  PREVIEW_PERF_SEEK_TIMEOUT_MS,
   ADAPTIVE_PREVIEW_QUALITY_ENABLED,
   type VideoSourceSpan,
   type FastScrubBoundarySource,
-  type PreviewPerfSnapshot,
   toTrackFingerprint,
   getMediaResolveCost,
 } from '../utils/preview-constants';
-
-const logger = createLogger('VideoPreview');
 
 interface VideoPreviewProps {
   project: {
@@ -131,7 +104,6 @@ export const VideoPreview = memo(function VideoPreview({
   suspendOverlay = false,
 }: VideoPreviewProps) {
   const playerRef = useRef<PlayerRef>(null);
-  const playerContainerRef = useRef<HTMLDivElement>(null);
   const scrubCanvasRef = useRef<HTMLCanvasElement>(null);
   const gpuEffectsCanvasRef = useRef<HTMLCanvasElement>(null);
   const scrubFrameDirtyRef = useRef(false);
@@ -184,13 +156,6 @@ export const VideoPreview = memo(function VideoPreview({
   const lastBackwardRequestedFrameRef = useRef<number | null>(null);
   const resumeScrubLoopRef = useRef<() => void>(() => {});
   const scrubMountedRef = useRef(true);
-  const pendingSeekLatencyRef = useRef<{ targetFrame: number; startedAtMs: number } | null>(null);
-  const seekLatencyStatsRef = useRef<SeekLatencyStats>({
-    samples: 0,
-    totalMs: 0,
-    lastMs: 0,
-    timeouts: 0,
-  });
   const {
     showPerfPanel,
     perfPanelSnapshot,
@@ -206,55 +171,44 @@ export const VideoPreview = memo(function VideoPreview({
   });
   const lastPausedPrearmTargetRef = useRef<number | null>(null);
   const lastPlayingPrearmTargetRef = useRef<number | null>(null);
-
-  // State for gizmo overlay positioning
-  const [playerContainerRect, setPlayerContainerRect] = useState<DOMRect | null>(null);
-
-  // Callback ref that measures immediately when element is available
-  const setPlayerContainerRefCallback = useCallback((el: HTMLDivElement | null) => {
-    playerContainerRef.current = el;
-    if (el) {
-      setPlayerContainerRect(el.getBoundingClientRect());
-    }
-  }, []);
-
-  // Granular selectors - avoid subscribing to currentFrame here to prevent re-renders
-  const fps = useTimelineStore((s) => s.fps);
-  const tracks = useTimelineStore((s) => s.tracks);
-  const keyframes = useTimelineStore((s) => s.keyframes);
-  const items = useItemsStore((s) => s.items);
-  const itemsByTrackId = useItemsStore((s) => s.itemsByTrackId);
-  const mediaDependencyVersion = useMediaDependencyStore((s) => s.mediaDependencyVersion);
-  const transitions = useTransitionsStore((s) => s.transitions);
-  const mediaById = useMediaLibraryStore((s) => s.mediaById);
-  const brokenMediaCount = useMediaLibraryStore((s) => s.brokenMediaIds.length);
-  const hasRolling2Up = useRollingEditPreviewStore(
-    (s) => Boolean(s.trimmedItemId && s.neighborItemId && s.handle),
-  );
-  const hasRipple2Up = useRippleEditPreviewStore((s) => Boolean(s.trimmedItemId && s.handle));
-  const hasSlip4Up = useSlipEditPreviewStore((s) => Boolean(s.itemId));
-  const hasSlide4Up = useSlideEditPreviewStore((s) => Boolean(s.itemId));
-  const activeGizmoItemId = useGizmoStore((s) => s.activeGizmo?.itemId ?? null);
-  const isGizmoInteracting = useGizmoStore((s) => s.activeGizmo !== null);
-  const isMaskEditingActive = useMaskEditorStore((s) => s.isEditing);
-  const isPlaying = usePlaybackStore((s) => s.isPlaying);
-  const showGpuEffectsOverlay = useGpuEffectsOverlay(gpuEffectsCanvasRef, playerContainerRef, scrubOffscreenCanvasRef, scrubFrameDirtyRef);
-  const zoom = usePlaybackStore((s) => s.zoom);
-  const useProxy = usePlaybackStore((s) => s.useProxy);
-  // Derive a stable count of ready proxies to avoid recomputing resolvedTracks
-  // on every proxyStatus Map recreation (e.g. during progress updates)
-  const proxyReadyCount = useMediaLibraryStore((s) => {
-    let count = 0;
-    for (const status of s.proxyStatus.values()) {
-      if (status === 'ready') count++;
-    }
-    return count;
+  const {
+    fps,
+    tracks,
+    keyframes,
+    items,
+    itemsByTrackId,
+    mediaDependencyVersion,
+    transitions,
+    mediaById,
+    brokenMediaCount,
+    hasRolling2Up,
+    hasRipple2Up,
+    hasSlip4Up,
+    hasSlide4Up,
+    activeGizmoItemType,
+    isGizmoInteracting,
+    isPlaying,
+    zoom,
+    useProxy,
+    blobUrlVersion,
+    proxyReadyCount,
+    playerSize,
+    needsOverflow,
+    playerContainerRef,
+    playerContainerRect,
+    backgroundRef,
+    setPlayerContainerRefCallback,
+    handleBackgroundClick,
+  } = usePreviewViewModel({
+    project,
+    containerSize,
+    suspendOverlay,
   });
-  const activeGizmoItemType = useMemo(
-    () => activeGizmoItemId
-      ? (items.find((item) => item.id === activeGizmoItemId)?.type ?? null)
-      : null,
-    [activeGizmoItemId, items]
+  const showGpuEffectsOverlay = useGpuEffectsOverlay(
+    gpuEffectsCanvasRef,
+    playerContainerRef,
+    scrubOffscreenCanvasRef,
+    scrubFrameDirtyRef,
   );
   const isGizmoInteractingRef = useRef(isGizmoInteracting);
   isGizmoInteractingRef.current = isGizmoInteracting;
@@ -263,7 +217,6 @@ export const VideoPreview = memo(function VideoPreview({
   const adaptiveQualityStateRef = useRef(createAdaptivePreviewQualityState(1));
   const adaptiveFrameSampleRef = useRef<{ frame: number; tsMs: number } | null>(null);
   const [adaptiveQualityCap, setAdaptiveQualityCap] = useState<PreviewQuality>(1);
-  const blobUrlVersion = useBlobUrlVersion();
 
   const shouldPreferPlayerForPreview = useCallback((previewFrame: number | null) => {
     return (
@@ -322,35 +275,6 @@ export const VideoPreview = memo(function VideoPreview({
   ) => {
     _devJitterMonitor?.recordRenderFrame(frame, renderMs, inTransition, transitionId, progress);
   }, []);
-
-  const trackPlayerSeek = useCallback((targetFrame: number) => {
-    if (!import.meta.env.DEV) return;
-    pendingSeekLatencyRef.current = {
-      targetFrame,
-      startedAtMs: performance.now(),
-    };
-  }, []);
-
-  const resolvePendingSeekLatency = useCallback((frame: number) => {
-    if (!import.meta.env.DEV) return;
-    const pending = pendingSeekLatencyRef.current;
-    if (!pending) return;
-    if (pending.targetFrame !== frame) return;
-    seekLatencyStatsRef.current = recordSeekLatency(
-      seekLatencyStatsRef.current,
-      performance.now() - pending.startedAtMs
-    );
-    pendingSeekLatencyRef.current = null;
-  }, []);
-
-  // Custom Player integration (hook handles bidirectional sync)
-  const { ignorePlayerUpdatesRef } = useCustomPlayer(
-    playerRef,
-    bypassPreviewSeekRef,
-    preferPlayerForStyledTextScrubRef,
-    isGizmoInteractingRef,
-    trackPlayerSeek,
-  );
 
   useEffect(() => {
     const playback = usePlaybackStore.getState();
@@ -494,6 +418,30 @@ export const VideoPreview = memo(function VideoPreview({
   });
 
   const {
+    trackPlayerSeek,
+    resolvePendingSeekLatency,
+  } = usePreviewPerfPublisher({
+    previewPerfRef,
+    adaptiveQualityStateRef,
+    transitionSessionTraceRef,
+    transitionTelemetryRef,
+    transitionSessionBufferedFramesRef,
+    renderSourceRef,
+    renderSourceSwitchCountRef,
+    renderSourceHistoryRef,
+    getUnresolvedQueueSize,
+    getPendingResolveCount,
+  });
+
+  const { ignorePlayerUpdatesRef } = useCustomPlayer(
+    playerRef,
+    bypassPreviewSeekRef,
+    preferPlayerForStyledTextScrubRef,
+    isGizmoInteractingRef,
+    trackPlayerSeek,
+  );
+
+  const {
     resolvedTracks,
     fastScrubTracks,
     playbackVideoSourceSpans,
@@ -621,125 +569,6 @@ export const VideoPreview = memo(function VideoPreview({
     },
     isGizmoInteractingRef,
   });
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-
-    const publish = () => {
-      const stats = previewPerfRef.current;
-      const seekNow = performance.now();
-      const playbackState = usePlaybackStore.getState();
-      const timelineFps = useTimelineStore.getState().fps;
-      const adaptiveQualityState = adaptiveQualityStateRef.current;
-      const frameTimeBudgetMs = getFrameBudgetMs(timelineFps, playbackState.playbackRate);
-      const userPreviewQuality = playbackState.previewQuality;
-      const effectiveQuality = getEffectivePreviewQuality(
-        userPreviewQuality,
-        adaptiveQualityState.qualityCap
-      );
-      const pendingSeek = pendingSeekLatencyRef.current;
-      if (
-        pendingSeek
-        && (seekNow - pendingSeek.startedAtMs) >= PREVIEW_PERF_SEEK_TIMEOUT_MS
-      ) {
-        seekLatencyStatsRef.current = recordSeekLatencyTimeout(seekLatencyStatsRef.current);
-        pendingSeekLatencyRef.current = null;
-      }
-      const seekStats = seekLatencyStatsRef.current;
-      const activeTransitionTrace = transitionSessionTraceRef.current;
-      const transitionTelemetry = transitionTelemetryRef.current;
-      const pendingSeekAgeMs = pendingSeekLatencyRef.current
-        ? Math.max(0, seekNow - pendingSeekLatencyRef.current.startedAtMs)
-        : 0;
-      const preseekMetrics = getDecoderPrewarmMetricsSnapshot();
-      const snapshot: PreviewPerfSnapshot = {
-        ts: Date.now(),
-        unresolvedQueue: getUnresolvedQueueSize(),
-        pendingResolves: getPendingResolveCount(),
-        renderSource: renderSourceRef.current,
-        renderSourceSwitches: renderSourceSwitchCountRef.current,
-        renderSourceHistory: [...renderSourceHistoryRef.current],
-        resolveAvgMs: stats.resolveSamples > 0 ? stats.resolveTotalMs / stats.resolveSamples : 0,
-        resolveMsPerId: stats.resolveTotalIds > 0 ? stats.resolveTotalMs / stats.resolveTotalIds : 0,
-        resolveLastMs: stats.resolveLastMs,
-        resolveLastIds: stats.resolveLastIds,
-        preloadScanAvgMs: stats.preloadScanSamples > 0 ? stats.preloadScanTotalMs / stats.preloadScanSamples : 0,
-        preloadScanLastMs: stats.preloadScanLastMs,
-        preloadBatchAvgMs: stats.preloadBatchSamples > 0 ? stats.preloadBatchTotalMs / stats.preloadBatchSamples : 0,
-        preloadBatchLastMs: stats.preloadBatchLastMs,
-        preloadBatchLastIds: stats.preloadBatchLastIds,
-        preloadCandidateIds: stats.preloadCandidateIds,
-        preloadBudgetBase: stats.preloadBudgetBase,
-        preloadBudgetAdjusted: stats.preloadBudgetAdjusted,
-        preloadWindowMaxCost: stats.preloadWindowMaxCost,
-        preloadScanBudgetYields: stats.preloadScanBudgetYields,
-        preloadContinuations: stats.preloadContinuations,
-        preloadScrubDirection: stats.preloadScrubDirection,
-        preloadDirectionPenaltyCount: stats.preloadDirectionPenaltyCount,
-        sourceWarmTarget: stats.sourceWarmTarget,
-        sourceWarmKeep: stats.sourceWarmKeep,
-        sourceWarmEvictions: stats.sourceWarmEvictions,
-        sourcePoolSources: stats.sourcePoolSources,
-        sourcePoolElements: stats.sourcePoolElements,
-        sourcePoolActiveClips: stats.sourcePoolActiveClips,
-        fastScrubPrewarmedSources: stats.fastScrubPrewarmedSources,
-        fastScrubPrewarmSourceEvictions: stats.fastScrubPrewarmSourceEvictions,
-        preseekRequests: preseekMetrics.requests,
-        preseekCacheHits: preseekMetrics.cacheHits,
-        preseekInflightReuses: preseekMetrics.inflightReuses,
-        preseekWorkerPosts: preseekMetrics.workerPosts,
-        preseekWorkerSuccesses: preseekMetrics.workerSuccesses,
-        preseekWorkerFailures: preseekMetrics.workerFailures,
-        preseekWaitRequests: preseekMetrics.waitRequests,
-        preseekWaitMatches: preseekMetrics.waitMatches,
-        preseekWaitResolved: preseekMetrics.waitResolved,
-        preseekWaitTimeouts: preseekMetrics.waitTimeouts,
-        preseekCachedBitmaps: preseekMetrics.cacheBitmaps,
-        staleScrubOverlayDrops: stats.staleScrubOverlayDrops,
-        scrubDroppedFrames: stats.scrubDroppedFrames,
-        scrubUpdates: stats.scrubUpdates,
-        seekLatencyAvgMs: seekStats.samples > 0 ? seekStats.totalMs / seekStats.samples : 0,
-        seekLatencyLastMs: seekStats.lastMs,
-        seekLatencyPendingMs: pendingSeekAgeMs,
-        seekLatencyTimeouts: seekStats.timeouts,
-        userPreviewQuality,
-        adaptiveQualityCap: adaptiveQualityState.qualityCap,
-        effectivePreviewQuality: effectiveQuality,
-        frameTimeBudgetMs,
-        frameTimeEmaMs: adaptiveQualityState.frameTimeEmaMs,
-        adaptiveQualityDowngrades: stats.adaptiveQualityDowngrades,
-        adaptiveQualityRecovers: stats.adaptiveQualityRecovers,
-        transitionSessionActive: activeTransitionTrace !== null,
-        transitionSessionMode: activeTransitionTrace?.mode ?? 'none',
-        transitionSessionComplex: activeTransitionTrace?.complex ?? false,
-        transitionSessionStartFrame: activeTransitionTrace?.startFrame ?? -1,
-        transitionSessionEndFrame: activeTransitionTrace?.endFrame ?? -1,
-        transitionBufferedFrames: transitionSessionBufferedFramesRef.current.size,
-        transitionPreparedFrame: activeTransitionTrace?.lastPreparedFrame ?? -1,
-        transitionLastPrepareMs: activeTransitionTrace?.lastPrepareMs ?? transitionTelemetry.lastPrepareMs,
-        transitionLastReadyLeadMs: activeTransitionTrace && activeTransitionTrace.enteredAtMs !== null && activeTransitionTrace.firstPreparedAtMs !== null
-          ? Math.max(0, activeTransitionTrace.enteredAtMs - activeTransitionTrace.firstPreparedAtMs)
-          : transitionTelemetry.lastReadyLeadMs,
-        transitionLastEntryMisses: activeTransitionTrace?.entryMisses ?? transitionTelemetry.lastEntryMisses,
-        transitionLastSessionDurationMs: activeTransitionTrace
-          ? Math.max(0, seekNow - activeTransitionTrace.startedAtMs)
-          : transitionTelemetry.lastSessionDurationMs,
-        transitionSessionCount: transitionTelemetry.sessionCount,
-      };
-
-      window.__PREVIEW_PERF__ = snapshot;
-      if (window.__PREVIEW_PERF_LOG__) {
-        logger.warn('PreviewPerf', snapshot);
-      }
-    };
-
-    publish();
-    const intervalId = setInterval(publish, PREVIEW_PERF_PUBLISH_INTERVAL_MS);
-    return () => {
-      clearInterval(intervalId);
-      window.__PREVIEW_PERF__ = undefined;
-    };
-  }, []);
 
   // Memoize inputProps to prevent Player from re-rendering
   const inputProps: CompositionInputProps = useMemo(() => ({
@@ -1231,93 +1060,6 @@ export const VideoPreview = memo(function VideoPreview({
     scheduleResolveRetryWake,
     kickResolvePass,
   });
-
-
-  // Calculate player size based on zoom mode
-  const playerSize = useMemo(() => {
-    const aspectRatio = project.width / project.height;
-
-    if (zoom === -1) {
-      if (containerSize.width > 0 && containerSize.height > 0) {
-        const containerAspectRatio = containerSize.width / containerSize.height;
-
-        let width: number;
-        let height: number;
-
-        if (containerAspectRatio > aspectRatio) {
-          height = containerSize.height;
-          width = height * aspectRatio;
-        } else {
-          width = containerSize.width;
-          height = width / aspectRatio;
-        }
-
-        return { width, height };
-      }
-      return { width: project.width, height: project.height };
-    }
-
-    const targetWidth = project.width * zoom;
-    const targetHeight = project.height * zoom;
-    return { width: targetWidth, height: targetHeight };
-  }, [project.width, project.height, zoom, containerSize]);
-
-  // Check if overflow is needed (video larger than container)
-  const needsOverflow = useMemo(() => {
-    if (zoom === -1) return false;
-    if (containerSize.width === 0 || containerSize.height === 0) return false;
-    return playerSize.width > containerSize.width || playerSize.height > containerSize.height;
-  }, [zoom, playerSize, containerSize]);
-
-  // Track player container rect changes for gizmo positioning
-  useLayoutEffect(() => {
-    if (suspendOverlay) return;
-    const container = playerContainerRef.current;
-    if (!container) return;
-
-    const updateRect = () => {
-      const nextRect = container.getBoundingClientRect();
-      setPlayerContainerRect((prev) => {
-        if (
-          prev
-          && prev.left === nextRect.left
-          && prev.top === nextRect.top
-          && prev.width === nextRect.width
-          && prev.height === nextRect.height
-        ) {
-          return prev;
-        }
-        return nextRect;
-      });
-    };
-
-    updateRect();
-
-    const resizeObserver = new ResizeObserver(updateRect);
-    resizeObserver.observe(container);
-
-    window.addEventListener('scroll', updateRect, true);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('scroll', updateRect, true);
-    };
-  }, [suspendOverlay]);
-
-  // Handle click on background area to deselect items
-  const backgroundRef = useRef<HTMLDivElement>(null);
-  const handleBackgroundClick = useCallback((e: React.MouseEvent) => {
-    if (isMaskEditingActive) {
-      e.stopPropagation();
-      return;
-    }
-    if (isMarqueeJustFinished()) return;
-
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-gizmo]')) return;
-
-    useSelectionStore.getState().clearItemSelection();
-  }, [isMaskEditingActive]);
 
   // Handle frame change from player
   // Skip when in preview mode to keep primary playhead stationary
