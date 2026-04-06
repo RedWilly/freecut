@@ -10,6 +10,16 @@ import { isVideoPoolAbortError } from '@/features/composition-runtime/deps/playe
 import { createLogger } from '@/shared/logging/logger';
 import { getVideoTargetTimeSeconds } from '../utils/video-timing';
 import {
+  getVideoSyncTargetContext,
+  planLayoutVideoSync,
+  planPausedVideoFrameSync,
+  planPlayingVideoDriftCorrection,
+  planPlayingVideoInitialSync,
+  planPremountedVideoSync,
+  planVideoFrameCallbackCorrection,
+  shouldReactOwnPlaybackRate,
+} from '../utils/video-sync-plan';
+import {
   registerDomVideoElement,
   unregisterDomVideoElement,
 } from '../utils/dom-video-element-registry';
@@ -434,49 +444,43 @@ const NativePreviewVideo: React.FC<{
     const video = elementRef.current;
     if (!video) return;
 
-    // Only set playbackRate from React when RVFC isn't managing drift correction.
-    // During playback with RVFC, the callback owns video.playbackRate and applies
-    // small rate adjustments for smooth drift correction. Overwriting here would
-    // undo those adjustments every frame.
-    if (!isPlaying || (!supportsRVFC && !sharedTransitionSync)) {
+    if (shouldReactOwnPlaybackRate({
+      isPlaying,
+      supportsRequestVideoFrameCallback: supportsRVFC,
+      sharedTransitionSync,
+    })) {
       video.playbackRate = playbackRate;
     }
 
-    const relativeFrame = frame - sequenceFrameOffset;
-    const isPremounted = relativeFrame < 0;
-    const canSeek = video.readyState >= 1;
+    const syncContext = getVideoSyncTargetContext({
+      frame,
+      sequenceFrameOffset,
+      safeTrimBefore,
+      sourceFps,
+      targetTime,
+      readyState: video.readyState,
+      videoDuration: video.duration || Infinity,
+      currentTime: video.currentTime,
+    });
+    const layoutPlan = planLayoutVideoSync({
+      isPremounted: syncContext.isPremounted,
+      isTransitionHeld: video.dataset.transitionHold === '1',
+      canSeek: syncContext.canSeek,
+      currentTime: video.currentTime,
+      targetTime: syncContext.clampedTargetTime,
+      isPlaying,
+      needsInitialSync: needsInitialSyncRef.current,
+    });
 
-    const effectiveTargetTime = isPremounted
-      ? (safeTrimBefore / sourceFps)
-      : targetTime;
-    const videoDuration = video.duration || Infinity;
-    const clampedTargetTime = Math.min(Math.max(0, effectiveTargetTime), videoDuration - 0.05);
-
-    if (!canSeek) return;
-
-    if (isPremounted) {
-      const heldByTransition = video.dataset.transitionHold === '1';
-      if (!heldByTransition) {
-        if (!video.paused) {
-          video.pause();
-        }
-        if (Math.abs(video.currentTime - clampedTargetTime) > 0.016) {
-          try {
-            video.currentTime = clampedTargetTime;
-          } catch {
-            // Seek failed - element may still be initializing
-          }
-        }
-      }
-      return;
+    if (layoutPlan.shouldPause && !video.paused) {
+      video.pause();
     }
 
-    const mustHardSync = needsInitialSyncRef.current;
-    if (mustHardSync || (!isPlaying && Math.abs(video.currentTime - clampedTargetTime) > 0.016)) {
+    if (layoutPlan.seekTo !== null) {
       try {
-        video.currentTime = clampedTargetTime;
+        video.currentTime = layoutPlan.seekTo;
         lastSyncTimeRef.current = Date.now();
-        if (mustHardSync) {
+        if (layoutPlan.shouldMarkInitialSyncComplete) {
           needsInitialSyncRef.current = false;
         }
       } catch {
@@ -490,9 +494,11 @@ const NativePreviewVideo: React.FC<{
     const video = elementRef.current;
     if (!video) return;
 
-    // Only set playbackRate from React when RVFC isn't active.
-    // RVFC owns the rate during playback for smooth drift correction.
-    if (!isPlaying || (!supportsRVFC && !sharedTransitionSync)) {
+    if (shouldReactOwnPlaybackRate({
+      isPlaying,
+      supportsRequestVideoFrameCallback: supportsRVFC,
+      sharedTransitionSync,
+    })) {
       video.playbackRate = playbackRate;
     }
 
@@ -502,31 +508,22 @@ const NativePreviewVideo: React.FC<{
     // Detect if frame actually changed (for scrub detection)
     const frameChanged = frame !== lastFrameRef.current;
     lastFrameRef.current = frame;
+    const syncContext = getVideoSyncTargetContext({
+      frame,
+      sequenceFrameOffset,
+      safeTrimBefore,
+      sourceFps,
+      targetTime,
+      readyState: video.readyState,
+      videoDuration: video.duration || Infinity,
+      currentTime: video.currentTime,
+    });
 
-    // Check if we're in premount phase (frame < 0 means clip hasn't started yet)
-    // During premount, we should NOT play - just prepare the video at the start position
-    const relativeFrame = frame - sequenceFrameOffset;
-    const isPremounted = relativeFrame < 0;
-
-    // Guard: Only seek if video has enough data loaded
-    const canSeek = video.readyState >= 1;
-
-    // During premount, seek to the start of the clip (frame 0 position), not negative time
-    // This ensures the video is ready at the correct starting frame when playback reaches this clip
-    const effectiveTargetTime = isPremounted
-      ? (safeTrimBefore / sourceFps)
-      : targetTime;
-
-    // Clamp target time to video duration to prevent seeking past the end
-    // This prevents black frames when the clip extends to the edge of the source
-    const videoDuration = video.duration || Infinity;
-    const clampedTargetTime = Math.min(Math.max(0, effectiveTargetTime), videoDuration - 0.05);
-
-    if (targetTime > videoDuration - 1) {
+    if (targetTime > syncContext.videoDuration - 1) {
       videoLog.debug(`[${shortId}] NEAR END:`, {
         targetTime: targetTime.toFixed(2),
-        videoDuration: videoDuration.toFixed(2),
-        clampedTargetTime: clampedTargetTime.toFixed(2),
+        videoDuration: syncContext.videoDuration.toFixed(2),
+        clampedTargetTime: syncContext.clampedTargetTime.toFixed(2),
         frame,
         playbackRate,
         safeTrimBefore,
@@ -539,15 +536,19 @@ const NativePreviewVideo: React.FC<{
     // data-transition-hold), the canvas overlay needs it playing for zero-copy
     // frame reads. Pausing it would cause a play/pause fight every frame that
     // disrupts Chrome's video decode pipeline and produces visible judder.
-    if (isPremounted) {
-      const heldByTransition = video.dataset.transitionHold === '1';
-      if (!heldByTransition) {
-        if (!video.paused) {
-          video.pause();
-        }
-        if (canSeek && Math.abs(video.currentTime - clampedTargetTime) > 0.1) {
-          video.currentTime = clampedTargetTime;
-        }
+    if (syncContext.isPremounted) {
+      const premountPlan = planPremountedVideoSync({
+        isTransitionHeld: video.dataset.transitionHold === '1',
+        canSeek: syncContext.canSeek,
+        currentTime: video.currentTime,
+        targetTime: syncContext.clampedTargetTime,
+        seekToleranceSeconds: 0.1,
+      });
+      if (premountPlan.shouldPause && !video.paused) {
+        video.pause();
+      }
+      if (premountPlan.seekTo !== null) {
+        video.currentTime = premountPlan.seekTo;
       }
       return;
     }
@@ -564,15 +565,23 @@ const NativePreviewVideo: React.FC<{
       // Initial sync on first play after mount/seek.
       // Skip the seek if element is already at the target (avoids readyState
       // drop from redundant seeks, which delays play start by 100-300ms).
-      if (needsInitialSyncRef.current && canSeek) {
-        if (Math.abs(video.currentTime - clampedTargetTime) > 0.016) {
-          try {
-            video.currentTime = clampedTargetTime;
-          } catch {
-            // Seek failed - video may not be ready yet
-          }
+      const initialSyncPlan = planPlayingVideoInitialSync({
+        needsInitialSync: needsInitialSyncRef.current,
+        canSeek: syncContext.canSeek,
+        currentTime: video.currentTime,
+        targetTime: syncContext.clampedTargetTime,
+      });
+      if (initialSyncPlan.seekTo !== null) {
+        try {
+          video.currentTime = initialSyncPlan.seekTo;
+        } catch {
+          // Seek failed - video may not be ready yet
         }
+      }
+      if (initialSyncPlan.shouldUpdateLastSyncTime) {
         lastSyncTimeRef.current = Date.now();
+      }
+      if (initialSyncPlan.shouldMarkInitialSyncComplete) {
         needsInitialSyncRef.current = false;
       }
 
@@ -581,18 +590,17 @@ const NativePreviewVideo: React.FC<{
       // directly from the video's presentation callback, avoiding per-frame
       // React scheduling overhead.
       if (!supportsRVFC && !sharedTransitionSync) {
-        const currentTime = video.currentTime;
-        const now = Date.now();
-        const drift = currentTime - clampedTargetTime;
-        const timeSinceLastSync = now - lastSyncTimeRef.current;
-        const videoBehind = drift < -0.2;
-        const videoFarAhead = drift > 0.5;
-        // Keep correction responsive for segment/transition boundaries.
-        // A 500ms backoff can leak stale frames in preview.
-        if ((videoFarAhead || (videoBehind && timeSinceLastSync > 80)) && canSeek) {
+        const driftCorrectionPlan = planPlayingVideoDriftCorrection({
+          canSeek: syncContext.canSeek,
+          currentTime: video.currentTime,
+          targetTime: syncContext.clampedTargetTime,
+          lastSyncTimeMs: lastSyncTimeRef.current,
+          nowMs: Date.now(),
+        });
+        if (driftCorrectionPlan.seekTo !== null) {
           try {
-            video.currentTime = clampedTargetTime;
-            lastSyncTimeRef.current = now;
+            video.currentTime = driftCorrectionPlan.seekTo;
+            lastSyncTimeRef.current = Date.now();
           } catch {
             // Seek failed - video may not be ready yet
           }
@@ -619,12 +627,18 @@ const NativePreviewVideo: React.FC<{
         && playbackState.previewFrame !== null
         && useGizmoStore.getState().activeGizmo === null;
       // Only seek when paused if frame actually changed (user is scrubbing)
-      if (frameChanged && canSeek) {
+      if (frameChanged && syncContext.canSeek) {
         // Layout sync already applies seeks before paint; skip duplicate runtime seek
         // unless the element still has meaningful drift.
-        if (Math.abs(video.currentTime - clampedTargetTime) > 0.016) {
+        const pausedSyncPlan = planPausedVideoFrameSync({
+          frameChanged,
+          canSeek: syncContext.canSeek,
+          currentTime: video.currentTime,
+          targetTime: syncContext.clampedTargetTime,
+        });
+        if (pausedSyncPlan.seekTo !== null) {
           try {
-            video.currentTime = clampedTargetTime;
+            video.currentTime = pausedSyncPlan.seekTo;
           } catch {
             // Seek failed - video may not be ready yet
           }
@@ -710,33 +724,24 @@ const NativePreviewVideo: React.FC<{
       );
       const dur = v.duration || Infinity;
       const clamped = Math.min(Math.max(0, target), dur - 0.05);
+      const correctionPlan = planVideoFrameCallbackCorrection({
+        currentTime: v.currentTime,
+        targetTime: clamped,
+        nominalRate,
+        readyState: v.readyState,
+      });
 
-      const drift = v.currentTime - clamped;
-      const absDrift = Math.abs(drift);
-
-      if (absDrift > 0.2) {
-        // Large drift (>200ms) — hard seek, reset rate
-        if (v.readyState >= 1) {
-          try {
-            v.currentTime = clamped;
+      if (correctionPlan.kind === 'seek') {
+        try {
+          v.currentTime = correctionPlan.seekTo;
+          if (correctionPlan.shouldUpdateLastSyncTime) {
             lastSyncTimeRef.current = Date.now();
-          } catch {
-            // Seek may fail if element isn't fully loaded
           }
+        } catch {
+          // Seek may fail if element isn't fully loaded
         }
-        v.playbackRate = nominalRate;
-      } else if (absDrift > 0.016) {
-        // Small drift (16-200ms) — smooth rate-based correction.
-        // Proportional: larger drift → stronger correction (up to ±5%).
-        // Converges in ~0.3-0.5s without visible jumps.
-        const correction = Math.min(0.05, absDrift * 0.3);
-        v.playbackRate = drift > 0
-          ? nominalRate * (1 - correction) // ahead → slow down
-          : nominalRate * (1 + correction); // behind → speed up
-      } else {
-        // In sync (within ~1 frame) — nominal rate
-        v.playbackRate = nominalRate;
       }
+      v.playbackRate = correctionPlan.playbackRate;
 
       handle = v.requestVideoFrameCallback(onVideoFrame);
     };

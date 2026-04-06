@@ -1,9 +1,11 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { TimelineTrack } from '@/types/timeline';
 import { usePlaybackStore } from '@/shared/state/playback';
-import { getPreviewAnchorFrame, getPreviewInteractionMode } from '../utils/preview-interaction-mode';
 import { getPreloadWindowRange } from '../utils/preload-window';
-import { resolvePreviewTransitionFromPlaybackStates } from '../utils/preview-state-coordinator';
+import {
+  getPreviewRuntimeSnapshotFromPlaybackState,
+  resolvePreviewTransitionFromPlaybackStates,
+} from '../utils/preview-state-coordinator';
 import {
   PRELOAD_AHEAD_SECONDS,
   PRELOAD_BACKWARD_SCRUB_EXTRA_IDS,
@@ -113,15 +115,12 @@ export function usePreviewMediaPreload({
       }
 
       const playbackState = usePlaybackStore.getState();
-      const interactionMode = getPreviewInteractionMode({
-        isPlaying: playbackState.isPlaying,
-        previewFrame: playbackState.previewFrame,
-        isGizmoInteracting: isGizmoInteractingRef.current,
-      });
-      const anchorFrame = getPreviewAnchorFrame(interactionMode, {
-        currentFrame: playbackState.currentFrame,
-        previewFrame: playbackState.previewFrame,
-      });
+      const runtimeSnapshot = getPreviewRuntimeSnapshotFromPlaybackState(
+        playbackState,
+        isGizmoInteractingRef.current,
+      );
+      const interactionMode = runtimeSnapshot.mode;
+      const anchorFrame = runtimeSnapshot.anchorFrame;
       const previousAnchorFrame = preloadLastAnchorFrameRef.current;
       preloadLastAnchorFrameRef.current = anchorFrame;
       const scrubDirection: -1 | 0 | 1 = interactionMode === 'scrubbing' && previousAnchorFrame !== null

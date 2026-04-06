@@ -70,6 +70,15 @@ export function getPreviewRuntimeStateFromPlaybackState(
   };
 }
 
+export function getPreviewRuntimeSnapshotFromPlaybackState(
+  state: PreviewPlaybackState,
+  isGizmoInteracting: boolean,
+): PreviewRuntimeSnapshot {
+  return getPreviewRuntimeSnapshot(
+    getPreviewRuntimeStateFromPlaybackState(state, isGizmoInteracting)
+  );
+}
+
 export function resolvePreviewTransitionDecision(input: {
   prev: PreviewRuntimeState;
   next: PreviewRuntimeState;

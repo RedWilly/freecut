@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getPreviewRuntimeStateFromPlaybackState,
   getPreviewRuntimeSnapshot,
+  getPreviewRuntimeSnapshotFromPlaybackState,
   resolvePreviewTransitionFromPlaybackStates,
   resolvePreviewTransitionDecision,
 } from './preview-state-coordinator';
@@ -32,6 +33,21 @@ describe('getPreviewRuntimeSnapshot', () => {
 
     expect(snapshot.mode).toBe('scrubbing');
     expect(snapshot.anchorFrame).toBe(42);
+  });
+});
+
+describe('getPreviewRuntimeSnapshotFromPlaybackState', () => {
+  it('derives a runtime snapshot directly from playback store state', () => {
+    expect(getPreviewRuntimeSnapshotFromPlaybackState({
+      isPlaying: false,
+      previewFrame: 42,
+      currentFrame: 10,
+    }, false)).toEqual({
+      mode: 'scrubbing',
+      anchorFrame: 42,
+      currentFrame: 10,
+      previewFrame: 42,
+    });
   });
 });
 

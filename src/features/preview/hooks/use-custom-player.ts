@@ -14,11 +14,11 @@ import { usePlaybackStore } from '@/shared/state/playback';
 import { useTimelineSettingsStore } from '@/features/preview/deps/timeline-store';
 import { resolvePreviewTransitionFromPlaybackStates } from '../utils/preview-state-coordinator';
 import {
-  PLAYER_BACKWARD_SCRUB_SEEK_THROTTLE_MS,
-  PLAYER_BACKWARD_SCRUB_SEEK_QUANTIZE_FRAMES,
-  PLAYER_BACKWARD_SCRUB_FORCE_JUMP_FRAMES,
-  getFrameDirection,
-} from '../utils/preview-constants';
+  type PlayerCommand,
+  planCurrentFrameSyncCommand,
+  planPlaybackStateCommand,
+  planPreviewFrameSyncCommand,
+} from '../utils/player-command-planner';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('useCustomPlayer');
@@ -45,7 +45,7 @@ export function useCustomPlayer(
     return Number.isFinite(frame) ? Math.round(frame!) : null;
   }, [playerRef]);
 
-  const seekPlayerToFrame = useCallback((targetFrame: number) => {
+  const seekPlayerToFrame = useCallback((targetFrame: number, holdIgnoreUntilReleased = false) => {
     if (!playerRef.current) return;
     if (lastSeekTargetRef.current === targetFrame) return;
 
@@ -66,10 +66,41 @@ export function useCustomPlayer(
       logger.error('Failed to seek Player:', error);
     }
 
-    requestAnimationFrame(() => {
-      ignorePlayerUpdatesRef.current = false;
-    });
+    if (!holdIgnoreUntilReleased) {
+      requestAnimationFrame(() => {
+        ignorePlayerUpdatesRef.current = false;
+      });
+    }
   }, [playerRef, getPlayerFrame, onPlayerSeek]);
+
+  const executePlayerCommand = useCallback((command: PlayerCommand) => {
+    if (!playerRef.current) return;
+
+    switch (command.type) {
+      case 'noop':
+        return;
+      case 'pause':
+        playerRef.current.pause();
+        return;
+      case 'play':
+        playerRef.current.play();
+        return;
+      case 'seek':
+        seekPlayerToFrame(command.targetFrame);
+        return;
+      case 'seek_and_play':
+        seekPlayerToFrame(command.targetFrame, true);
+        if (!usePlaybackStore.getState().isPlaying) {
+          ignorePlayerUpdatesRef.current = false;
+          return;
+        }
+        playerRef.current.play();
+        ignorePlayerUpdatesRef.current = false;
+        return;
+      default:
+        return;
+    }
+  }, [playerRef, seekPlayerToFrame]);
 
   // Detect when Player becomes ready
   useEffect(() => {
@@ -97,38 +128,23 @@ export function useCustomPlayer(
 
     const wasPlaying = wasPlayingRef.current;
     wasPlayingRef.current = isPlaying;
+    const { currentFrame, setPreviewFrame } = usePlaybackStore.getState();
+    const playbackPlan = planPlaybackStateCommand({
+      wasPlaying,
+      isPlaying,
+      currentFrame,
+      playerFrame: getPlayerFrame(),
+    });
 
     try {
-      if (isPlaying && !wasPlaying) {
-        // Always resume from the store playhead, not the hover-preview (gray) playhead.
-        const { currentFrame, setPreviewFrame } = usePlaybackStore.getState();
-        const playerFrame = getPlayerFrame();
-        const needsSeek = playerFrame === null || Math.abs(playerFrame - currentFrame) > 1;
-        if (needsSeek) {
-          ignorePlayerUpdatesRef.current = true;
-          onPlayerSeek?.(currentFrame);
-          playerRef.current.seekTo(currentFrame);
-          lastSyncedFrameRef.current = currentFrame;
-          lastSeekTargetRef.current = currentFrame;
-        }
+      if (playbackPlan.clearPreviewFrame) {
         setPreviewFrame(null);
-
-        // Start playback immediately after optional seek. Deferring to rAF adds
-        // an extra frame of latency every time playback resumes.
-        if (!usePlaybackStore.getState().isPlaying) {
-          ignorePlayerUpdatesRef.current = false;
-          return;
-        }
-        playerRef.current?.play();
-        ignorePlayerUpdatesRef.current = false;
-        return;
-      } else if (!isPlaying && wasPlaying) {
-        playerRef.current.pause();
       }
+      executePlayerCommand(playbackPlan.command);
     } catch (error) {
       logger.error('Failed to control playback:', error);
     }
-  }, [isPlaying, playerRef, getPlayerFrame, onPlayerSeek]);
+  }, [isPlaying, playerRef, executePlayerCommand, getPlayerFrame]);
 
   // Wait for timeline to finish loading before syncing frame position.
   // Without this, the Player would seek to frame 0 (the default) before
@@ -156,31 +172,19 @@ export function useCustomPlayer(
         next: state,
         isGizmoInteracting: isGizmoInteractingRef?.current === true,
       });
+      const plan = planCurrentFrameSyncCommand({
+        transition,
+        currentFrame: state.currentFrame,
+        lastSyncedFrame: lastSyncedFrameRef.current,
+        playerFrame: getPlayerFrame(),
+      });
 
-      if (!transition.currentFrameChanged) return;
-      const currentFrame = state.currentFrame;
-
-      const frameDiff = Math.abs(currentFrame - lastSyncedFrameRef.current);
-      if (frameDiff === 0) return;
-
-      if (transition.next.mode === 'playing') {
-        const playerFrame = getPlayerFrame();
-        // While actively playing, most store frame updates originate from the Player itself.
-        // Only seek when there is real drift, which indicates an external timeline seek.
-        if (playerFrame !== null && Math.abs(playerFrame - currentFrame) <= 2) {
-          lastSyncedFrameRef.current = currentFrame;
-          return;
-        }
+      if (plan.acknowledgedFrame !== null) {
+        lastSyncedFrameRef.current = plan.acknowledgedFrame;
       }
-
-      // During active gizmo interactions, don't seek from currentFrame updates.
-      // Gizmo mode prioritizes real-time transform updates from Player output.
-      if (transition.shouldSkipCurrentFrameSeek) {
-        lastSyncedFrameRef.current = currentFrame;
-        return;
+      if (plan.command.type === 'seek') {
+        seekPlayerToFrame(plan.command.targetFrame);
       }
-
-      seekPlayerToFrame(currentFrame);
     });
 
     return unsubscribe;
@@ -197,65 +201,27 @@ export function useCustomPlayer(
         next: state,
         isGizmoInteracting: isGizmoInteractingRef?.current === true,
       });
-      if (!transition.previewFrameChanged) return;
-      const interactionMode = transition.next.mode;
-      if (interactionMode === 'playing' || interactionMode === 'gizmo_dragging') {
-        lastBackwardScrubSeekAtRef.current = 0;
-        lastBackwardScrubSeekFrameRef.current = null;
-        return;
-      }
-      if (interactionMode === 'scrubbing' && bypassPreviewSeekRef?.current) {
-        lastBackwardScrubSeekAtRef.current = 0;
-        lastBackwardScrubSeekFrameRef.current = null;
-        return;
-      }
-      const shouldUseFastScrubOnly = (
-        !preferPlayerForStyledTextScrubRef?.current
-        &&
-        interactionMode === 'scrubbing'
-        && state.previewFrame !== null
-        && state.currentFrame === state.previewFrame
-        && state.currentFrameEpoch === state.previewFrameEpoch
-      );
-      if (shouldUseFastScrubOnly) {
-        lastBackwardScrubSeekAtRef.current = 0;
-        lastBackwardScrubSeekFrameRef.current = null;
-        return;
-      }
+      const plan = planPreviewFrameSyncCommand({
+        transition,
+        currentFrame: state.currentFrame,
+        previewFrame: state.previewFrame,
+        currentFrameEpoch: state.currentFrameEpoch,
+        previewFrameEpoch: state.previewFrameEpoch,
+        bypassPreviewSeek: bypassPreviewSeekRef?.current === true,
+        preferPlayerForStyledTextScrub: preferPlayerForStyledTextScrubRef?.current === true,
+        nowMs: performance.now(),
+        backwardScrubState: {
+          lastSeekAtMs: lastBackwardScrubSeekAtRef.current,
+          lastSeekFrame: lastBackwardScrubSeekFrameRef.current,
+        },
+      });
 
-      const targetFrame = transition.next.anchorFrame;
-      const scrubDirection = interactionMode === 'scrubbing'
-        ? getFrameDirection(transition.prev.anchorFrame, transition.next.anchorFrame)
-        : 0;
+      lastBackwardScrubSeekAtRef.current = plan.backwardScrubState.lastSeekAtMs;
+      lastBackwardScrubSeekFrameRef.current = plan.backwardScrubState.lastSeekFrame;
 
-      if (scrubDirection < 0) {
-        const nowMs = performance.now();
-        const quantizedFrame = Math.floor(
-          targetFrame / PLAYER_BACKWARD_SCRUB_SEEK_QUANTIZE_FRAMES
-        ) * PLAYER_BACKWARD_SCRUB_SEEK_QUANTIZE_FRAMES;
-        const lastRequestedFrame = lastBackwardScrubSeekFrameRef.current;
-        const withinThrottle = (
-          (nowMs - lastBackwardScrubSeekAtRef.current) < PLAYER_BACKWARD_SCRUB_SEEK_THROTTLE_MS
-        );
-        const jumpDistance = lastRequestedFrame === null
-          ? Number.POSITIVE_INFINITY
-          : Math.abs(quantizedFrame - lastRequestedFrame);
-        if (
-          withinThrottle
-          && jumpDistance < PLAYER_BACKWARD_SCRUB_FORCE_JUMP_FRAMES
-        ) {
-          return;
-        }
-
-        lastBackwardScrubSeekAtRef.current = nowMs;
-        lastBackwardScrubSeekFrameRef.current = quantizedFrame;
-        seekPlayerToFrame(quantizedFrame);
-        return;
+      if (plan.command.type === 'seek') {
+        seekPlayerToFrame(plan.command.targetFrame);
       }
-
-      lastBackwardScrubSeekAtRef.current = 0;
-      lastBackwardScrubSeekFrameRef.current = null;
-      seekPlayerToFrame(targetFrame);
     });
   }, [playerReady, playerRef, seekPlayerToFrame, bypassPreviewSeekRef, preferPlayerForStyledTextScrubRef, isGizmoInteractingRef]);
 
