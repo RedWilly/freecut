@@ -12,86 +12,35 @@ interface UsePreviewTransitionModelParams {
   fastScrubPreviewItems: TimelineItem[];
 }
 
+interface BuildPreviewTransitionDataParams {
+  fps: number;
+  transitions: CompositionInputProps['transitions'];
+  fastScrubScaledTracks: CompositionInputProps['tracks'];
+}
+
 export function usePreviewTransitionModel({
   fps,
   transitions,
   fastScrubScaledTracks,
   fastScrubPreviewItems,
 }: UsePreviewTransitionModelParams) {
-  const playbackTransitionFingerprint = useMemo(() => (
-    (transitions ?? [])
-      .map((transition) => (
-        `${transition.id}:${transition.type}:${transition.leftClipId}:${transition.rightClipId}:${transition.trackId ?? ''}:${transition.durationInFrames}:${transition.presentation ?? ''}:${transition.timing ?? ''}`
-      ))
-      .join('|')
-  ), [transitions]);
-
-  const playbackTransitionWindows = useMemo(() => {
-    const clipMap = new Map<string, TimelineItem>();
-    for (const track of fastScrubScaledTracks) {
-      for (const item of track.items as TimelineItem[]) {
-        clipMap.set(item.id, item);
-      }
-    }
-    return resolveTransitionWindows(transitions ?? [], clipMap);
-  }, [fastScrubScaledTracks, transitions]);
-
-  const playbackTransitionLookaheadFrames = useMemo(
-    () => Math.max(2, Math.round(fps * 0.25)),
-    [fps],
-  );
-  const playbackTransitionCooldownFrames = useMemo(
-    () => Math.max(2, Math.round(fps * 0.1)),
-    [fps],
-  );
-  const pausedTransitionPrearmFrames = useMemo(
-    () => Math.max(playbackTransitionLookaheadFrames, Math.round(fps * 3)),
-    [fps, playbackTransitionLookaheadFrames],
-  );
-  const playingComplexTransitionPrearmFrames = useMemo(
-    () => Math.max(playbackTransitionLookaheadFrames, Math.round(fps * 1.5)),
-    [fps, playbackTransitionLookaheadFrames],
-  );
-  const playbackTransitionPrerenderRunwayFrames = 8;
-
-  const playbackTransitionEffectfulStartFrames = useMemo(() => {
-    const hasExpensiveVisuals = (item: TimelineItem) => (
-      item.effects?.some((effect) => effect.enabled)
-      || (item.blendMode !== undefined && item.blendMode !== 'normal')
-    );
-
-    const effectfulStartFrames = new Set<number>();
-    for (const window of playbackTransitionWindows) {
-      if (hasExpensiveVisuals(window.leftClip) || hasExpensiveVisuals(window.rightClip)) {
-        effectfulStartFrames.add(window.startFrame);
-      }
-    }
-
-    return effectfulStartFrames;
-  }, [playbackTransitionWindows]);
-
-  const playbackTransitionVariableSpeedStartFrames = useMemo(() => {
-    const variableSpeedStartFrames = new Set<number>();
-    for (const window of playbackTransitionWindows) {
-      const leftSpeed = window.leftClip.speed ?? 1;
-      const rightSpeed = window.rightClip.speed ?? 1;
-      if (Math.abs(leftSpeed - 1) > 0.001 || Math.abs(rightSpeed - 1) > 0.001) {
-        variableSpeedStartFrames.add(window.startFrame);
-      }
-    }
-    return variableSpeedStartFrames;
-  }, [playbackTransitionWindows]);
-
-  const playbackTransitionComplexStartFrames = useMemo(() => {
-    const complexStartFrames = new Set<number>();
-    for (const frame of playbackTransitionEffectfulStartFrames) {
-      complexStartFrames.add(frame);
-    }
-    for (const frame of playbackTransitionVariableSpeedStartFrames) {
-      complexStartFrames.add(frame);
-    }
-    return complexStartFrames;
-  }, [playbackTransitionEffectfulStartFrames, playbackTransitionVariableSpeedStartFrames]);
+  const {
+    playbackTransitionFingerprint,
+    playbackTransitionWindows,
+    playbackTransitionLookaheadFrames,
+    playbackTransitionCooldownFrames,
+    pausedTransitionPrearmFrames,
+    playingComplexTransitionPrearmFrames,
+    playbackTransitionPrerenderRunwayFrames,
+    playbackTransitionComplexStartFrames,
+    playbackTransitionOverlayWindows,
+  } = useMemo(() => {
+    return buildPreviewTransitionData({
+      fps,
+      transitions,
+      fastScrubScaledTracks,
+    });
+  }, [fastScrubScaledTracks, fps, transitions]);
 
   const transitionWindowUsesDomProvider = useCallback((window: ResolvedTransitionWindow<TimelineItem> | null) => {
     if (!window) return true;
@@ -126,15 +75,6 @@ export function usePreviewTransitionModel({
     )) ?? null;
   }, [playbackTransitionWindows]);
 
-  const playbackTransitionOverlayWindows = useMemo(
-    () => playbackTransitionWindows.map((window) => ({
-      startFrame: window.startFrame,
-      endFrame: window.endFrame,
-      cooldownFrames: getTransitionCooldownForWindow(window),
-    })),
-    [getTransitionCooldownForWindow, playbackTransitionWindows],
-  );
-
   const shouldPreserveHighFidelityBackwardPreview = useCallback((frame: number | null) => {
     if (frame === null) return false;
     if (getTransitionWindowForFrame(frame) !== null) {
@@ -159,5 +99,78 @@ export function usePreviewTransitionModel({
     getActiveTransitionWindowForFrame,
     playbackTransitionOverlayWindows,
     shouldPreserveHighFidelityBackwardPreview,
+  };
+}
+
+export function buildPreviewTransitionData({
+  fps,
+  transitions,
+  fastScrubScaledTracks,
+}: BuildPreviewTransitionDataParams) {
+  const safeTransitions = transitions ?? [];
+  const playbackTransitionFingerprint = safeTransitions
+    .map((transition) => (
+      `${transition.id}:${transition.type}:${transition.leftClipId}:${transition.rightClipId}:${transition.trackId ?? ''}:${transition.durationInFrames}:${transition.presentation ?? ''}:${transition.timing ?? ''}`
+    ))
+    .join('|');
+
+  const clipMap = new Map<string, TimelineItem>();
+  for (const track of fastScrubScaledTracks) {
+    for (const item of track.items as TimelineItem[]) {
+      clipMap.set(item.id, item);
+    }
+  }
+  const playbackTransitionWindows = resolveTransitionWindows(safeTransitions, clipMap);
+  const playbackTransitionLookaheadFrames = Math.max(2, Math.round(fps * 0.25));
+  const playbackTransitionCooldownFrames = Math.max(2, Math.round(fps * 0.1));
+  const pausedTransitionPrearmFrames = Math.max(playbackTransitionLookaheadFrames, Math.round(fps * 3));
+  const playingComplexTransitionPrearmFrames = Math.max(playbackTransitionLookaheadFrames, Math.round(fps * 1.5));
+  const playbackTransitionPrerenderRunwayFrames = 8;
+
+  const hasExpensiveVisuals = (item: TimelineItem) => (
+    item.effects?.some((effect) => effect.enabled)
+    || (item.blendMode !== undefined && item.blendMode !== 'normal')
+  );
+
+  const playbackTransitionComplexStartFrames = new Set<number>();
+  const playbackTransitionOverlayWindows = playbackTransitionWindows.map((window) => {
+    const leftSpeed = window.leftClip.speed ?? 1;
+    const rightSpeed = window.rightClip.speed ?? 1;
+    if (
+      hasExpensiveVisuals(window.leftClip)
+      || hasExpensiveVisuals(window.rightClip)
+      || Math.abs(leftSpeed - 1) > 0.001
+      || Math.abs(rightSpeed - 1) > 0.001
+    ) {
+      playbackTransitionComplexStartFrames.add(window.startFrame);
+    }
+
+    const leftOriginId = window.leftClip.originId;
+    const rightOriginId = window.rightClip.originId;
+    const cooldownFrames = (
+      leftOriginId
+      && rightOriginId
+      && leftOriginId === rightOriginId
+    )
+      ? 0
+      : playbackTransitionCooldownFrames;
+
+    return {
+      startFrame: window.startFrame,
+      endFrame: window.endFrame,
+      cooldownFrames,
+    };
+  });
+
+  return {
+    playbackTransitionFingerprint,
+    playbackTransitionWindows,
+    playbackTransitionLookaheadFrames,
+    playbackTransitionCooldownFrames,
+    pausedTransitionPrearmFrames,
+    playingComplexTransitionPrearmFrames,
+    playbackTransitionPrerenderRunwayFrames,
+    playbackTransitionComplexStartFrames,
+    playbackTransitionOverlayWindows,
   };
 }
