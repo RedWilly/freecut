@@ -1155,8 +1155,9 @@ export function usePreviewRenderPump({
               targetTime = getVideoItemSourceTimeSeconds(sessionWindow.rightClip, state.currentFrame, fps);
             } catch { /* missing sourceFps in tests */ }
             if (targetTime !== null) {
-              // The pool lane element is pinned under the LEFT clip id
-              // (stabilization kept it active during the transition).
+              // The pool lane was stabilized on the LEFT clip during the
+              // transition. Check it directly — it must reach the RIGHT
+              // clip's target time before we drop the overlay.
               const poolLane = transitionSessionPinnedElementsRef.current.get(sessionWindow.leftClip.id);
               if (poolLane && poolLane.readyState >= 2 && Math.abs(poolLane.currentTime - targetTime) > 0.1) {
                 scrubRequestedFrameRef.current = state.currentFrame;
