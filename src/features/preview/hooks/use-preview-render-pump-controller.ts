@@ -1139,9 +1139,10 @@ export function usePreviewRenderPump({
           }
         }
         if (!(playbackTransitionState.hasActiveTransition || playbackTransitionState.shouldHoldOverlay)) {
-          // For same-origin transitions, the pool lane re-seeks at exit.
-          // Hold the overlay until a video element is near the right clip's
-          // target time so the Player doesn't flash stale left-clip content.
+          // Same-origin transitions: the pool lane was stabilized on the
+          // LEFT clip and re-seeks to the RIGHT clip at exit. The pinned
+          // element for the LEFT clip IS the pool lane. Hold the overlay
+          // until that element reaches the right clip's target time.
           const sessionWindow = transitionSessionWindowRef.current;
           if (
             sessionWindow
@@ -1154,18 +1155,10 @@ export function usePreviewRenderPump({
               targetTime = getVideoItemSourceTimeSeconds(sessionWindow.rightClip, state.currentFrame, fps);
             } catch { /* missing sourceFps in tests */ }
             if (targetTime !== null) {
-              // Exclude pinned shadow elements — those are at the right
-              // position but will unmount when the session clears.  We need
-              // the POOL LANE (primary Player element) to be ready.
-              const pinnedEls = transitionSessionPinnedElementsRef.current;
-              const allVideos = document.querySelectorAll('video');
-              const poolCandidates = Array.from(allVideos).filter(v =>
-                v.videoWidth > 0 && v.readyState >= 2 && !Array.from(pinnedEls.values()).includes(v),
-              );
-              const ready = poolCandidates.length === 0 || poolCandidates.some(
-                v => Math.abs(v.currentTime - targetTime!) < 0.1,
-              );
-              if (!ready) {
+              // The pool lane element is pinned under the LEFT clip id
+              // (stabilization kept it active during the transition).
+              const poolLane = transitionSessionPinnedElementsRef.current.get(sessionWindow.leftClip.id);
+              if (poolLane && poolLane.readyState >= 2 && Math.abs(poolLane.currentTime - targetTime) > 0.1) {
                 scrubRequestedFrameRef.current = state.currentFrame;
                 void pumpRenderLoop();
                 return;
