@@ -19,6 +19,7 @@ import {
 } from '@/features/timeline/deps/media-library-resolver';
 import { findNearestAvailableSpace } from '../utils/collision-utils';
 import { mapWithConcurrency } from '@/shared/async/async-utils';
+import { useExternalDragPreview } from '../hooks/use-external-drag-preview';
 import { useCompositionNavigationStore } from '../stores/composition-navigation-store';
 import { wouldCreateCompositionCycle } from '../utils/composition-graph';
 import {
@@ -40,6 +41,13 @@ import {
   planNewTrackZonePlacements,
 } from '../utils/new-track-zone-media';
 import { preflightFirstTimelineVideoProjectMatch } from '../utils/external-file-project-match';
+import {
+  getGhostHighlightClasses,
+  getGhostPreviewItemClasses,
+  isDroppableMediaType,
+  isValidDragMediaItem,
+  type DragMediaItem,
+} from '../utils/drag-drop-preview';
 
 const logger = createLogger('TimelineMediaDropZone');
 
@@ -51,13 +59,6 @@ interface TimelineMediaDropZoneProps {
 
 export type GhostPreviewItem = NewTrackZoneGhostPreview;
 
-interface DragMediaItem {
-  mediaId: string;
-  mediaType: DroppableMediaType;
-  fileName: string;
-  duration: number;
-}
-
 interface DroppedMediaEntry {
   media: MediaMetadata;
   mediaId: string;
@@ -65,60 +66,7 @@ interface DroppedMediaEntry {
   label: string;
 }
 
-interface PreviewEntry {
-  label: string;
-  mediaType: DroppableMediaType;
-  duration?: number;
-  hasLinkedAudio?: boolean;
-}
-
 const MULTI_DROP_METADATA_CONCURRENCY = 3;
-
-function getGhostHighlightClasses(ghostPreviews: GhostPreviewItem[]): string {
-  if (ghostPreviews.some((ghost) => ghost.type === 'audio')) {
-    return 'border-timeline-audio/60 bg-timeline-audio/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'video')) {
-    return 'border-timeline-video/60 bg-timeline-video/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'text')) {
-    return 'border-timeline-text/60 bg-timeline-text/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'shape')) {
-    return 'border-timeline-shape/60 bg-timeline-shape/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'adjustment')) {
-    return 'border-slate-400/60 bg-slate-400/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'image')) {
-    return 'border-timeline-image/60 bg-timeline-image/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'composition')) {
-    return 'border-violet-400/60 bg-violet-600/10';
-  }
-  if (ghostPreviews.some((ghost) => ghost.type === 'external-file')) {
-    return 'border-orange-500/60 bg-orange-500/10';
-  }
-  return 'border-primary/50 bg-primary/10';
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function isDroppableMediaType(value: unknown): value is DroppableMediaType {
-  return value === 'video' || value === 'audio' || value === 'image';
-}
-
-function isValidDragMediaItem(value: unknown): value is DragMediaItem {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<DragMediaItem>;
-  return isNonEmptyString(candidate.mediaId)
-    && isDroppableMediaType(candidate.mediaType)
-    && isNonEmptyString(candidate.fileName)
-    && typeof candidate.duration === 'number'
-    && Number.isFinite(candidate.duration);
-}
 
 export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   height,
@@ -128,11 +76,6 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
   const zoneRef = useRef<HTMLDivElement>(null);
-  const externalPreviewItemsRef = useRef<PreviewEntry[] | null>(null);
-  const externalPreviewSignatureRef = useRef<string | null>(null);
-  const externalPreviewPromiseRef = useRef<Promise<void> | null>(null);
-  const externalPreviewTokenRef = useRef(0);
-  const lastDragFrameRef = useRef(0);
 
   const addItem = useTimelineStore((s) => s.addItem);
   const addItems = useTimelineStore((s) => s.addItems);
@@ -283,7 +226,12 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     };
   }, [anchorTrackId, fps, getCurrentCanvasSize, zone]);
 
-  const buildGhostPreviewsForEntries = useCallback((entries: PreviewEntry[], dropFrame: number): GhostPreviewItem[] => {
+  const buildGhostPreviewsForEntries = useCallback((entries: Array<{
+    label: string;
+    mediaType: DroppableMediaType;
+    duration?: number;
+    hasLinkedAudio?: boolean;
+  }>, dropFrame: number): GhostPreviewItem[] => {
     const currentTracks = useTimelineStore.getState().tracks;
     const preferredTrackHeight = currentTracks.find((track) => track.id === anchorTrackId)?.height ?? 64;
     const { plannedItems } = planNewTrackZonePlacements({
@@ -357,6 +305,19 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     }];
   }, [ensureVideoZoneTrack, fps, frameToPixels, zone]);
 
+  const {
+    clearExternalPreviewSession,
+    externalPreviewItemsRef,
+    lastDragFrameRef,
+    primeExternalPreviewEntries,
+  } = useExternalDragPreview<GhostPreviewItem>({
+    buildGhostPreviews: buildGhostPreviewsForEntries,
+    setGhostPreviews: setZoneGhostPreviews,
+    onError: (error) => {
+      logger.warn('Failed to build external drag preview:', error);
+    },
+  });
+
   const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): {
     item: TimelineItemType;
     tracks: ReturnType<typeof useTimelineStore.getState>['tracks'];
@@ -398,61 +359,6 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       tracks: createdTrack.tracks,
     };
   }, [ensureVideoZoneTrack, fps, getCurrentCanvasSize, zone]);
-
-  const clearExternalPreviewSession = useCallback(() => {
-    externalPreviewItemsRef.current = null;
-    externalPreviewSignatureRef.current = null;
-    externalPreviewPromiseRef.current = null;
-    externalPreviewTokenRef.current += 1;
-  }, []);
-
-  const primeExternalPreviewEntries = useCallback((dataTransfer: DataTransfer) => {
-    const signature = `${dataTransfer.items.length}:${Array.from(dataTransfer.items)
-      .map((item) => `${item.kind}:${item.type || 'unknown'}`)
-      .join('|')}`;
-
-    if (externalPreviewSignatureRef.current === signature && externalPreviewItemsRef.current) {
-      return;
-    }
-
-    if (externalPreviewSignatureRef.current === signature && externalPreviewPromiseRef.current) {
-      return;
-    }
-
-    clearExternalPreviewSession();
-    externalPreviewSignatureRef.current = signature;
-    const token = externalPreviewTokenRef.current;
-
-    const previewPromise = (async () => {
-      const { supported, entries } = await extractValidMediaFileEntriesFromDataTransfer(dataTransfer);
-      if (!supported || token !== externalPreviewTokenRef.current) {
-        return;
-      }
-
-      const previewEntries = entries.flatMap((entry) => (
-        entry.mediaType === 'video' || entry.mediaType === 'audio' || entry.mediaType === 'image'
-          ? [{
-            label: entry.file.name,
-            mediaType: entry.mediaType,
-          }]
-          : []
-      ));
-
-      externalPreviewItemsRef.current = previewEntries;
-      externalPreviewPromiseRef.current = null;
-
-      if (previewEntries.length > 0) {
-        setZoneGhostPreviews(buildGhostPreviewsForEntries(previewEntries, lastDragFrameRef.current));
-      }
-    })().catch((error) => {
-      if (token === externalPreviewTokenRef.current) {
-        externalPreviewPromiseRef.current = null;
-        logger.warn('Failed to build external drag preview:', error);
-      }
-    });
-
-    externalPreviewPromiseRef.current = previewPromise;
-  }, [buildGhostPreviewsForEntries, clearExternalPreviewSession, setZoneGhostPreviews]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     const data = getMediaDragData();
@@ -925,23 +831,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       {ghostPreviews.map((ghost, index) => (
         <div
           key={`${ghost.label}-${index}`}
-          className={`absolute rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 ${
-            ghost.type === 'composition'
-              ? 'border-violet-400 bg-violet-600/20'
-              : ghost.type === 'external-file'
-              ? 'border-orange-500 bg-orange-500/15'
-              : ghost.type === 'video'
-              ? 'border-timeline-video bg-timeline-video/20'
-              : ghost.type === 'audio'
-              ? 'border-timeline-audio bg-timeline-audio/20'
-              : ghost.type === 'text'
-              ? 'border-timeline-text bg-timeline-text/20'
-              : ghost.type === 'shape'
-              ? 'border-timeline-shape bg-timeline-shape/20'
-              : ghost.type === 'adjustment'
-              ? 'border-slate-400 bg-slate-400/15'
-              : 'border-timeline-image bg-timeline-image/20'
-          }`}
+          className={`absolute rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 ${getGhostPreviewItemClasses(ghost.type)}`}
           style={{
             left: `${ghost.left}px`,
             width: `${ghost.width}px`,
