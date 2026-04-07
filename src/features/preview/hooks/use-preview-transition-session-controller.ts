@@ -173,6 +173,7 @@ export function usePreviewTransitionSessionController({
         if (!el) continue;
         const localFrame = currentFrame - clip.from;
         if (localFrame < 0) continue;
+        if (localFrame >= clip.durationInFrames) continue;
         const sourceStart = clip.sourceStart ?? clip.trimStart ?? 0;
         const sourceFps = clip.sourceFps ?? fps;
         const clipSpeed = clip.speed ?? 1;
