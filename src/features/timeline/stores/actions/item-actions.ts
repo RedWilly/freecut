@@ -17,6 +17,15 @@ import {
 } from '@/features/timeline/deps/media-library-service';
 import { toast } from 'sonner';
 import { execute, applyTransitionRepairs, getLogger, warnIfOverlapping } from './shared';
+import {
+  buildLinkedLeftShiftUpdates,
+  buildSynchronizedLinkedMoveUpdatesForEdit,
+  expandIdsWithLinkedItems,
+  getLinkedItemsForEdit,
+  getMatchingSynchronizedLinkedCounterpartForEdit,
+  getSynchronizedLinkedCounterpartPairForEdit,
+  getSynchronizedLinkedItemsForEdit,
+} from './linked-edit';
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { timelineToSourceFrames, sourceToTimelineFrames } from '../../utils/source-calculations';
 import { computeClampedSlipDelta } from '../../utils/slip-utils';
@@ -28,7 +37,6 @@ import {
   canLinkSelection,
   expandSelectionWithLinkedItems,
   getLinkedItemIds,
-  getLinkedItems,
 } from '../../utils/linked-items';
 
 function findNextAvailableSpaceOnTrack(
@@ -99,197 +107,8 @@ function placeItemsWithoutTimelineOverlap(items: TimelineItem[]): TimelineItem[]
   return placedItems;
 }
 
-function expandIdsWithLinkedItems(ids: string[]): string[] {
-  if (!useEditorStore.getState().linkedSelectionEnabled) {
-    return Array.from(new Set(ids));
-  }
-
-  return expandSelectionWithLinkedItems(useItemsStore.getState().items, ids);
-}
-
-function getLinkedItemsForEdit(items: TimelineItem[], itemId: string): TimelineItem[] {
-  if (useEditorStore.getState().linkedSelectionEnabled) {
-    return getLinkedItems(items, itemId);
-  }
-
-  const anchor = items.find((item) => item.id === itemId);
-  return anchor ? [anchor] : [];
-}
-
-function getSynchronizedLinkedItemsForEdit(items: TimelineItem[], itemId: string): TimelineItem[] {
-  if (useEditorStore.getState().linkedSelectionEnabled) {
-    return getSynchronizedLinkedItems(items, itemId);
-  }
-
-  const anchor = items.find((item) => item.id === itemId);
-  return anchor ? [anchor] : [];
-}
-
-function getSynchronizedLinkedCounterpartPairForEdit(
-  items: TimelineItem[],
-  leftId: string,
-  rightId: string,
-): { leftCounterpart: TimelineItem; rightCounterpart: TimelineItem } | null {
-  if (!useEditorStore.getState().linkedSelectionEnabled) {
-    return null;
-  }
-
-  return getSynchronizedLinkedCounterpartPair(items, leftId, rightId);
-}
-
-function getMatchingSynchronizedLinkedCounterpartForEdit(
-  items: TimelineItem[],
-  itemId: string,
-  trackId: string,
-  type: TimelineItem['type'],
-): TimelineItem | null {
-  if (!useEditorStore.getState().linkedSelectionEnabled) {
-    return null;
-  }
-
-  return getMatchingSynchronizedLinkedCounterpart(items, itemId, trackId, type);
-}
-
-function buildLinkedLeftShiftUpdates(
-  items: TimelineItem[],
-  baseShiftByItemId: ReadonlyMap<string, number>
-): Array<{ id: string; from: number }> {
-  if (!useEditorStore.getState().linkedSelectionEnabled) {
-    return items.flatMap((item) => {
-      const shiftAmount = baseShiftByItemId.get(item.id) ?? 0;
-      return shiftAmount > 0
-        ? [{ id: item.id, from: item.from - shiftAmount }]
-        : [];
-    });
-  }
-
-  const shiftByItemId = new Map(baseShiftByItemId);
-  const visited = new Set<string>();
-
-  for (const item of items) {
-    if (visited.has(item.id)) continue;
-
-    const linkedItems = getLinkedItems(items, item.id);
-    for (const linkedItem of linkedItems) {
-      visited.add(linkedItem.id);
-    }
-
-    if (linkedItems.length <= 1) continue;
-
-    let groupShift = 0;
-    for (const linkedItem of linkedItems) {
-      groupShift = Math.max(groupShift, baseShiftByItemId.get(linkedItem.id) ?? 0);
-    }
-
-    if (groupShift <= 0) continue;
-
-    for (const linkedItem of linkedItems) {
-      shiftByItemId.set(linkedItem.id, groupShift);
-    }
-  }
-
-  return items.flatMap((item) => {
-    const shiftAmount = shiftByItemId.get(item.id) ?? 0;
-    return shiftAmount > 0
-      ? [{ id: item.id, from: item.from - shiftAmount }]
-      : [];
-  });
-}
-
-function getSynchronizedLinkedItems(items: TimelineItem[], itemId: string): TimelineItem[] {
-  const linkedItems = getLinkedItems(items, itemId);
-  const anchor = linkedItems.find((item) => item.id === itemId);
-  if (!anchor) return [];
-
-  const synchronizedItems = linkedItems.filter((item) => (
-    item.id === anchor.id
-    || (
-      item.from === anchor.from
-      && item.durationInFrames === anchor.durationInFrames
-      && (item.sourceStart ?? null) === (anchor.sourceStart ?? null)
-      && (item.sourceEnd ?? null) === (anchor.sourceEnd ?? null)
-      && (item.speed ?? 1) === (anchor.speed ?? 1)
-    )
-  ));
-
-  return synchronizedItems.length > 0 ? synchronizedItems : [anchor];
-}
-
-function getSynchronizedLinkedCounterpartPair(
-  items: TimelineItem[],
-  leftId: string,
-  rightId: string,
-): { leftCounterpart: TimelineItem; rightCounterpart: TimelineItem } | null {
-  const leftCounterparts = getSynchronizedLinkedItems(items, leftId).filter((item) => item.id !== leftId);
-  const rightCounterparts = getSynchronizedLinkedItems(items, rightId).filter((item) => item.id !== rightId);
-
-  for (const leftCounterpart of leftCounterparts) {
-    const rightCounterpart = rightCounterparts.find((item) => (
-      item.trackId === leftCounterpart.trackId && item.type === leftCounterpart.type
-    ));
-    if (rightCounterpart) {
-      return { leftCounterpart, rightCounterpart };
-    }
-  }
-
-  return null;
-}
-
-function getMatchingSynchronizedLinkedCounterpart(
-  items: TimelineItem[],
-  itemId: string,
-  trackId: string,
-  type: TimelineItem['type'],
-): TimelineItem | null {
-  return getSynchronizedLinkedItems(items, itemId).find((item) => (
-    item.id !== itemId && item.trackId === trackId && item.type === type
-  )) ?? null;
-}
-
-function buildSynchronizedLinkedMoveUpdates(
-  items: TimelineItem[],
-  baseDeltaByItemId: ReadonlyMap<string, number>,
-): Array<{ id: string; from: number }> {
-  if (!useEditorStore.getState().linkedSelectionEnabled) {
-    return items.flatMap((item) => {
-      const delta = baseDeltaByItemId.get(item.id) ?? 0;
-      return delta !== 0
-        ? [{ id: item.id, from: item.from + delta }]
-        : [];
-    });
-  }
-
-  const deltaByItemId = new Map(baseDeltaByItemId);
-  const visited = new Set<string>();
-
-  for (const item of items) {
-    if (visited.has(item.id)) continue;
-
-    const synchronizedItems = getSynchronizedLinkedItems(items, item.id);
-    for (const synchronizedItem of synchronizedItems) {
-      visited.add(synchronizedItem.id);
-    }
-
-    if (synchronizedItems.length <= 1) continue;
-
-    const groupDelta = synchronizedItems.reduce((selected, synchronizedItem) => {
-      const candidate = baseDeltaByItemId.get(synchronizedItem.id) ?? 0;
-      return Math.abs(candidate) > Math.abs(selected) ? candidate : selected;
-    }, 0);
-
-    if (groupDelta === 0) continue;
-
-    for (const synchronizedItem of synchronizedItems) {
-      deltaByItemId.set(synchronizedItem.id, groupDelta);
-    }
-  }
-
-  return items.flatMap((item) => {
-    const delta = deltaByItemId.get(item.id) ?? 0;
-    return delta !== 0
-      ? [{ id: item.id, from: item.from + delta }]
-      : [];
-  });
+function isLinkedSelectionEnabled(): boolean {
+  return useEditorStore.getState().linkedSelectionEnabled;
 }
 
 export function addItem(item: TimelineItem): void {
@@ -392,7 +211,7 @@ export function linkItems(ids: string[]): boolean {
 }
 
 export function removeItems(ids: string[]): void {
-  const expandedIds = expandIdsWithLinkedItems(ids);
+  const expandedIds = expandIdsWithLinkedItems(useItemsStore.getState().items, ids, isLinkedSelectionEnabled());
   if (expandedIds.length === 0) return;
 
   execute('REMOVE_ITEMS', () => {
@@ -411,7 +230,7 @@ export function removeItems(ids: string[]): void {
 
 export function rippleDeleteItems(ids: string[]): void {
   const items = useItemsStore.getState().items;
-  const expandedIds = expandIdsWithLinkedItems(ids);
+  const expandedIds = expandIdsWithLinkedItems(items, ids, isLinkedSelectionEnabled());
   if (expandedIds.length === 0) return;
 
   const idsToDelete = new Set(expandedIds);
@@ -429,7 +248,7 @@ export function rippleDeleteItems(ids: string[]): void {
     }
   }
 
-  const updates = buildLinkedLeftShiftUpdates(remainingItems, baseShiftByItemId);
+  const updates = buildLinkedLeftShiftUpdates(remainingItems, baseShiftByItemId, isLinkedSelectionEnabled());
 
   execute('RIPPLE_DELETE_ITEMS', () => {
     useItemsStore.getState()._removeItems(expandedIds);
@@ -475,7 +294,7 @@ export function closeGapAtPosition(trackId: string, frame: number): void {
     }
   }
 
-  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId);
+  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId, isLinkedSelectionEnabled());
   if (updates.length === 0) return;
 
   execute('CLOSE_GAP', () => {
@@ -506,7 +325,7 @@ export function closeAllGapsOnTrack(trackId: string): void {
     cursor = newFrom + item.durationInFrames;
   }
 
-  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId);
+  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId, isLinkedSelectionEnabled());
   if (updates.length === 0) return;
 
   execute('CLOSE_ALL_GAPS', () => {
@@ -623,7 +442,7 @@ export function duplicateItemsWithTrackChanges(
 function applySynchronizedTrim(id: string, handle: 'start' | 'end', trimAmount: number): void {
   const itemsStore = useItemsStore.getState();
   const itemsBefore = itemsStore.items;
-  const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
+  const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id, isLinkedSelectionEnabled());
   const anchorBefore = synchronizedItems.find((item) => item.id === id);
   if (!anchorBefore) return;
 
@@ -707,7 +526,7 @@ export function splitItem(
   splitFrame: number
 ): { leftItem: TimelineItem; rightItem: TimelineItem } | null {
   const items = useItemsStore.getState().items;
-  const itemsToSplit = getLinkedItemsForEdit(items, id);
+  const itemsToSplit = getLinkedItemsForEdit(items, id, isLinkedSelectionEnabled());
 
   for (const item of itemsToSplit) {
     // Bounds check first â€” out-of-range splits are a silent no-op (handled by _splitItem),
@@ -832,7 +651,12 @@ export function joinItems(itemIds: string[]): void {
     if (itemsToJoin.length === 2) {
       const [leftItem, rightItem] = itemsToJoin;
       if (leftItem && rightItem) {
-        const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(items, leftItem.id, rightItem.id);
+        const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(
+          items,
+          leftItem.id,
+          rightItem.id,
+          isLinkedSelectionEnabled(),
+        );
         if (counterpartPair) {
           joinGroups.push([counterpartPair.leftCounterpart.id, counterpartPair.rightCounterpart.id]);
         }
@@ -899,7 +723,7 @@ export function rateStretchItem(
   execute('RATE_STRETCH_ITEM', () => {
     const itemsStore = useItemsStore.getState();
     const itemsBefore = itemsStore.items;
-    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id, isLinkedSelectionEnabled());
     const anchorBefore = synchronizedItems.find((item) => item.id === id);
     if (!anchorBefore) return;
 
@@ -1103,7 +927,7 @@ export function resetSpeedWithRipple(itemIds: string[]): void {
       const currentSpeed = item.speed || 1;
       if (Math.abs(currentSpeed - 1) <= TOLERANCE) continue;
 
-      const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsStore.items, id);
+      const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsStore.items, id, isLinkedSelectionEnabled());
       for (const si of synchronizedItems) processedIds.add(si.id);
 
       const sourceFps = item.sourceFps ?? fps;
@@ -1471,7 +1295,7 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
     const itemsBefore = itemsStore.items;
     const item = itemsBefore.find((i) => i.id === id);
     if (!item) return;
-    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id, isLinkedSelectionEnabled());
     const synchronizedIds = new Set(synchronizedItems.map((synchronizedItem) => synchronizedItem.id));
     const oldById = new Map(synchronizedItems.map((synchronizedItem) => [synchronizedItem.id, synchronizedItem]));
 
@@ -1550,7 +1374,11 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
         }
       }
 
-      const updates = buildSynchronizedLinkedMoveUpdates(freshItems, baseDeltaByItemId);
+      const updates = buildSynchronizedLinkedMoveUpdatesForEdit(
+        freshItems,
+        baseDeltaByItemId,
+        isLinkedSelectionEnabled(),
+      );
       if (updates.length > 0) {
         itemsStore._moveItems(updates);
       }
@@ -1585,7 +1413,12 @@ export function rollingTrimItems(leftId: string, rightId: string, editPointDelta
   execute('ROLLING_EDIT', () => {
     const itemsStore = useItemsStore.getState();
     const itemsBefore = itemsStore.items;
-    const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(itemsBefore, leftId, rightId);
+    const counterpartPair = getSynchronizedLinkedCounterpartPairForEdit(
+      itemsBefore,
+      leftId,
+      rightId,
+      isLinkedSelectionEnabled(),
+    );
     const rightBefore = itemsBefore.find((item) => item.id === rightId);
     if (!rightBefore) return;
 
@@ -1642,7 +1475,7 @@ export function slipItem(id: string, slipDelta: number): void {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     if (item.type !== 'video' && item.type !== 'audio' && item.type !== 'composition') return;
-    const synchronizedItems = getSynchronizedLinkedItemsForEdit(items, id);
+    const synchronizedItems = getSynchronizedLinkedItemsForEdit(items, id, isLinkedSelectionEnabled());
 
     const sourceStart = item.sourceStart ?? 0;
     const sourceEnd = item.sourceEnd;
@@ -1709,13 +1542,25 @@ export function slideItem(
       useTimelineSettingsStore.getState().fps,
     );
     if (clampedSlideDelta === 0) return;
-    const synchronizedCounterpart = getSynchronizedLinkedItemsForEdit(items, id)
+    const synchronizedCounterpart = getSynchronizedLinkedItemsForEdit(items, id, isLinkedSelectionEnabled())
       .find((candidate) => candidate.id !== id) ?? null;
     const leftCounterpart = synchronizedCounterpart && leftNeighborId
-      ? getMatchingSynchronizedLinkedCounterpartForEdit(items, leftNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+      ? getMatchingSynchronizedLinkedCounterpartForEdit(
+        items,
+        leftNeighborId,
+        synchronizedCounterpart.trackId,
+        synchronizedCounterpart.type,
+        isLinkedSelectionEnabled(),
+      )
       : null;
     const rightCounterpart = synchronizedCounterpart && rightNeighborId
-      ? getMatchingSynchronizedLinkedCounterpartForEdit(items, rightNeighborId, synchronizedCounterpart.trackId, synchronizedCounterpart.type)
+      ? getMatchingSynchronizedLinkedCounterpartForEdit(
+        items,
+        rightNeighborId,
+        synchronizedCounterpart.trackId,
+        synchronizedCounterpart.type,
+        isLinkedSelectionEnabled(),
+      )
       : null;
     const itemFromBefore = item.from;
     const itemSourceStartBefore = item.sourceStart;

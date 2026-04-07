@@ -4,6 +4,7 @@ import { createLogger } from '@/shared/logging/logger';
 const logger = createLogger('TimelineTrack');
 import type { TimelineTrack as TimelineTrackType, TimelineItem as TimelineItemType } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
+import { TimelineDropGhostPreviews } from './timeline-drop-ghost-previews';
 import { TimelineItem } from './timeline-item';
 import { TransitionItem } from './transition-item';
 import { useTimelineStore } from '../stores/timeline-store';
@@ -60,8 +61,6 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
-  getGhostHighlightClasses,
-  getGhostPreviewItemClasses,
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
@@ -135,10 +134,6 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const ghostPreviews = useMemo(
     () => allGhostPreviews.filter((ghost) => ghost.targetTrackId === track.id),
     [allGhostPreviews, track.id]
-  );
-  const ghostHighlightClasses = useMemo(
-    () => getGhostHighlightClasses(ghostPreviews),
-    [ghostPreviews]
   );
 
   const getDropFrame = useCallback((event: React.DragEvent): number | null => {
@@ -809,27 +804,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           onMouseDown={handleMouseDown}
           onContextMenu={handleContextMenu}
         >
-          {isDragOver && !isDropDisabled && !isExternalDragOver && ghostPreviews.length === 0 && (
-            <div className="absolute inset-0 pointer-events-none z-10 rounded border border-dashed border-primary/50 bg-primary/10" />
+          {!isDropDisabled && (
+            <TimelineDropGhostPreviews
+              ghostPreviews={ghostPreviews}
+              showEmptyOverlay={isDragOver && !isExternalDragOver && ghostPreviews.length === 0}
+              variant="track"
+            />
           )}
-
-          {!isDropDisabled && ghostPreviews.length > 0 && (
-            <div className={`absolute inset-0 pointer-events-none z-10 rounded border border-dashed ${ghostHighlightClasses}`} />
-          )}
-
-          {/* Ghost preview clips during drag */}
-          {!isDropDisabled && ghostPreviews.map((ghost, index) => (
-            <div
-              key={index}
-              className={`absolute inset-y-0 rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 ${getGhostPreviewItemClasses(ghost.type)}`}
-              style={{
-                left: `${ghost.left}px`,
-                width: `${ghost.width}px`,
-              }}
-            >
-              <span className="text-xs text-foreground/70 truncate">{ghost.label}</span>
-            </div>
-          ))}
 
           {/* Render all items for this track - dimmed when track is hidden */}
           {trackItems.map((item) => (

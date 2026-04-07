@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
 import { createLogger } from '@/shared/logging/logger';
+import { TimelineDropGhostPreviews } from './timeline-drop-ghost-previews';
 import { useTimelineZoomContext } from '../contexts/timeline-zoom-context';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useCompositionsStore } from '../stores/compositions-store';
@@ -45,8 +46,6 @@ import {
   type DroppedMediaEntry,
 } from '../utils/drop-execution';
 import {
-  getGhostHighlightClasses,
-  getGhostPreviewItemClasses,
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
@@ -84,10 +83,6 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   const ghostPreviews = useMemo(
     () => allGhostPreviews.filter((ghost) => ghost.targetZone === zone),
     [allGhostPreviews, zone]
-  );
-  const ghostHighlightClasses = useMemo(
-    () => getGhostHighlightClasses(ghostPreviews),
-    [ghostPreviews]
   );
 
   const getDropFrame = useCallback((event: React.DragEvent): number | null => {
@@ -721,28 +716,11 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {isDragOver && !isExternalDragOver && ghostPreviews.length === 0 && (
-        <div className="absolute inset-0 pointer-events-none z-10 rounded border border-dashed border-primary/50 bg-primary/10" />
-      )}
-
-      {ghostPreviews.length > 0 && (
-        <div className={`absolute inset-0 pointer-events-none z-10 rounded border border-dashed ${ghostHighlightClasses}`} />
-      )}
-
-      {ghostPreviews.map((ghost, index) => (
-        <div
-          key={`${ghost.label}-${index}`}
-          className={`absolute rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 ${getGhostPreviewItemClasses(ghost.type)}`}
-          style={{
-            left: `${ghost.left}px`,
-            width: `${ghost.width}px`,
-            top: 0,
-            height: '100%',
-          }}
-        >
-          <span className="truncate text-[10px] font-medium text-foreground/80">{ghost.label}</span>
-        </div>
-      ))}
+      <TimelineDropGhostPreviews
+        ghostPreviews={ghostPreviews}
+        showEmptyOverlay={isDragOver && !isExternalDragOver && ghostPreviews.length === 0}
+        variant="zone"
+      />
     </div>
   );
 });

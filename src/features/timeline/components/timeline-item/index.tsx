@@ -56,9 +56,7 @@ import { SegmentStatusOverlays } from './segment-status-overlays';
 import { ToolOperationOverlay } from './tool-operation-overlay';
 import { supportsVisualFadeControls } from './visual-fade-items';
 import {
-  getTimelineItemDragParticipation,
   getTimelineItemGestureMode,
-  shouldDimTimelineItemForDrag,
 } from './drag-visual-mode';
 import { getTimelineClipLabelRowHeightPx } from './hover-layout';
 import {
@@ -67,6 +65,7 @@ import {
   getStretchOperationBoundsVisual,
   getTrimOperationBoundsVisual,
 } from './tool-operation-overlay-utils';
+import { useDragVisualState } from './use-drag-visual-state';
 import { AnchorDragGhost, FollowerDragGhost } from './drag-ghosts';
 import { DragBlockedTooltip } from './drag-blocked-tooltip';
 import { ItemContextMenu } from './item-context-menu';
@@ -313,12 +312,8 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     };
   }, [isEffectDropTarget]);
 
-  // Track if this item or neighbors are being dragged (for join indicators)
-  const [dragAffectsJoin, setDragAffectsJoin] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
-
-  // Ref for transform style (updated via RAF for smooth dragging without re-renders)
   const transformRef = useRef<HTMLDivElement>(null);
-  const ghostRef = useRef<HTMLDivElement>(null); // Ghost element for alt-drag followers
+  const ghostRef = useRef<HTMLDivElement>(null);
 
   // Drag-and-drop functionality (local state for anchor item) - disabled if track is locked
   const { isDragging, dragOffset, handleDragStart } = useTimelineDrag(item, timelineDuration, trackLocked, transformRef);
@@ -389,182 +384,20 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
     };
   }, [activeGlobalCursorClass]);
 
-  const wasDraggingRef = useRef(false);
-
-  // Track drag participation via ref subscription - NO RE-RENDERS on drag state changes
-  const isAnyDragActiveRef = useRef(false);
-  const dragWasActiveRef = useRef(false);
-  const dragParticipationRef = useRef(0); // 0 = not participating, 1 = participating, 2 = participating + alt
-  const rafIdRef = useRef<number | null>(null);
-
-  // PERFORMANCE: Use refs for item properties accessed in subscription callbacks
-  // This prevents effect recreation on every position change during drag
-  const itemFromRef = useRef(item.from);
-  const itemDurationRef = useRef(item.durationInFrames);
-  const itemTrackIdRef = useRef(item.trackId);
-  itemFromRef.current = item.from;
-  itemDurationRef.current = item.durationInFrames;
-  itemTrackIdRef.current = item.trackId;
-
-  // Single subscription for all drag state tracking - manages RAF loop directly
-  useEffect(() => {
-    const updateTransform = () => {
-      if (!transformRef.current) return;
-
-      const participation = dragParticipationRef.current;
-      const isPartOfDrag = participation > 0 && !isDragging;
-      const isAltDrag = participation === 2;
-
-      if (isPartOfDrag) {
-        const offset = dragPreviewOffsetByItemRef.current[item.id] ?? dragOffsetRef.current;
-
-        if (isAltDrag) {
-          // Alt-drag: keep item in place, move ghost
-          transformRef.current.style.transform = '';
-          transformRef.current.style.opacity = '';
-          transformRef.current.style.transition = 'none';
-          transformRef.current.style.pointerEvents = 'none';
-
-          if (ghostRef.current) {
-            ghostRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
-            ghostRef.current.style.display = 'block';
-          }
-        } else {
-          // Normal drag: move item
-          transformRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
-          transformRef.current.style.opacity = String(DRAG_OPACITY);
-          transformRef.current.style.transition = 'none';
-          transformRef.current.style.pointerEvents = 'none';
-          transformRef.current.style.zIndex = '50';
-
-          if (ghostRef.current) {
-            ghostRef.current.style.display = 'none';
-          }
-        }
-        rafIdRef.current = requestAnimationFrame(updateTransform);
-      }
-    };
-
-    const cleanupDragStyles = () => {
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-      if (transformRef.current) {
-        transformRef.current.style.transition = 'none';
-        transformRef.current.style.transform = '';
-        // Clear imperative opacity so React's inline style takes precedence
-        transformRef.current.style.opacity = '';
-        transformRef.current.style.pointerEvents = '';
-        transformRef.current.style.zIndex = '';
-      }
-      if (ghostRef.current) {
-        ghostRef.current.style.display = 'none';
-      }
-    };
-
-    let dragWasActiveTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const unsubscribe = useSelectionStore.subscribe((state) => {
-      const wasDragActive = isAnyDragActiveRef.current;
-      const isDragActive = !!state.dragState?.isDragging;
-      isAnyDragActiveRef.current = isDragActive;
-
-      // Update join indicator visibility based on whether this item or neighbors are dragged
-      // Use refs for item properties to avoid effect recreation on position changes
-      if (isDragActive && state.dragState?.draggedItemIds) {
-        const draggedIds = state.dragState.draggedItemIds;
-        const timelineState = useTimelineStore.getState();
-        const items = timelineState.items;
-        const currentFrom = itemFromRef.current;
-        const currentDuration = itemDurationRef.current;
-        const currentTrackId = itemTrackIdRef.current;
-
-        // Find current neighbors using refs
-        const leftNeighbor = items.find(
-          (other) => other.id !== item.id && other.trackId === currentTrackId &&
-            other.from + other.durationInFrames === currentFrom
-        );
-        const rightNeighbor = items.find(
-          (other) => other.id !== item.id && other.trackId === currentTrackId &&
-            other.from === currentFrom + currentDuration
-        );
-
-        const newLeft = !!(draggedIds.includes(item.id) || (leftNeighbor && draggedIds.includes(leftNeighbor.id)));
-        const newRight = !!(draggedIds.includes(item.id) || (rightNeighbor && draggedIds.includes(rightNeighbor.id)));
-
-        setDragAffectsJoin(prev =>
-          prev.left === newLeft && prev.right === newRight ? prev : { left: newLeft, right: newRight }
-        );
-      } else if (wasDragActive && !isDragActive) {
-        setDragAffectsJoin(prev =>
-          !prev.left && !prev.right ? prev : { left: false, right: false }
-        );
-      }
-
-      // Track when drag ends to prevent click from clearing group selection
-      if (wasDragActive && !isDragActive) {
-        dragWasActiveRef.current = true;
-        if (dragWasActiveTimeout) clearTimeout(dragWasActiveTimeout);
-        dragWasActiveTimeout = setTimeout(() => {
-          dragWasActiveRef.current = false;
-        }, 100);
-      }
-
-      // Trim/stretch/slip/slide use dragState as a gesture lifecycle signal for
-      // snap indicators and overlays, but they should never enter move-drag
-      // visual mode (dimmed opacity / drag ghost transform).
-      const newParticipation = getTimelineItemDragParticipation({
-        itemId: item.id,
-        dragState: state.dragState,
-        gestureMode,
-      });
-      const oldParticipation = dragParticipationRef.current;
-
-      dragParticipationRef.current = newParticipation;
-
-      // Start RAF loop when becoming a drag participant (not anchor)
-      if (oldParticipation === 0 && newParticipation > 0 && !isDragging) {
-        rafIdRef.current = requestAnimationFrame(updateTransform);
-      }
-
-      // Cleanup when drag ends
-      if (oldParticipation > 0 && newParticipation === 0) {
-        cleanupDragStyles();
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      cleanupDragStyles();
-      if (dragWasActiveTimeout) clearTimeout(dragWasActiveTimeout);
-    };
-  }, [gestureMode, item.id, isDragging]);
-
-  // Computed values from refs for rendering
-  const isPartOfMultiDrag = dragParticipationRef.current > 0;
-  const isAltDrag = dragParticipationRef.current === 2;
-  const isPartOfDrag = isPartOfMultiDrag && !isDragging;
-
-  // Disable transition when anchor item drag ends to avoid animation
-  useEffect(() => {
-    if (wasDraggingRef.current && !isDragging && transformRef.current) {
-      transformRef.current.style.transition = 'none';
-      requestAnimationFrame(() => {
-        if (transformRef.current) {
-          transformRef.current.style.transition = '';
-        }
-      });
-    }
-    wasDraggingRef.current = isDragging;
-  }, [isDragging]);
-
-  // Determine if this item is being dragged (anchor or follower)
-  const isBeingDragged = isDragging || isPartOfDrag;
-  const shouldDimForDrag = shouldDimTimelineItemForDrag({
-    isBeingDragged,
+  const {
+    dragAffectsJoin,
+    isAnyDragActiveRef,
+    dragWasActiveRef,
     isAltDrag,
+    isPartOfDrag,
+    isBeingDragged,
+    shouldDimForDrag,
+  } = useDragVisualState({
+    item,
     gestureMode,
+    isDragging,
+    transformRef,
+    ghostRef,
   });
 
   const linkedEditPreviewUpdate = useLinkedEditPreviewStore(
