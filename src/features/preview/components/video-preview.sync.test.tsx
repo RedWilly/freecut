@@ -2059,7 +2059,7 @@ describe('VideoPreview sync behavior', () => {
     });
   });
 
-  it('drops the transition overlay immediately after overlap end for same-origin A-A handoffs', async () => {
+  it('drops the transition overlay after cooldown for same-origin A-A handoffs', async () => {
     useItemsStore.getState().setTracks([
       {
         id: 'track-video',
@@ -2137,8 +2137,9 @@ describe('VideoPreview sync behavior', () => {
       expect(scrubCanvas.style.visibility).toBe('visible');
     });
 
+    // Advance past cooldown (same-origin now uses standard cooldown, not 0)
     act(() => {
-      usePlaybackStore.getState().setCurrentFrame(61);
+      usePlaybackStore.getState().setCurrentFrame(70);
     });
 
     await waitFor(() => {

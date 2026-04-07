@@ -1139,6 +1139,34 @@ export function usePreviewRenderPump({
           }
         }
         if (!(playbackTransitionState.hasActiveTransition || playbackTransitionState.shouldHoldOverlay)) {
+          // For same-origin transitions, the pool lane re-seeks at exit.
+          // Hold the overlay until a video element is near the right clip's
+          // target time so the Player doesn't flash stale left-clip content.
+          const sessionWindow = transitionSessionWindowRef.current;
+          if (
+            sessionWindow
+            && sessionWindow.rightClip.type === 'video'
+            && sessionWindow.leftClip.originId
+            && sessionWindow.leftClip.originId === sessionWindow.rightClip.originId
+          ) {
+            let targetTime: number | null = null;
+            try {
+              targetTime = getVideoItemSourceTimeSeconds(sessionWindow.rightClip, state.currentFrame, fps);
+            } catch { /* missing sourceFps in tests */ }
+            if (targetTime !== null) {
+              const allVideos = document.querySelectorAll('video');
+              const readyVideos = Array.from(allVideos).filter(v => v.videoWidth > 0 && v.readyState >= 2);
+              const ready = readyVideos.length === 0 || readyVideos.some(
+                v => Math.abs(v.currentTime - targetTime!) < 0.06,
+              );
+              if (!ready) {
+                // Pool lane still seeking — render this frame on the overlay
+                scrubRequestedFrameRef.current = state.currentFrame;
+                void pumpRenderLoop();
+                return;
+              }
+            }
+          }
           if (!playbackTransitionState.shouldPrewarm) {
             clearTransitionPlaybackSession();
           }

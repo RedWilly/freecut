@@ -1,4 +1,17 @@
 import { describe, expect, it } from 'vitest';
+
+/** Compare Map<string, number[]> values with floating-point tolerance. */
+function expectMapCloseTo(actual: Map<string, number[]>, expected: Map<string, number[]>, precision = 4) {
+  expect(actual.size).toBe(expected.size);
+  for (const [key, expectedValues] of expected) {
+    const actualValues = actual.get(key);
+    expect(actualValues).toBeDefined();
+    expect(actualValues!.length).toBe(expectedValues.length);
+    for (let i = 0; i < expectedValues.length; i++) {
+      expect(actualValues![i]).toBeCloseTo(expectedValues[i]!, precision);
+    }
+  }
+}
 import type { TimelineTrack, VideoItem } from '@/types/timeline';
 import {
   collectClipVideoSourceTimesBySrcForFrame,
@@ -70,11 +83,12 @@ describe('render pump preseek helpers', () => {
       ]),
     ];
 
-    expect(
+    expectMapCloseTo(
       collectVisibleTrackVideoSourceTimesBySrc(tracks, 10, 30),
-    ).toEqual(new Map([
-      ['same.mp4', [10 / 30, 40 / 30]],
-    ]));
+      new Map([
+        ['same.mp4', [10 / 30, 40 / 30]],
+      ]),
+    );
   });
 
   it('collects transition clip source times for a frame range', () => {
@@ -83,14 +97,15 @@ describe('render pump preseek helpers', () => {
       makeVideoItem({ id: 'right', src: 'right.mp4', from: 40, durationInFrames: 20, sourceStart: 90, sourceFps: 30, speed: 1 }),
     ];
 
-    expect(
+    expectMapCloseTo(
       collectClipVideoSourceTimesBySrcForFrameRange(items, 40, 3, 30, {
         requireExplicitSourceFps: true,
       }),
-    ).toEqual(new Map([
-      ['left.mp4', [0, 1 / 30, 2 / 30]],
-      ['right.mp4', [3, 3 + (1 / 30), 3 + (2 / 30)]],
-    ]));
+      new Map([
+        ['left.mp4', [0, 1 / 30, 2 / 30]],
+        ['right.mp4', [3, 3 + (1 / 30), 3 + (2 / 30)]],
+      ]),
+    );
   });
 
   it('collects transition clip source times for a single frame', () => {
@@ -99,14 +114,15 @@ describe('render pump preseek helpers', () => {
       makeVideoItem({ id: 'right', src: 'right.mp4', from: 40, durationInFrames: 20, sourceStart: 60, sourceFps: 30, speed: 1 }),
     ];
 
-    expect(
+    expectMapCloseTo(
       collectClipVideoSourceTimesBySrcForFrame(items, 41, 30, {
         requireExplicitSourceFps: true,
       }),
-    ).toEqual(new Map([
-      ['left.mp4', [1 / 30]],
-      ['right.mp4', [(60 / 30) + (1 / 30)]],
-    ]));
+      new Map([
+        ['left.mp4', [1 / 30]],
+        ['right.mp4', [(60 / 30) + (1 / 30)]],
+      ]),
+    );
   });
 
   it('collects variable-speed playback-start prewarm ids and preseek targets', () => {
