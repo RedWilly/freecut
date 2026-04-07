@@ -42,6 +42,7 @@ import { useTimelineCommandStore } from '../stores/timeline-command-store';
 import { captureSnapshot } from '../stores/commands/snapshot';
 import type { TimelineSnapshot } from '../stores/commands/types';
 import { usePlaybackStore } from '@/shared/state/playback';
+import { useEditorStore } from '@/shared/state/editor';
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
 import {
   DEFAULT_BEZIER_POINTS,
@@ -372,9 +373,12 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   // Use _updateKeyframe directly (no undo per call) for dragging
   const _updateKeyframe = useKeyframesStore((s) => s._updateKeyframe);
   const currentProject = useProjectStore((s) => s.currentProject);
+  const setKeyframeEditorShortcutScopeActive = useEditorStore((s) => s.setKeyframeEditorShortcutScopeActive);
 
   // Ref to store snapshot captured on drag start for undo batching
   const dragSnapshotRef = useRef<TimelineSnapshot | null>(null);
+  const [isPointerWithinEditor, setIsPointerWithinEditor] = useState(false);
+  const [isFocusWithinEditor, setIsFocusWithinEditor] = useState(false);
 
   // Keyframe selection
   const selectedKeyframes = useKeyframeSelectionStore((s) => s.selectedKeyframes);
@@ -414,6 +418,29 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
       // ignore localStorage write errors
     }
   }, [editorMode]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsPointerWithinEditor(false);
+      setIsFocusWithinEditor(false);
+      setKeyframeEditorShortcutScopeActive(false);
+      return;
+    }
+
+    setKeyframeEditorShortcutScopeActive(isPointerWithinEditor || isFocusWithinEditor);
+  }, [
+    isFocusWithinEditor,
+    isOpen,
+    isPointerWithinEditor,
+    setKeyframeEditorShortcutScopeActive,
+  ]);
+
+  useEffect(
+    () => () => {
+      setKeyframeEditorShortcutScopeActive(false);
+    },
+    [setKeyframeEditorShortcutScopeActive]
+  );
 
   const canvas = useMemo<CanvasSettings>(() => ({
     width: currentProject?.metadata.width ?? 1920,
@@ -1280,6 +1307,16 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   return (
     <div
       ref={panelRef}
+      onPointerEnter={() => setIsPointerWithinEditor(true)}
+      onPointerLeave={() => setIsPointerWithinEditor(false)}
+      onFocusCapture={() => setIsFocusWithinEditor(true)}
+      onBlurCapture={(event) => {
+        const nextFocused = event.relatedTarget as Node | null;
+        if (event.currentTarget.contains(nextFocused)) {
+          return;
+        }
+        setIsFocusWithinEditor(false);
+      }}
       className={cn(
         'flex-shrink-0 bg-background overflow-hidden',
         placement === 'top' ? 'border-b border-border' : 'border-t border-border',

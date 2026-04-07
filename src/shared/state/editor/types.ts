@@ -5,6 +5,7 @@ export interface EditorState {
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
   keyframeEditorOpen: boolean;
+  keyframeEditorShortcutScopeActive: boolean;
   activeTab: 'media' | 'text' | 'shapes' | 'effects' | 'transitions' | 'ai';
   clipInspectorTab: ClipInspectorTab;
   sidebarWidth: number;
@@ -29,6 +30,7 @@ export interface EditorActions {
   setLeftSidebarOpen: (open: boolean) => void;
   setRightSidebarOpen: (open: boolean) => void;
   setKeyframeEditorOpen: (open: boolean) => void;
+  setKeyframeEditorShortcutScopeActive: (active: boolean) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   toggleKeyframeEditorOpen: () => void;

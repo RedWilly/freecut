@@ -16,6 +16,7 @@ import type { TransformProperties } from '@/types/transform';
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts';
 import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog';
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings';
+import { useKeyframeSelectionStore } from '../../stores/keyframe-selection-store';
 
 export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const hotkeys = useResolvedHotkeys();
@@ -23,6 +24,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId);
   const selectedTransitionId = useSelectionStore((s) => s.selectedTransitionId);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
+  const selectedKeyframes = useKeyframeSelectionStore((s) => s.selectedKeyframes);
   const removeItems = useTimelineStore((s) => s.removeItems);
   const removeMarker = useTimelineStore((s) => s.removeMarker);
   const removeTransition = useTimelineStore((s) => s.removeTransition);
@@ -31,7 +33,11 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const joinItems = useTimelineStore((s) => s.joinItems);
   const splitItem = useTimelineStore((s) => s.splitItem);
   const items = useTimelineStore((s) => s.items);
+  const keyframeEditorOpen = useEditorStore((s) => s.keyframeEditorOpen);
+  const keyframeEditorShortcutScopeActive = useEditorStore((s) => s.keyframeEditorShortcutScopeActive);
   const toggleLinkedSelectionEnabled = useEditorStore((s) => s.toggleLinkedSelectionEnabled);
+  const keyframeSelectionOwnsDeleteShortcut = keyframeEditorShortcutScopeActive
+    || (keyframeEditorOpen && selectedKeyframes.length > 0);
 
   const nudgeSelectedVisualItems = useCallback((deltaX: number, deltaY: number) => {
     if (selectedItemIds.length === 0) return;
@@ -60,6 +66,10 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   useHotkeys(
     hotkeys.DELETE_SELECTED,
     (event) => {
+      if (keyframeSelectionOwnsDeleteShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (selectedTransitionId) {
         event.preventDefault();
         removeTransition(selectedTransitionId);
@@ -81,13 +91,17 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       }
     },
     HOTKEY_OPTIONS,
-    [selectedItemIds, selectedMarkerId, selectedTransitionId, removeItems, removeMarker, removeTransition, clearSelection, callbacks]
+    [keyframeSelectionOwnsDeleteShortcut, selectedItemIds, selectedMarkerId, selectedTransitionId, removeItems, removeMarker, removeTransition, clearSelection, callbacks]
   );
 
   // Editing: Backspace - Delete selected items, marker, or transition (alternative)
   useHotkeys(
     hotkeys.DELETE_SELECTED_ALT,
     (event) => {
+      if (keyframeSelectionOwnsDeleteShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (selectedTransitionId) {
         event.preventDefault();
         removeTransition(selectedTransitionId);
@@ -109,13 +123,17 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       }
     },
     HOTKEY_OPTIONS,
-    [selectedItemIds, selectedMarkerId, selectedTransitionId, removeItems, removeMarker, removeTransition, clearSelection, callbacks]
+    [keyframeSelectionOwnsDeleteShortcut, selectedItemIds, selectedMarkerId, selectedTransitionId, removeItems, removeMarker, removeTransition, clearSelection, callbacks]
   );
 
   // Editing: Ctrl+Delete - Ripple delete selected items (delete + close gap)
   useHotkeys(
     hotkeys.RIPPLE_DELETE,
     (event) => {
+      if (keyframeSelectionOwnsDeleteShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (selectedItemIds.length > 0) {
         event.preventDefault();
         rippleDeleteItems(selectedItemIds);
@@ -126,13 +144,17 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       }
     },
     HOTKEY_OPTIONS,
-    [selectedItemIds, rippleDeleteItems, clearSelection, callbacks]
+    [keyframeSelectionOwnsDeleteShortcut, selectedItemIds, rippleDeleteItems, clearSelection, callbacks]
   );
 
   // Editing: Ctrl+Backspace - Ripple delete selected items (alternative)
   useHotkeys(
     hotkeys.RIPPLE_DELETE_ALT,
     (event) => {
+      if (keyframeSelectionOwnsDeleteShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (selectedItemIds.length > 0) {
         event.preventDefault();
         rippleDeleteItems(selectedItemIds);
@@ -143,7 +165,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       }
     },
     HOTKEY_OPTIONS,
-    [selectedItemIds, rippleDeleteItems, clearSelection, callbacks]
+    [keyframeSelectionOwnsDeleteShortcut, selectedItemIds, rippleDeleteItems, clearSelection, callbacks]
   );
 
   // Editing: Shift+Arrow keys - nudge selected visual items by 1px

@@ -40,6 +40,7 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   leftSidebarOpen: true,
   rightSidebarOpen: true,
   keyframeEditorOpen: false,
+  keyframeEditorShortcutScopeActive: false,
   activeTab: 'media',
   clipInspectorTab: 'video',
   sidebarWidth: loadSidebarWidth('editor:sidebarWidth', EDITOR_LAYOUT.leftSidebarDefaultWidth),
@@ -73,14 +74,17 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   setRightSidebarOpen: (open) => set({ rightSidebarOpen: open }),
   setKeyframeEditorOpen: (open) => set((state) => ({
     keyframeEditorOpen: open,
+    keyframeEditorShortcutScopeActive: open ? state.keyframeEditorShortcutScopeActive : false,
     leftSidebarOpen: open ? true : state.leftSidebarOpen,
   })),
+  setKeyframeEditorShortcutScopeActive: (active) => set({ keyframeEditorShortcutScopeActive: active }),
   toggleLeftSidebar: () => set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
   toggleRightSidebar: () => set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen })),
   toggleKeyframeEditorOpen: () => set((state) => {
     const nextOpen = !state.keyframeEditorOpen;
     return {
       keyframeEditorOpen: nextOpen,
+      keyframeEditorShortcutScopeActive: nextOpen ? state.keyframeEditorShortcutScopeActive : false,
       leftSidebarOpen: nextOpen ? true : state.leftSidebarOpen,
     };
   }),

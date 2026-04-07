@@ -18,6 +18,7 @@ describe('editor-store', () => {
       leftSidebarOpen: true,
       rightSidebarOpen: true,
       keyframeEditorOpen: false,
+      keyframeEditorShortcutScopeActive: false,
       activeTab: 'media',
       clipInspectorTab: 'video',
       sidebarWidth: editorLayout.leftSidebarDefaultWidth,
@@ -39,6 +40,7 @@ describe('editor-store', () => {
     expect(state.leftSidebarOpen).toBe(true);
     expect(state.rightSidebarOpen).toBe(true);
     expect(state.keyframeEditorOpen).toBe(false);
+    expect(state.keyframeEditorShortcutScopeActive).toBe(false);
     expect(state.activeTab).toBe('media');
     expect(state.clipInspectorTab).toBe('video');
     expect(state.sourcePreviewMediaId).toBe(null);
