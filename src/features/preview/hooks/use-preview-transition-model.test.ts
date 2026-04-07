@@ -123,7 +123,7 @@ describe('buildPreviewTransitionData', () => {
     });
 
     expect(result.playbackTransitionOverlayWindows).toEqual([
-      { startFrame: 35, endFrame: 45, cooldownFrames: 11 },
+      { startFrame: 35, endFrame: 45, cooldownFrames: 15 },
     ]);
   });
 });

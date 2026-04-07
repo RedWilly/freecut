@@ -149,7 +149,7 @@ export function buildPreviewTransitionData({
     const rightOriginId = window.rightClip.originId;
     const isSameOrigin = leftOriginId && rightOriginId && leftOriginId === rightOriginId;
     const cooldownFrames = isSameOrigin
-      ? Math.max(10, Math.round(fps * 0.35))
+      ? Math.max(12, Math.round(fps * 0.5))
       : playbackTransitionCooldownFrames;
 
     return {
