@@ -1154,13 +1154,18 @@ export function usePreviewRenderPump({
               targetTime = getVideoItemSourceTimeSeconds(sessionWindow.rightClip, state.currentFrame, fps);
             } catch { /* missing sourceFps in tests */ }
             if (targetTime !== null) {
+              // Exclude pinned shadow elements — those are at the right
+              // position but will unmount when the session clears.  We need
+              // the POOL LANE (primary Player element) to be ready.
+              const pinnedEls = transitionSessionPinnedElementsRef.current;
               const allVideos = document.querySelectorAll('video');
-              const readyVideos = Array.from(allVideos).filter(v => v.videoWidth > 0 && v.readyState >= 2);
-              const ready = readyVideos.length === 0 || readyVideos.some(
-                v => Math.abs(v.currentTime - targetTime!) < 0.06,
+              const poolCandidates = Array.from(allVideos).filter(v =>
+                v.videoWidth > 0 && v.readyState >= 2 && !Array.from(pinnedEls.values()).includes(v),
+              );
+              const ready = poolCandidates.length === 0 || poolCandidates.some(
+                v => Math.abs(v.currentTime - targetTime!) < 0.1,
               );
               if (!ready) {
-                // Pool lane still seeking — render this frame on the overlay
                 scrubRequestedFrameRef.current = state.currentFrame;
                 void pumpRenderLoop();
                 return;
