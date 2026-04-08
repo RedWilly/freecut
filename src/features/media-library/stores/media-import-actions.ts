@@ -23,8 +23,49 @@ interface ImportTask {
   file: File;
 }
 
+interface CompletedImportTask extends ImportTask {
+  metadata: ImportedMetadata;
+}
+
+function buildOptimisticMediaItem(handle: FileSystemFileHandle, file: File, tempId: string): MediaMetadata {
+  const now = Date.now();
+
+  return {
+    id: tempId,
+    storageType: 'handle',
+    fileHandle: handle,
+    fileName: file.name,
+    fileSize: file.size,
+    fileLastModified: file.lastModified,
+    mimeType: getMimeType(file),
+    duration: 0,
+    width: 0,
+    height: 0,
+    fps: 30,
+    codec: 'importing...',
+    bitrate: 0,
+    tags: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function removeImportPlaceholder(set: Set, tempId: string): void {
+  set((state) => ({
+    mediaItems: state.mediaItems.filter((item) => item.id !== tempId),
+    importingIds: state.importingIds.filter((id) => id !== tempId),
+  }));
+}
+
+function replaceImportPlaceholder(set: Set, tempId: string, metadata: MediaMetadata): void {
+  set((state) => ({
+    mediaItems: state.mediaItems.map((item) => (item.id === tempId ? metadata : item)),
+    importingIds: state.importingIds.filter((id) => id !== tempId),
+  }));
+}
+
 function processImportResults(
-  importResults: PromiseSettledResult<{ metadata: ImportedMetadata; tempId: string; file: File; handle: FileSystemFileHandle }>[],
+  importResults: PromiseSettledResult<CompletedImportTask>[],
   importTasks: ImportTask[],
   set: Set,
   options?: { includeDuplicatesInResults?: boolean }
@@ -35,26 +76,23 @@ function processImportResults(
   let importedCount = 0;
   let failedCount = 0;
 
-  for (const result of importResults) {
+  importResults.forEach((result, index) => {
+    const importTask = importTasks[index];
+    if (!importTask) {
+      return;
+    }
+
     if (result.status === 'fulfilled') {
       const { metadata, tempId, file, handle } = result.value;
 
       if (metadata.isDuplicate) {
-        set((state) => ({
-          mediaItems: state.mediaItems.filter((item) => item.id !== tempId),
-          importingIds: state.importingIds.filter((id) => id !== tempId),
-        }));
+        removeImportPlaceholder(set, tempId);
         duplicateNames.push(file.name);
         if (options?.includeDuplicatesInResults) {
           results.push(metadata);
         }
       } else {
-        set((state) => ({
-          mediaItems: state.mediaItems.map((item) =>
-            item.id === tempId ? metadata : item
-          ),
-          importingIds: state.importingIds.filter((id) => id !== tempId),
-        }));
+        replaceImportPlaceholder(set, tempId, metadata);
 
         if (metadata.mimeType.startsWith('video/')) {
           proxyService.setProxyKey(metadata.id, getSharedProxyKey(metadata));
@@ -72,18 +110,10 @@ function processImportResults(
       }
     } else {
       failedCount++;
-      const failedTask = importTasks.find(
-        (_, i) => importResults[i] === result
-      );
-      if (failedTask) {
-        set((state) => ({
-          mediaItems: state.mediaItems.filter((item) => item.id !== failedTask.tempId),
-          importingIds: state.importingIds.filter((id) => id !== failedTask.tempId),
-        }));
-        logger.error(`Failed to import ${failedTask.file.name}`, result.reason);
-      }
+      removeImportPlaceholder(set, importTask.tempId);
+      logger.error(`Failed to import ${importTask.file.name}`, result.reason);
     }
-  }
+  });
 
   return { results, importedCount, duplicateNames, unsupportedCodecFiles, failedCount };
 }
@@ -123,25 +153,7 @@ export function createImportActions(
       if (!handle) continue;
       const tempId = crypto.randomUUID();
       const file = await handle.getFile();
-
-      const tempItem: MediaMetadata = {
-        id: tempId,
-        storageType: 'handle',
-        fileHandle: handle,
-        fileName: file.name,
-        fileSize: file.size,
-        fileLastModified: file.lastModified,
-        mimeType: getMimeType(file),
-        duration: 0,
-        width: 0,
-        height: 0,
-        fps: 30,
-        codec: 'importing...',
-        bitrate: 0,
-        tags: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const tempItem = buildOptimisticMediaItem(handle, file, tempId);
 
       set((state) => ({
         mediaItems: [tempItem, ...state.mediaItems],
@@ -154,6 +166,17 @@ export function createImportActions(
 
     return importTasks;
   };
+
+  const runImportTasks = (
+    importTasks: ImportTask[],
+    projectId: string
+  ): Promise<PromiseSettledResult<CompletedImportTask>[]> =>
+    Promise.allSettled(
+      importTasks.map(async ({ handle, tempId, file }) => {
+        const metadata = await mediaLibraryService.importMediaWithHandle(handle, projectId);
+        return { metadata, tempId, file, handle };
+      })
+    );
 
   const importHandlesInternal = async (
     handles: FileSystemFileHandle[],
@@ -175,16 +198,7 @@ export function createImportActions(
     });
 
     const importTasks = await createOptimisticImportTasks(handles);
-
-    const importResults = await Promise.allSettled(
-      importTasks.map(async ({ handle, tempId, file }) => {
-        const metadata = await mediaLibraryService.importMediaWithHandle(
-          handle,
-          currentProjectId
-        );
-        return { metadata, tempId, file, handle };
-      })
-    );
+    const importResults = await runImportTasks(importTasks, currentProjectId);
 
     const { results, importedCount, duplicateNames, unsupportedCodecFiles, failedCount } =
       processImportResults(importResults, importTasks, set, options);
@@ -247,17 +261,7 @@ export function createImportActions(
 
         // Create optimistic placeholders for all files immediately
         const importTasks = await createOptimisticImportTasks(handles);
-
-        // Process all imports in parallel
-        const importResults = await Promise.allSettled(
-          importTasks.map(async ({ handle, tempId, file }) => {
-            const metadata = await mediaLibraryService.importMediaWithHandle(
-              handle,
-              currentProjectId
-            );
-            return { metadata, tempId, file, handle };
-          })
-        );
+        const importResults = await runImportTasks(importTasks, currentProjectId);
 
         const { results, importedCount, duplicateNames, unsupportedCodecFiles, failedCount } =
           processImportResults(importResults, importTasks, set);

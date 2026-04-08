@@ -5,6 +5,7 @@
   OrphanedClipInfo,
 } from '../types';
 import type { TimelineItem } from '@/types/timeline';
+import type { MediaMetadata } from '@/types/storage';
 import { mediaLibraryService } from '../services/media-library-service';
 import {
   removeProjectItems,
@@ -22,6 +23,24 @@ type Set = (
     | ((state: MediaLibraryState & MediaLibraryActions) => Partial<MediaLibraryState>)
 ) => void;
 type Get = () => MediaLibraryState & MediaLibraryActions;
+
+function replaceMediaItem(set: Set, mediaId: string, updated: MediaMetadata): void {
+  set((state) => ({
+    mediaItems: state.mediaItems.map((item) => (item.id === mediaId ? updated : item)),
+  }));
+}
+
+function applySuccessfulRelink(
+  set: Set,
+  get: Get,
+  mediaId: string,
+  updated: MediaMetadata
+): void {
+  // Invalidate stale blob URL so preview re-fetches from the new handle.
+  blobUrlManager.invalidate(mediaId);
+  replaceMediaItem(set, mediaId, updated);
+  get().markMediaHealthy(mediaId);
+}
 
 export function createRelinkingActions(
   set: Set,
@@ -75,19 +94,7 @@ export function createRelinkingActions(
           mediaId,
           newHandle
         );
-
-        // Invalidate stale blob URL so preview re-fetches from the new handle
-        blobUrlManager.invalidate(mediaId);
-
-        // Update local state
-        set((state) => ({
-          mediaItems: state.mediaItems.map((item) =>
-            item.id === mediaId ? updated : item
-          ),
-        }));
-
-        // Clear broken status
-        get().markMediaHealthy(mediaId);
+        applySuccessfulRelink(set, get, mediaId, updated);
         get().showNotification({
           type: 'success',
           message: `"${updated.fileName}" relinked successfully`,
@@ -115,19 +122,7 @@ export function createRelinkingActions(
             mediaId,
             handle
           );
-
-          // Invalidate stale blob URL so preview re-fetches from the new handle
-          blobUrlManager.invalidate(mediaId);
-
-          // Update local state
-          set((state) => ({
-            mediaItems: state.mediaItems.map((item) =>
-              item.id === mediaId ? updated : item
-            ),
-          }));
-
-          // Clear broken status
-          get().markMediaHealthy(mediaId);
+          applySuccessfulRelink(set, get, mediaId, updated);
           success.push(mediaId);
         } catch (error) {
           logger.error(
