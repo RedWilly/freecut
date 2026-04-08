@@ -20,6 +20,7 @@ import {
   THUMBNAIL_WIDTH,
 } from '@/features/timeline/constants';
 import { filmstripOPFSStorage, type FilmstripFrame } from './filmstrip-opfs-storage';
+import { FilmstripMemoryState } from './filmstrip-memory-state';
 import type { ExtractRequest, WorkerResponse } from '../workers/filmstrip-extraction-worker';
 
 export { THUMBNAIL_WIDTH };
@@ -62,7 +63,6 @@ const PROGRESS_NOTIFY_INTERVAL_MS = 200;
 const PROGRESS_NOTIFY_FRAME_DELTA = 4;
 const IMAGE_FORMAT = 'image/jpeg';
 const IMAGE_QUALITY = 0.7;
-const FRAME_MEMORY_FALLBACK_BYTES = FILMSTRIP_EXTRACT_WIDTH * FILMSTRIP_EXTRACT_HEIGHT * 4;
 const MAX_IDLE_WORKERS_BASE = 2;
 const WORKER_PARALLEL_SAVES_BASE = 2;
 const WORKER_PARALLEL_SAVES_MEMORY_PRESSURE = 2;
@@ -164,16 +164,9 @@ export interface FilmstripMetricsSnapshot {
   recent: ExtractionMetricSample[];
 }
 
-interface CacheEntryMeta {
-  sizeBytes: number;
-  lastAccessedAt: number;
-}
-
 class FilmstripCacheService {
   private cache = new Map<string, Filmstrip>();
-  private cacheMeta = new Map<string, CacheEntryMeta>();
-  private cacheBytes = 0;
-  private idleEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly memoryState = new FilmstripMemoryState();
   private pendingExtractions = new Map<string, PendingExtraction>();
   private updateCallbacks = new Map<string, Set<FilmstripUpdateCallback>>();
   private loadingPromises = new Map<string, Promise<Filmstrip>>();
@@ -197,6 +190,10 @@ class FilmstripCacheService {
   };
   private metricsHistory: ExtractionMetricSample[] = [];
   private lastMemoryCheckAt = 0;
+
+  private get cacheBytes(): number {
+    return this.memoryState.sizeBytes;
+  }
 
   private getQueueScore(mediaId: string): number {
     const pending = this.pendingExtractions.get(mediaId);
@@ -260,52 +257,20 @@ class FilmstripCacheService {
     return this.cacheBytes >= MEMORY_TARGET_BYTES;
   }
 
-  private estimateFilmstripBytes(frames: FilmstripFrame[]): number {
-    let total = 0;
-    for (const frame of frames) {
-      total += frame.byteSize && frame.byteSize > 0
-        ? frame.byteSize
-        : FRAME_MEMORY_FALLBACK_BYTES;
-    }
-    return total;
-  }
-
   private updateCacheMeta(mediaId: string, filmstrip: Filmstrip): void {
-    const nextSize = this.estimateFilmstripBytes(filmstrip.frames);
-    const previous = this.cacheMeta.get(mediaId);
-    if (previous) {
-      this.cacheBytes = Math.max(0, this.cacheBytes - previous.sizeBytes);
-    }
-    this.cacheBytes += nextSize;
-    this.cacheMeta.set(mediaId, {
-      sizeBytes: nextSize,
-      lastAccessedAt: Date.now(),
-    });
+    this.memoryState.updateEntry(mediaId, filmstrip);
   }
 
   private touchCacheEntry(mediaId: string): void {
-    const entry = this.cacheMeta.get(mediaId);
-    if (entry) {
-      entry.lastAccessedAt = Date.now();
-      return;
-    }
-    const cached = this.cache.get(mediaId);
-    if (!cached) return;
-    this.updateCacheMeta(mediaId, cached);
+    this.memoryState.touchEntry(mediaId, this.cache.get(mediaId) ?? null);
   }
 
   private clearCacheMeta(mediaId: string): void {
-    const previous = this.cacheMeta.get(mediaId);
-    if (!previous) return;
-    this.cacheBytes = Math.max(0, this.cacheBytes - previous.sizeBytes);
-    this.cacheMeta.delete(mediaId);
+    this.memoryState.clearEntry(mediaId);
   }
 
   private clearIdleEvictionTimer(mediaId: string): void {
-    const timer = this.idleEvictionTimers.get(mediaId);
-    if (!timer) return;
-    clearTimeout(timer);
-    this.idleEvictionTimers.delete(mediaId);
+    this.memoryState.clearIdleTimer(mediaId);
   }
 
   private scheduleIdleEviction(mediaId: string): void {
@@ -314,11 +279,9 @@ class FilmstripCacheService {
     if (this.hasSubscribers(mediaId)) return;
     if (!this.cache.has(mediaId)) return;
 
-    const timer = setTimeout(() => {
-      this.idleEvictionTimers.delete(mediaId);
+    this.memoryState.scheduleIdleTimer(mediaId, CACHE_EVICT_IDLE_MS, () => {
       this.tryEvictMedia(mediaId, 'idle-timeout');
-    }, CACHE_EVICT_IDLE_MS);
-    this.idleEvictionTimers.set(mediaId, timer);
+    });
   }
 
   private hasSubscribers(mediaId: string): boolean {
@@ -352,16 +315,12 @@ class FilmstripCacheService {
       || (usedHeap !== null && usedHeap > MEMORY_SOFT_LIMIT_BYTES);
     if (!shouldTrim) return;
 
-    const evictable = Array.from(this.cacheMeta.entries())
-      .filter(([mediaId]) => !this.pendingExtractions.has(mediaId))
-      .sort((a, b) => {
-        const aSubscribed = this.hasSubscribers(a[0]) ? 1 : 0;
-        const bSubscribed = this.hasSubscribers(b[0]) ? 1 : 0;
-        if (aSubscribed !== bSubscribed) return aSubscribed - bSubscribed;
-        return a[1].lastAccessedAt - b[1].lastAccessedAt;
-      });
+    const evictable = this.memoryState.getEvictionCandidates({
+      hasSubscribers: (mediaId) => this.hasSubscribers(mediaId),
+      pendingMediaIds: this.pendingExtractions,
+    });
 
-    for (const [mediaId] of evictable) {
+    for (const mediaId of evictable) {
       if (this.cacheBytes <= MEMORY_SOFT_LIMIT_BYTES) {
         break;
       }
@@ -1951,13 +1910,8 @@ class FilmstripCacheService {
     for (const mediaId of this.pendingExtractions.keys()) {
       this.abort(mediaId);
     }
-    for (const timer of this.idleEvictionTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.idleEvictionTimers.clear();
     this.cache.clear();
-    this.cacheMeta.clear();
-    this.cacheBytes = 0;
+    this.memoryState.clear();
     await filmstripOPFSStorage.clearAll();
   }
 
@@ -1975,17 +1929,12 @@ class FilmstripCacheService {
       this.abort(mediaId);
     }
     this.workerPoolManager.terminateAll();
-    for (const timer of this.idleEvictionTimers.values()) {
-      clearTimeout(timer);
-    }
     // Revoke in-memory object URLs only; keep persisted OPFS filmstrip files.
     for (const mediaId of this.cache.keys()) {
       filmstripOPFSStorage.revokeUrls(mediaId);
     }
-    this.idleEvictionTimers.clear();
     this.cache.clear();
-    this.cacheMeta.clear();
-    this.cacheBytes = 0;
+    this.memoryState.clear();
     this.pendingExtractions.clear();
     this.clearMetrics();
     this.updateCallbacks.clear();
