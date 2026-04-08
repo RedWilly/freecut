@@ -41,13 +41,22 @@ import type { MaskVertex } from '@/types/masks';
 import type { ShapeItem, TimelineTrack } from '@/types/timeline';
 import type { TransformProperties } from '@/types/transform';
 import {
+  drawMaskSegment,
+  drawMaskSelectionMarquee,
+  drawMaskVertexWithHandles,
+} from './mask-editor-drawing';
+import {
+  hitTestMaskVertices,
+  hitTestPenVertices,
+  type MaskHit,
+  type PenHit,
+} from './mask-editor-hit-testing';
+import {
   MASK_GEOMETRY_TRANSFORM_PROPS,
   cloneVertices,
   cubicPointAt,
-  distanceToLineSegment,
   drawSelectedVertexRing,
   getNextTrackName,
-  isPointInPolygon,
   toOverlayTransform,
   transformChanged,
 } from './mask-editor-overlay-utils';
@@ -75,11 +84,6 @@ const DRAG_THRESHOLD = 3;
 const PEN_BEZIER_DRAG_THRESHOLD = 10;
 /** Segment sampling density for interior hit testing on curved paths */
 const CURVE_HIT_TEST_STEPS = 16;
-
-type MaskHit =
-  | { type: 'vertex' | 'inHandle' | 'outHandle' | 'segment'; index: number }
-  | { type: 'shape' };
-type PenHit = { type: 'vertex' | 'inHandle' | 'outHandle'; index: number };
 type PenInteraction =
   | {
       type: 'create';
@@ -321,19 +325,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
 
   /** Draw a single bezier/line segment between two vertices */
   const drawSegment = useCallback((ctx: CanvasRenderingContext2D, curr: MaskVertex, next: MaskVertex) => {
-    const outH = curr.outHandle;
-    const inH = next.inHandle;
-    const isStraight = outH[0] === 0 && outH[1] === 0 && inH[0] === 0 && inH[1] === 0;
-
-    if (isStraight) {
-      const [nx, ny] = vertexToScreen(next);
-      ctx.lineTo(nx, ny);
-    } else {
-      const [cp1x, cp1y] = handleToScreen(curr, 'out');
-      const [cp2x, cp2y] = handleToScreen(next, 'in');
-      const [nx, ny] = vertexToScreen(next);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, nx, ny);
-    }
+    drawMaskSegment(ctx, curr, next, vertexToScreen, handleToScreen);
   }, [vertexToScreen, handleToScreen]);
 
   /** Draw closed path with handles (edit mode) */
@@ -408,25 +400,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
   }, [getVertices, vertexToScreen, handleToScreen, draggingVertexIndex, draggingHandle, selectedVertexIndices, hoveredVertexIndex, hoveredHandle, hoveredSegmentIndex, drawSegment]);
 
   const drawSelectionMarquee = useCallback((ctx: CanvasRenderingContext2D) => {
-    if (!selectionMarquee || (selectionMarquee.width < 1 && selectionMarquee.height < 1)) {
-      return;
-    }
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(
-      selectionMarquee.left,
-      selectionMarquee.top,
-      selectionMarquee.width,
-      selectionMarquee.height
-    );
-    ctx.fillStyle = 'rgba(34, 211, 238, 0.12)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(103, 232, 249, 0.95)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([6, 4]);
-    ctx.stroke();
-    ctx.restore();
+    drawMaskSelectionMarquee(ctx, selectionMarquee);
   }, [selectionMarquee]);
 
   /** Draw open pen path with rubber-band line */
@@ -582,70 +556,20 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
 
   /** Draw a single vertex with its handles */
   const drawVertexWithHandles = useCallback((ctx: CanvasRenderingContext2D, v: MaskVertex, i: number) => {
-    const [vx, vy] = vertexToScreen(v);
-
-    const hasInHandle = v.inHandle[0] !== 0 || v.inHandle[1] !== 0;
-    const hasOutHandle = v.outHandle[0] !== 0 || v.outHandle[1] !== 0;
-
-    if (hasInHandle) {
-      const [hx, hy] = handleToScreen(v, 'in');
-      ctx.beginPath();
-      ctx.moveTo(vx, vy);
-      ctx.lineTo(hx, hy);
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(hx, hy, HANDLE_RADIUS, 0, Math.PI * 2);
-      const isHoveredIn = hoveredVertexIndex === i && hoveredHandle === 'in';
-      ctx.fillStyle = isHoveredIn ? '#22d3ee' : 'rgba(34, 211, 238, 0.6)';
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    if (hasOutHandle) {
-      const [hx, hy] = handleToScreen(v, 'out');
-      ctx.beginPath();
-      ctx.moveTo(vx, vy);
-      ctx.lineTo(hx, hy);
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(hx, hy, HANDLE_RADIUS, 0, Math.PI * 2);
-      const isHoveredOut = hoveredVertexIndex === i && hoveredHandle === 'out';
-      ctx.fillStyle = isHoveredOut ? '#22d3ee' : 'rgba(34, 211, 238, 0.6)';
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    const isActive = draggingVertexIndex === i && draggingHandle === null;
-    const isSelected = selectedVertexIndices.includes(i);
-    const isHovered = hoveredVertexIndex === i && hoveredHandle === null;
-    if (isSelected) {
-      drawSelectedVertexRing(ctx, vx, vy);
-    }
-    ctx.beginPath();
-    ctx.arc(vx, vy, VERTEX_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected
-      ? isActive
-        ? '#fde68a'
-        : '#fef3c7'
-      : isActive
-        ? '#fff'
-        : isHovered
-          ? '#22d3ee'
-          : '#0e7490';
-    ctx.fill();
-    ctx.strokeStyle = isSelected ? '#f59e0b' : '#22d3ee';
-    ctx.lineWidth = isSelected ? 2.5 : 1.5;
-    ctx.stroke();
+    drawMaskVertexWithHandles({
+      ctx,
+      vertex: v,
+      index: i,
+      vertexRadius: VERTEX_RADIUS,
+      handleRadius: HANDLE_RADIUS,
+      vertexToScreen,
+      handleToScreen,
+      draggingVertexIndex,
+      draggingHandle,
+      selectedVertexIndices,
+      hoveredVertexIndex,
+      hoveredHandle,
+    });
   }, [vertexToScreen, handleToScreen, draggingVertexIndex, draggingHandle, selectedVertexIndices, hoveredVertexIndex, hoveredHandle]);
 
   // Redraw on state changes
@@ -669,134 +593,29 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     (screenX: number, screenY: number): MaskHit | null => {
       const vertices = getVertices();
       if (!vertices) return null;
-
-      for (let i = 0; i < vertices.length; i++) {
-        const v = vertices[i]!;
-        if (v.inHandle[0] !== 0 || v.inHandle[1] !== 0) {
-          const [hx, hy] = handleToScreen(v, 'in');
-          if (Math.hypot(screenX - hx, screenY - hy) < HIT_RADIUS) {
-            return { type: 'inHandle', index: i };
-          }
-        }
-        if (v.outHandle[0] !== 0 || v.outHandle[1] !== 0) {
-          const [hx, hy] = handleToScreen(v, 'out');
-          if (Math.hypot(screenX - hx, screenY - hy) < HIT_RADIUS) {
-            return { type: 'outHandle', index: i };
-          }
-        }
-      }
-
-      for (let i = 0; i < vertices.length; i++) {
-        const [vx, vy] = vertexToScreen(vertices[i]!);
-        if (Math.hypot(screenX - vx, screenY - vy) < HIT_RADIUS) {
-          return { type: 'vertex', index: i };
-        }
-      }
-
-      for (let i = 0; i < vertices.length; i++) {
-        const curr = vertices[i]!;
-        const next = vertices[(i + 1) % vertices.length]!;
-        const [x1, y1] = vertexToScreen(curr);
-        const [x2, y2] = vertexToScreen(next);
-        const isStraight =
-          curr.outHandle[0] === 0
-          && curr.outHandle[1] === 0
-          && next.inHandle[0] === 0
-          && next.inHandle[1] === 0;
-
-        if (isStraight) {
-          if (distanceToLineSegment(screenX, screenY, x1, y1, x2, y2) < HIT_RADIUS) {
-            return { type: 'segment', index: i };
-          }
-          continue;
-        }
-
-        const [cp1x, cp1y] = handleToScreen(curr, 'out');
-        const [cp2x, cp2y] = handleToScreen(next, 'in');
-        let prevX = x1;
-        let prevY = y1;
-
-        for (let step = 1; step <= CURVE_HIT_TEST_STEPS; step++) {
-          const t = step / CURVE_HIT_TEST_STEPS;
-          const curveX = cubicPointAt(x1, cp1x, cp2x, x2, t);
-          const curveY = cubicPointAt(y1, cp1y, cp2y, y2, t);
-
-          if (distanceToLineSegment(screenX, screenY, prevX, prevY, curveX, curveY) < HIT_RADIUS) {
-            return { type: 'segment', index: i };
-          }
-
-          prevX = curveX;
-          prevY = curveY;
-        }
-      }
-
-      if (vertices.length >= 3) {
-        const polygon: [number, number][] = [vertexToScreen(vertices[0]!)];
-
-        for (let i = 0; i < vertices.length; i++) {
-          const curr = vertices[i]!;
-          const next = vertices[(i + 1) % vertices.length]!;
-          const [startX, startY] = vertexToScreen(curr);
-          const [endX, endY] = vertexToScreen(next);
-          const isStraight =
-            curr.outHandle[0] === 0
-            && curr.outHandle[1] === 0
-            && next.inHandle[0] === 0
-            && next.inHandle[1] === 0;
-
-          if (isStraight) {
-            polygon.push([endX, endY]);
-            continue;
-          }
-
-          const [cp1x, cp1y] = handleToScreen(curr, 'out');
-          const [cp2x, cp2y] = handleToScreen(next, 'in');
-
-          for (let step = 1; step <= CURVE_HIT_TEST_STEPS; step++) {
-            const t = step / CURVE_HIT_TEST_STEPS;
-            polygon.push([
-              cubicPointAt(startX, cp1x, cp2x, endX, t),
-              cubicPointAt(startY, cp1y, cp2y, endY, t),
-            ]);
-          }
-        }
-
-        if (isPointInPolygon(screenX, screenY, polygon)) {
-          return { type: 'shape' };
-        }
-      }
-
-      return null;
+      return hitTestMaskVertices({
+        vertices,
+        screenX,
+        screenY,
+        hitRadius: HIT_RADIUS,
+        curveHitTestSteps: CURVE_HIT_TEST_STEPS,
+        vertexToScreen,
+        handleToScreen,
+      });
     },
     [getVertices, vertexToScreen, handleToScreen]
   );
 
   const hitTestPen = useCallback(
     (screenX: number, screenY: number): PenHit | null => {
-      for (let i = 0; i < penVertices.length; i++) {
-        const vertex = penVertices[i]!;
-        if (vertex.inHandle[0] !== 0 || vertex.inHandle[1] !== 0) {
-          const [hx, hy] = handleToScreen(vertex, 'in');
-          if (Math.hypot(screenX - hx, screenY - hy) < HIT_RADIUS) {
-            return { type: 'inHandle', index: i };
-          }
-        }
-        if (vertex.outHandle[0] !== 0 || vertex.outHandle[1] !== 0) {
-          const [hx, hy] = handleToScreen(vertex, 'out');
-          if (Math.hypot(screenX - hx, screenY - hy) < HIT_RADIUS) {
-            return { type: 'outHandle', index: i };
-          }
-        }
-      }
-
-      for (let i = 0; i < penVertices.length; i++) {
-        const [vx, vy] = vertexToScreen(penVertices[i]!);
-        if (Math.hypot(screenX - vx, screenY - vy) < HIT_RADIUS) {
-          return { type: 'vertex', index: i };
-        }
-      }
-
-      return null;
+      return hitTestPenVertices({
+        vertices: penVertices,
+        screenX,
+        screenY,
+        hitRadius: HIT_RADIUS,
+        vertexToScreen,
+        handleToScreen,
+      });
     },
     [penVertices, vertexToScreen, handleToScreen]
   );
@@ -1640,11 +1459,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
         startVertexDrag(hit.index);
         dragStateRef.current = {
           type: 'vertex',
-          startVertices: vertices.map((v) => ({
-            position: [...v.position] as [number, number],
-            inHandle: [...v.inHandle] as [number, number],
-            outHandle: [...v.outHandle] as [number, number],
-          })),
+          startVertices: cloneVertices(vertices),
           vertexIndex: hit.index,
           handleType: null,
           startCanvasPos: [canvasPos.x, canvasPos.y],
@@ -1654,11 +1469,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
         startHandleDrag(hit.index, handleType);
         dragStateRef.current = {
           type: 'handle',
-          startVertices: vertices.map((v) => ({
-            position: [...v.position] as [number, number],
-            inHandle: [...v.inHandle] as [number, number],
-            outHandle: [...v.outHandle] as [number, number],
-          })),
+          startVertices: cloneVertices(vertices),
           vertexIndex: hit.index,
           handleType,
           startCanvasPos: [canvasPos.x, canvasPos.y],
@@ -1735,11 +1546,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
         const itemWidth = bounds.width / scale;
         const itemHeight = bounds.height / scale;
 
-        const newVertices = state.startVertices.map((v) => ({
-          position: [...v.position] as [number, number],
-          inHandle: [...v.inHandle] as [number, number],
-          outHandle: [...v.outHandle] as [number, number],
-        }));
+        const newVertices = cloneVertices(state.startVertices);
 
         if (state.handleType === null) {
           const v = newVertices[state.vertexIndex]!;
