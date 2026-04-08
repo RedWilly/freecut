@@ -54,7 +54,6 @@ export const PreviewStage = memo(function PreviewStage({
       className="w-full h-full bg-video-preview-background relative"
       style={{ overflow: needsOverflow ? 'auto' : 'visible' }}
       onClick={onBackgroundClick}
-      role="img"
       aria-label="Video preview"
     >
       <div

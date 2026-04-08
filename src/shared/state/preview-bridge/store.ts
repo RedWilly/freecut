@@ -3,7 +3,12 @@ import type { PreviewBridgeActions, PreviewBridgeState } from './types';
 
 function normalizeFrame(frame: number | null): number | null {
   if (frame == null) return null;
-  if (!Number.isFinite(frame)) return 0;
+  if (!Number.isFinite(frame)) {
+    if (import.meta.env.DEV) {
+      console.warn('[PreviewBridge] normalizeFrame received non-finite value:', frame);
+    }
+    return 0;
+  }
   return Math.max(0, Math.round(frame));
 }
 

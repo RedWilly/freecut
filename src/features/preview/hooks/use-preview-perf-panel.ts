@@ -6,6 +6,8 @@ import {
   parsePreviewPerfPanelQuery,
 } from '../utils/preview-constants';
 
+const POLL_INTERVAL_MS = 250;
+
 export function usePreviewPerfPanel() {
   const [showPerfPanel, setShowPerfPanel] = useState(false);
   const [perfPanelSnapshot, setPerfPanelSnapshot] = useState<PreviewPerfSnapshot | null>(null);
@@ -58,7 +60,7 @@ export function usePreviewPerfPanel() {
     const intervalId = setInterval(() => {
       if (window.__PREVIEW_PERF_PANEL__ !== true) return;
       setPerfPanelSnapshot(window.__PREVIEW_PERF__ ?? null);
-    }, 250);
+    }, POLL_INTERVAL_MS);
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {

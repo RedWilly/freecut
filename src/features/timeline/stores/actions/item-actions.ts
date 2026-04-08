@@ -260,6 +260,12 @@ export function rippleDeleteItems(ids: string[]): void {
     useTransitionsStore.getState()._removeTransitionsForItems(expandedIds);
     useKeyframesStore.getState()._removeKeyframesForItems(expandedIds);
 
+    // Repair transitions for surviving clips that were shifted
+    if (updates.length > 0) {
+      const movedClipIds = updates.map((update) => update.id);
+      applyTransitionRepairs(movedClipIds, new Set(expandedIds));
+    }
+
     useTimelineSettingsStore.getState().markDirty();
   }, { ids: expandedIds });
 }

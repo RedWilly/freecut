@@ -62,9 +62,12 @@ export function getVideoSyncTargetContext(input: {
   const effectiveTargetTime = isPremounted
     ? (input.safeTrimBefore / input.sourceFps)
     : input.targetTime;
+  // Clamp away from the exact video end to avoid browser/decoder quirks
+  // (some decoders stall or return empty frames at the very last sample).
+  const END_CLAMP_BUFFER = 0.05;
   const clampedTargetTime = Math.min(
     Math.max(0, effectiveTargetTime),
-    input.videoDuration - 0.05,
+    input.videoDuration - END_CLAMP_BUFFER,
   );
 
   return {
@@ -186,6 +189,10 @@ export function planPlayingVideoDriftCorrection(input: {
 
   const drift = input.currentTime - input.targetTime;
   const timeSinceLastSync = input.nowMs - input.lastSyncTimeMs;
+  // Asymmetric thresholds: tolerate small negative drift (video can catch up
+  // naturally) but use a larger positive threshold for far-ahead cases where
+  // an immediate seek is needed. The 80ms debounce for the behind case avoids
+  // jitter from transient drift spikes.
   const videoBehind = drift < -0.2;
   const videoFarAhead = drift > 0.5;
 

@@ -266,7 +266,7 @@ const GroupRenderer: React.FC<{
       .filter(({ item, index }) => index !== activeItemIndex && transitionClipIds.has(item.id))
       .map(({ index }) => index)
       .join(',');
-  }, [isPremounted, activeItemIndex, group.items, transitionWindows, globalFrame, fps]);
+  }, [isPremounted, activeItemIndex, group.items, transitionWindows, globalFrame]);
 
   // Build adjusted shadow items — only recalculated when overlap composition changes.
   // String comparison is by value, so stable overlapKey prevents rebuilds every frame.

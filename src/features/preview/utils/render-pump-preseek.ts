@@ -3,6 +3,7 @@ import type { TimelineItem, TimelineTrack, VideoItem } from '@/types/timeline';
 
 export interface RenderPumpSourceTimeOptions {
   requireExplicitSourceFps?: boolean;
+  resolvedMediaFps?: number;
 }
 
 export interface PreseekSourceTarget {
@@ -42,7 +43,7 @@ export function getVideoItemSourceTimeSeconds(
 
   const sourceFps = options.requireExplicitSourceFps
     ? item.sourceFps
-    : (item.sourceFps ?? timelineFps);
+    : (item.sourceFps ?? options.resolvedMediaFps ?? timelineFps);
   if (!Number.isFinite(sourceFps) || !sourceFps || sourceFps <= 0) {
     return null;
   }
@@ -219,6 +220,7 @@ export function resolvePausedVariableSpeedPrewarmPlan(
   }
 
   let visibilityFrame = timelineFrame;
+  let hasCandidate = false;
 
   for (const track of tracks) {
     const varItem = track.items.find((item) => candidateIdSet.has(item.id));
@@ -237,8 +239,12 @@ export function resolvePausedVariableSpeedPrewarmPlan(
         }
       }
     }
-    visibilityFrame = latestOccluderEnd;
-    break;
+    if (!hasCandidate) {
+      visibilityFrame = latestOccluderEnd;
+      hasCandidate = true;
+    } else {
+      visibilityFrame = Math.min(visibilityFrame, latestOccluderEnd);
+    }
   }
 
   return {

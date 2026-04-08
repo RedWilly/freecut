@@ -68,6 +68,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     (event) => {
       if (keyframeSelectionOwnsDeleteShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (selectedTransitionId) {
@@ -100,6 +101,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     (event) => {
       if (keyframeSelectionOwnsDeleteShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (selectedTransitionId) {
@@ -132,6 +134,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     (event) => {
       if (keyframeSelectionOwnsDeleteShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (selectedItemIds.length > 0) {
@@ -153,6 +156,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     (event) => {
       if (keyframeSelectionOwnsDeleteShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (selectedItemIds.length > 0) {

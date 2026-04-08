@@ -547,13 +547,32 @@ export function usePreviewRendererController({
           return blobToDataUrl(blob);
         }
 
+        // Progressive half-downscale to avoid aliasing/moire with
+        // high-frequency GPU effects (halftone, pixelate, etc.)
+        let srcW = offscreen.width;
+        let srcH = offscreen.height;
+        let source: CanvasImageSource = offscreen;
+        while (srcW > targetWidth * 2 || srcH > targetHeight * 2) {
+          const halfW = Math.max(targetWidth, Math.ceil(srcW / 2));
+          const halfH = Math.max(targetHeight, Math.ceil(srcH / 2));
+          const step = document.createElement('canvas');
+          step.width = halfW;
+          step.height = halfH;
+          const stepCtx = step.getContext('2d');
+          if (!stepCtx) break;
+          stepCtx.drawImage(source, 0, 0, halfW, halfH);
+          source = step;
+          srcW = halfW;
+          srcH = halfH;
+        }
+
         const canvas = document.createElement('canvas');
         canvas.width = targetWidth;
         canvas.height = targetHeight;
         const ctx2d = canvas.getContext('2d');
         if (!ctx2d) return null;
 
-        ctx2d.drawImage(offscreen, 0, 0, targetWidth, targetHeight);
+        ctx2d.drawImage(source, 0, 0, targetWidth, targetHeight);
         const blob = await new Promise<Blob | null>((resolve) => {
           canvas.toBlob(resolve, format, quality);
         });

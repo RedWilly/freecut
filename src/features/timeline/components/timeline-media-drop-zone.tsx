@@ -501,6 +501,8 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     if (data.type === 'media-item' && data.mediaId && data.mediaType && data.fileName) {
       const media = getMedia.find((entry) => entry.id === data.mediaId);
       if (!media || !isDroppableMediaType(data.mediaType)) {
+        e.dataTransfer.dropEffect = 'none';
+        setIsDragOver(false);
         clearZoneGhostPreviews();
         return;
       }
@@ -522,6 +524,8 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       return;
     }
 
+    e.dataTransfer.dropEffect = 'none';
+    setIsDragOver(false);
     clearZoneGhostPreviews();
   }, [
     buildGenericExternalGhostPreviews,

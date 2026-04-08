@@ -26,6 +26,22 @@ describe('shouldReactOwnPlaybackRate', () => {
       sharedTransitionSync: false,
     })).toBe(true);
   });
+
+  it('lets RVFC own playback rate during shared transition sync with RVFC support', () => {
+    expect(shouldReactOwnPlaybackRate({
+      isPlaying: true,
+      supportsRequestVideoFrameCallback: true,
+      sharedTransitionSync: true,
+    })).toBe(false);
+  });
+
+  it('keeps React in control during shared transition sync without RVFC', () => {
+    expect(shouldReactOwnPlaybackRate({
+      isPlaying: true,
+      supportsRequestVideoFrameCallback: false,
+      sharedTransitionSync: false,
+    })).toBe(true);
+  });
 });
 
 describe('getVideoSyncTargetContext', () => {
@@ -154,5 +170,20 @@ describe('planVideoFrameCallbackCorrection', () => {
       throw new Error('Expected rate adjustment plan');
     }
     expect(plan.playbackRate).toBeLessThan(1);
+  });
+
+  it('returns nominal_rate when drift is negligible', () => {
+    const plan = planVideoFrameCallbackCorrection({
+      currentTime: 1.008,
+      targetTime: 1,
+      nominalRate: 1,
+      readyState: 4,
+    });
+
+    expect(plan.kind).toBe('nominal_rate');
+    if (plan.kind !== 'nominal_rate') {
+      throw new Error('Expected nominal_rate plan');
+    }
+    expect(plan.playbackRate).toBe(1);
   });
 });

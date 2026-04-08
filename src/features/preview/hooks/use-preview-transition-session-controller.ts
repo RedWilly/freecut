@@ -351,11 +351,10 @@ export function usePreviewTransitionSessionController({
       return pinned;
     }
 
-    const prev = transitionSessionPinnedElementsRef.current.get(itemId) ?? null;
-    if (prev && prev !== pinned) {
-      delete prev.dataset.transitionHold;
-    }
     const next = getBestDomVideoElementForItem(itemId);
+    if (pinned && pinned !== next) {
+      delete pinned.dataset.transitionHold;
+    }
     if (next && next.readyState >= 2) {
       ensurePlaying(next);
     }

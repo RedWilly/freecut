@@ -1307,7 +1307,14 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
   return (
     <div
       ref={panelRef}
-      onPointerEnter={() => setIsPointerWithinEditor(true)}
+      tabIndex={-1}
+      onPointerEnter={(event) => {
+        setIsPointerWithinEditor(true);
+        const target = event.currentTarget;
+        if (!target.contains(document.activeElement)) {
+          target.focus({ preventScroll: true });
+        }
+      }}
       onPointerLeave={() => setIsPointerWithinEditor(false)}
       onFocusCapture={() => setIsFocusWithinEditor(true)}
       onBlurCapture={(event) => {
@@ -1317,8 +1324,17 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
         }
         setIsFocusWithinEditor(false);
       }}
+      onKeyDown={(event) => {
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          if (selectedEditorKeyframes.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            handleRemoveKeyframes(selectedEditorKeyframes.map(({ ref }) => ref));
+          }
+        }
+      }}
       className={cn(
-        'flex-shrink-0 bg-background overflow-hidden',
+        'flex-shrink-0 bg-background overflow-hidden outline-none',
         placement === 'top' ? 'border-b border-border' : 'border-t border-border',
         isOpen ? 'opacity-100' : 'opacity-90',
         !isResizing && 'transition-all duration-200'

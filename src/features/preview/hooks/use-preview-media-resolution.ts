@@ -168,16 +168,30 @@ export function usePreviewMediaResolution({
     return resolveRetryAfterRef.current.get(mediaId) ?? 0;
   }, []);
 
+  const resolveRetryTimerAtRef = useRef<number | null>(null);
+
   const scheduleResolveRetryWake = useCallback((retryAt: number | null) => {
+    if (retryAt === null) {
+      if (resolveRetryTimerRef.current) {
+        clearTimeout(resolveRetryTimerRef.current);
+        resolveRetryTimerRef.current = null;
+      }
+      resolveRetryTimerAtRef.current = null;
+      return;
+    }
+
+    if (resolveRetryTimerRef.current && resolveRetryTimerAtRef.current !== null && resolveRetryTimerAtRef.current <= retryAt) {
+      return;
+    }
+
     if (resolveRetryTimerRef.current) {
       clearTimeout(resolveRetryTimerRef.current);
-      resolveRetryTimerRef.current = null;
     }
-    if (retryAt === null) return;
-
+    resolveRetryTimerAtRef.current = retryAt;
     const delayMs = Math.max(0, retryAt - Date.now());
     resolveRetryTimerRef.current = setTimeout(() => {
       resolveRetryTimerRef.current = null;
+      resolveRetryTimerAtRef.current = null;
       setResolveRetryTick((v) => v + 1);
     }, delayMs);
   }, []);
@@ -189,6 +203,7 @@ export function usePreviewMediaResolution({
       clearTimeout(resolveRetryTimerRef.current);
       resolveRetryTimerRef.current = null;
     }
+    resolveRetryTimerAtRef.current = null;
   }, []);
 
   const kickResolvePass = useCallback(() => {

@@ -6,7 +6,7 @@ import {
   getMatchingSynchronizedLinkedCounterpart,
   getSynchronizedLinkedCounterpartPair,
   getSynchronizedLinkedItems,
-} from '../../utils/linked-items';
+} from '@/features/timeline/utils/linked-items';
 
 function getAnchorItem(items: TimelineItem[], itemId: string): TimelineItem[] {
   const anchor = items.find((item) => item.id === itemId);

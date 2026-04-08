@@ -168,7 +168,15 @@ export async function resolveDroppedMediaEntriesFromExternalFiles({
     return null;
   }
 
-  const importedMedia = await importHandlesForPlacement(entries.map((entry) => entry.handle));
+  let importedMedia: Awaited<ReturnType<typeof importHandlesForPlacement>>;
+  try {
+    importedMedia = await importHandlesForPlacement(entries.map((entry) => entry.handle));
+  } catch (error) {
+    notify.error('Unable to import dropped files.', {
+      description: error instanceof Error ? error.message : 'Please try again.',
+    });
+    return null;
+  }
   if (importedMedia.length === 0) {
     notify.error('Unable to import dropped files');
     return null;

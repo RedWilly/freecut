@@ -1520,23 +1520,22 @@ export function usePreviewRenderPump({
         }
       }
       if (playbackTransitionState.hasActiveTransition || playbackTransitionState.shouldHoldOverlay) {
-        if (tryShowPreparedPlaybackTransitionOverlay(playbackState.currentFrame)) {
-          return;
-        }
-        if (playbackTransitionState.hasActiveTransition) {
-          const trace = transitionSessionTraceRef.current;
-          if (trace && trace.lastEntryMissFrame !== playbackState.currentFrame) {
-            trace.entryMisses += 1;
-            trace.lastEntryMissFrame = playbackState.currentFrame;
-            pushTransitionTrace('entry_miss', {
-              opId: trace.opId,
-              frame: playbackState.currentFrame,
-              bufferedFrames: transitionSessionBufferedFramesRef.current.size,
-            });
+        if (!tryShowPreparedPlaybackTransitionOverlay(playbackState.currentFrame)) {
+          if (playbackTransitionState.hasActiveTransition) {
+            const trace = transitionSessionTraceRef.current;
+            if (trace && trace.lastEntryMissFrame !== playbackState.currentFrame) {
+              trace.entryMisses += 1;
+              trace.lastEntryMissFrame = playbackState.currentFrame;
+              pushTransitionTrace('entry_miss', {
+                opId: trace.opId,
+                frame: playbackState.currentFrame,
+                bufferedFrames: transitionSessionBufferedFramesRef.current.size,
+              });
+            }
           }
+          scrubRequestedFrameRef.current = playbackState.currentFrame;
+          void pumpRenderLoop();
         }
-        scrubRequestedFrameRef.current = playbackState.currentFrame;
-        void pumpRenderLoop();
       } else {
         if (!playbackTransitionState.shouldPrewarm) {
           clearTransitionPlaybackSession();

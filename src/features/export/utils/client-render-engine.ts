@@ -70,6 +70,7 @@ import {
   resolveCompositionRenderPlan,
   collectFrameVideoCandidates,
   resolveFrameRenderScene,
+  snapSourceTime,
 } from '@/features/export/deps/composition-runtime';
 import {
   renderItem,
@@ -90,16 +91,6 @@ function getLog() { return createLogger('ClientRenderEngine'); }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Snap a source time to the nearest frame boundary to avoid floating-point
- * drift where `Math.floor(time * fps)` lands on the wrong frame.
- */
-function snapSourceTime(time: number, fps: number): number {
-  const frame = time * fps;
-  const rounded = Math.round(frame);
-  return Math.abs(frame - rounded) < 1e-6 ? (rounded + 1e-4) / fps : time;
-}
 
 /**
  * Check if an image item is a potentially animated image (GIF or WebP).

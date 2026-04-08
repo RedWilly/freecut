@@ -57,11 +57,11 @@ export function usePreviewTransitionModel({
     const rightOriginId = window.rightClip.originId;
 
     if (leftOriginId && rightOriginId && leftOriginId === rightOriginId) {
-      return 0;
+      return Math.max(12, Math.round(fps * 0.5));
     }
 
     return playbackTransitionCooldownFrames;
-  }, [playbackTransitionCooldownFrames]);
+  }, [fps, playbackTransitionCooldownFrames]);
 
   const getTransitionWindowForFrame = useCallback((frame: number) => {
     return playbackTransitionWindows.find((window) => (
