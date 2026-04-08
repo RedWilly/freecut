@@ -59,6 +59,13 @@ import { getCombinedGraphValueRange } from '../value-graph-editor/value-range-ut
 import { PROPERTY_VALUE_RANGES } from '@/features/keyframes/property-value-ranges';
 import { constrainSelectedKeyframeDelta } from '@/features/keyframes/utils/frame-move-constraints';
 import { useAutoKeyframeStore } from '../../stores/auto-keyframe-store';
+import { clampFrame, clampToAvoidBlockedRanges } from './frame-utils';
+import {
+  buildSelectionFramePreview as buildSelectionFramePreviewState,
+  commitSelectionFramePreview as commitSelectionFramePreviewState,
+  duplicateSelectionFramePreview as duplicateSelectionFramePreviewState,
+} from './selection-frame-actions';
+import { getDisplayedGroupFrameGroups as getDisplayedGroupFrameGroupsState } from './sheet-preview-frame-groups';
 
 interface DopesheetEditorProps {
   /** Shared time viewport when split mode needs synchronized frame zoom/pan */
@@ -349,11 +356,6 @@ function InterpolationTypeIcon({ type }: { type: EasingType }) {
   );
 }
 
-function clampFrame(frame: number, totalFrames: number): number {
-  if (totalFrames <= 0) return 0;
-  return Math.max(0, Math.min(totalFrames - 1, frame));
-}
-
 function getNiceTickStep(frameRange: number): number {
   const rough = Math.max(1, frameRange / 10);
   const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
@@ -362,24 +364,6 @@ function getNiceTickStep(frameRange: number): number {
   if (normalized <= 2) return 2 * magnitude;
   if (normalized <= 5) return 5 * magnitude;
   return 10 * magnitude;
-}
-
-function clampToAvoidBlockedRanges(
-  frame: number,
-  initialFrame: number,
-  blockedRanges: BlockedFrameRange[]
-): number {
-  if (blockedRanges.length === 0) return frame;
-  for (const range of blockedRanges) {
-    if (frame >= range.start && frame < range.end) {
-      if (initialFrame < range.start) return range.start - 1;
-      if (initialFrame >= range.end) return range.end;
-      const distToStart = frame - range.start;
-      const distToEnd = range.end - frame;
-      return distToStart < distToEnd ? range.start - 1 : range.end;
-    }
-  }
-  return frame;
 }
 
 function arePreviewFramesEqual(
@@ -1630,120 +1614,42 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
   const buildSelectionFramePreview = useCallback(
     (selectionIds: Iterable<string>, requestedDeltaFrames: number) => {
-      const movableSelectionIds = Array.from(selectionIds).filter((keyframeId) => {
-        const meta = keyframeMetaByIdRef.current.get(keyframeId);
-        return !!meta && !isPropertyLocked(meta.property);
-      });
-
-      if (movableSelectionIds.length === 0 || requestedDeltaFrames === 0) {
-        return {
-          movableSelectionIds,
-          previewFrames: null as Record<string, number> | null,
-          appliedDeltaFrames: 0,
-        };
-      }
-
-      const constrainedDeltaFrames = constrainSelectedKeyframeDelta({
+      return buildSelectionFramePreviewState({
+        selectionIds,
+        requestedDeltaFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
         keyframesByProperty,
-        selectedKeyframeIds: new Set(movableSelectionIds),
         totalFrames,
-        deltaFrames: requestedDeltaFrames,
+        transitionBlockedRanges,
       });
-
-      const nextPreviewFrames: Record<string, number> = {};
-      let appliedDeltaFrames = 0;
-
-      for (const keyframeId of movableSelectionIds) {
-        const meta = keyframeMetaByIdRef.current.get(keyframeId);
-        if (!meta) {
-          continue;
-        }
-
-        const initialFrame = meta.keyframe.frame;
-        let nextFrame = clampFrame(initialFrame + constrainedDeltaFrames, totalFrames);
-        nextFrame = clampToAvoidBlockedRanges(nextFrame, initialFrame, transitionBlockedRanges);
-        nextFrame = clampFrame(nextFrame, totalFrames);
-
-        if (nextFrame === initialFrame) {
-          continue;
-        }
-
-        if (appliedDeltaFrames === 0) {
-          appliedDeltaFrames = nextFrame - initialFrame;
-        }
-        nextPreviewFrames[keyframeId] = nextFrame;
-      }
-
-      return {
-        movableSelectionIds,
-        previewFrames: Object.keys(nextPreviewFrames).length > 0 ? nextPreviewFrames : null,
-        appliedDeltaFrames,
-      };
     },
     [isPropertyLocked, keyframesByProperty, totalFrames, transitionBlockedRanges]
   );
 
   const commitSelectionFramePreview = useCallback(
     (selectionIds: Iterable<string>, previewFrames: Record<string, number> | null) => {
-      if (!onKeyframeMove || !previewFrames) {
-        return false;
-      }
-
-      let hasChanges = false;
-      for (const keyframeId of selectionIds) {
-        const nextFrame = previewFrames[keyframeId];
-        if (nextFrame === undefined) {
-          continue;
-        }
-
-        const meta = keyframeMetaByIdRef.current.get(keyframeId);
-        if (!meta || isPropertyLocked(meta.property)) {
-          continue;
-        }
-
-        onKeyframeMove(
-          { itemId, property: meta.property, keyframeId },
-          nextFrame,
-          meta.keyframe.value
-        );
-        hasChanges = true;
-      }
-
-      return hasChanges;
+      return commitSelectionFramePreviewState({
+        selectionIds,
+        previewFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
+        itemId,
+        onKeyframeMove,
+      });
     },
     [isPropertyLocked, itemId, onKeyframeMove]
   );
   const duplicateSelectionFramePreview = useCallback(
     (selectionIds: Iterable<string>, previewFrames: Record<string, number> | null) => {
-      if (!onDuplicateKeyframes || !previewFrames) {
-        return false;
-      }
-
-      const entries: Array<{ ref: KeyframeRef; frame: number; value: number }> = [];
-      for (const keyframeId of selectionIds) {
-        const nextFrame = previewFrames[keyframeId];
-        if (nextFrame === undefined) {
-          continue;
-        }
-
-        const meta = keyframeMetaByIdRef.current.get(keyframeId);
-        if (!meta || isPropertyLocked(meta.property)) {
-          continue;
-        }
-
-        entries.push({
-          ref: { itemId, property: meta.property, keyframeId },
-          frame: nextFrame,
-          value: meta.keyframe.value,
-        });
-      }
-
-      if (entries.length === 0) {
-        return false;
-      }
-
-      onDuplicateKeyframes(entries);
-      return true;
+      return duplicateSelectionFramePreviewState({
+        selectionIds,
+        previewFrames,
+        keyframeMetaById: keyframeMetaByIdRef.current,
+        isPropertyLocked,
+        itemId,
+        onDuplicateKeyframes,
+      });
     },
     [isPropertyLocked, itemId, onDuplicateKeyframes]
   );
@@ -2412,52 +2318,11 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   );
   const getDisplayedGroupFrameGroups = useCallback(
     (group: DopesheetPropertyGroup) => {
-      if (!sheetPreviewFrames) {
-        return group.frameGroups;
-      }
-
-      const duplicatePreviewIdSet = sheetPreviewDuplicateKeyframeIds
-        ? new Set(sheetPreviewDuplicateKeyframeIds)
-        : null;
-
-      const previewEntries = group.rows
-        .flatMap((row) =>
-          row.keyframes.map((keyframe) => ({
-            property: row.property,
-            keyframe,
-            frame: sheetPreviewFrames[keyframe.id] ?? keyframe.frame,
-          }))
-        )
-        .filter((entry) => !duplicatePreviewIdSet || duplicatePreviewIdSet.has(entry.keyframe.id))
-        .toSorted((a, b) => a.frame - b.frame);
-
-      if (duplicatePreviewIdSet) {
-        return previewEntries.reduce<DopesheetPropertyGroup['frameGroups']>((groups, entry) => {
-          const lastGroup = groups.at(-1);
-          if (lastGroup && lastGroup.frame === entry.frame) {
-            lastGroup.keyframes.push({ property: entry.property, keyframe: entry.keyframe });
-          } else {
-            groups.push({
-              frame: entry.frame,
-              keyframes: [{ property: entry.property, keyframe: entry.keyframe }],
-            });
-          }
-          return groups;
-        }, []);
-      }
-
-      return previewEntries.reduce<DopesheetPropertyGroup['frameGroups']>((groups, entry) => {
-        const lastGroup = groups.at(-1);
-        if (lastGroup && lastGroup.frame === entry.frame) {
-          lastGroup.keyframes.push({ property: entry.property, keyframe: entry.keyframe });
-        } else {
-          groups.push({
-            frame: entry.frame,
-            keyframes: [{ property: entry.property, keyframe: entry.keyframe }],
-          });
-        }
-        return groups;
-      }, []);
+      return getDisplayedGroupFrameGroupsState({
+        group,
+        sheetPreviewFrames,
+        sheetPreviewDuplicateKeyframeIds,
+      });
     },
     [sheetPreviewDuplicateKeyframeIds, sheetPreviewFrames]
   );
