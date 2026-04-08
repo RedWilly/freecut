@@ -32,80 +32,12 @@ import { computeClampedSlipDelta } from '../../utils/slip-utils';
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
 import { clampSlideDeltaToPreserveTransitions } from '../../utils/transition-utils';
 import { calculateTransitionPortions } from '@/domain/timeline/transitions/transition-planner';
-import { type CollisionRect } from '../../utils/collision-utils';
 import {
   canLinkSelection,
   expandSelectionWithLinkedItems,
   getLinkedItemIds,
 } from '../../utils/linked-items';
-
-function findNextAvailableSpaceOnTrack(
-  proposedFrom: number,
-  durationInFrames: number,
-  trackItems: ReadonlyArray<CollisionRect>
-): number {
-  let nextFrom = Math.max(0, proposedFrom);
-
-  for (const item of trackItems) {
-    const itemEnd = item.from + item.durationInFrames;
-    if (itemEnd <= nextFrom) {
-      continue;
-    }
-
-    if (item.from >= nextFrom + durationInFrames) {
-      break;
-    }
-
-    nextFrom = itemEnd;
-  }
-
-  return nextFrom;
-}
-
-function placeItemsWithoutTimelineOverlap(items: TimelineItem[]): TimelineItem[] {
-  const occupiedRangesByTrack = new Map<string, CollisionRect[]>();
-  const placedItems: TimelineItem[] = [];
-
-  for (const item of useItemsStore.getState().items) {
-    const trackItems = occupiedRangesByTrack.get(item.trackId);
-    if (trackItems) {
-      trackItems.push(item);
-    } else {
-      occupiedRangesByTrack.set(item.trackId, [item]);
-    }
-  }
-
-  for (const trackItems of occupiedRangesByTrack.values()) {
-    trackItems.sort((a, b) => a.from - b.from);
-  }
-
-  for (const item of items) {
-    let trackItems = occupiedRangesByTrack.get(item.trackId);
-    if (!trackItems) {
-      trackItems = [];
-      occupiedRangesByTrack.set(item.trackId, trackItems);
-    }
-
-    const finalFrom = findNextAvailableSpaceOnTrack(
-      item.from,
-      item.durationInFrames,
-      trackItems
-    );
-    const placedItem = finalFrom === item.from
-      ? item
-      : { ...item, from: finalFrom };
-
-    placedItems.push(placedItem);
-    trackItems.push({
-      trackId: placedItem.trackId,
-      from: placedItem.from,
-      durationInFrames: placedItem.durationInFrames,
-    });
-    trackItems.sort((a, b) => a.from - b.from);
-  }
-
-  return placedItems;
-}
+import { placeItemsWithoutTimelineOverlap } from './item-placement';
 
 function isLinkedSelectionEnabled(): boolean {
   return useEditorStore.getState().linkedSelectionEnabled;
