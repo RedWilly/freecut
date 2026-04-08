@@ -4,6 +4,7 @@ import { mediaLibraryService } from '../services/media-library-service';
 import { proxyService } from '../services/proxy-service';
 import { getMimeType } from '../utils/validation';
 import { getSharedProxyKey } from '../utils/proxy-key';
+import { hasMediaFilePickerSupport, showMediaFilePicker } from '../utils/media-file-picker';
 import { createLogger, createOperationId } from '@/shared/logging/logger';
 
 const logger = createLogger('MediaImport');
@@ -225,7 +226,7 @@ export function createImportActions(
       }
 
       // Check if File System Access API is supported
-      if (!('showOpenFilePicker' in window)) {
+      if (!hasMediaFilePickerSupport()) {
         const isBrave = 'brave' in navigator;
         set({
           error: isBrave
@@ -243,19 +244,7 @@ export function createImportActions(
 
       try {
         // Open file picker
-        const handles = await window.showOpenFilePicker({
-          multiple: true,
-          types: [
-            {
-              description: 'Media files',
-              accept: {
-                'video/*': ['.mp4', '.webm', '.mov', '.avi', '.mkv'],
-                'audio/*': ['.mp3', '.wav', '.ogg', '.m4a', '.aac'],
-                'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'],
-              },
-            },
-          ],
-        });
+        const handles = await showMediaFilePicker({ multiple: true });
 
         event.set('fileCount', handles.length);
 

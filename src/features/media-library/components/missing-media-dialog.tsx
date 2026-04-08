@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useMediaLibraryStore } from '../stores/media-library-store';
 import { useProjectStore } from '@/features/media-library/deps/projects';
+import { showMediaFilePicker } from '../utils/media-file-picker';
 
 export function MissingMediaDialog() {
   const showDialog = useMediaLibraryStore((s) => s.showMissingMediaDialog);
@@ -134,19 +135,7 @@ export function MissingMediaDialog() {
   const handleRelinkSingle = async (mediaId: string) => {
     setRelinking(mediaId);
     try {
-      const handles = await window.showOpenFilePicker({
-        multiple: false,
-        types: [
-          {
-            description: 'Media files',
-            accept: {
-              'video/*': ['.mp4', '.webm', '.mov', '.avi', '.mkv'],
-              'audio/*': ['.mp3', '.wav', '.ogg', '.m4a', '.aac'],
-              'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'],
-            },
-          },
-        ],
-      });
+      const handles = await showMediaFilePicker({ multiple: false });
 
       const handle = handles[0];
       if (!handle) return;
@@ -333,4 +322,3 @@ export function MissingMediaDialog() {
     </Dialog>
   );
 }
-

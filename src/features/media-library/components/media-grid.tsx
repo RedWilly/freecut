@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants';
+import { showMediaFilePicker } from '../utils/media-file-picker';
 
 interface MediaGridProps {
   onMediaSelect?: (mediaId: string) => void;
@@ -124,20 +125,7 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
   // Handle relinking a broken media file
   const handleRelink = async (mediaId: string) => {
     try {
-      // Open file picker for a single file
-      const handles = await window.showOpenFilePicker({
-        multiple: false,
-        types: [
-          {
-            description: 'Media files',
-            accept: {
-              'video/*': ['.mp4', '.webm', '.mov', '.avi', '.mkv'],
-              'audio/*': ['.mp3', '.wav', '.ogg', '.m4a', '.aac'],
-              'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'],
-            },
-          },
-        ],
-      });
+      const handles = await showMediaFilePicker({ multiple: false });
 
       const handle = handles[0];
       if (!handle) return;

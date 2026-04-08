@@ -35,6 +35,85 @@ interface MediaCardProps {
   viewMode?: 'grid' | 'list';
 }
 
+interface MediaCardActionMenuProps {
+  isBroken: boolean;
+  onRelink?: () => void;
+  canGenerateProxy: boolean;
+  hasProxy: boolean;
+  proxyStatus?: 'generating' | 'ready' | 'error';
+  proxyProgress?: number;
+  isTranscribable: boolean;
+  isTranscribing: boolean;
+  hasTranscript: boolean;
+  transcriptProgressLabel: string;
+  onGenerateProxy: (event: React.MouseEvent) => Promise<void>;
+  onDeleteProxy: (event: React.MouseEvent) => Promise<void>;
+  onGenerateTranscript: (event: React.MouseEvent) => Promise<void>;
+  onDelete: (event: React.MouseEvent) => void;
+}
+
+function MediaCardActionMenuItems({
+  isBroken,
+  onRelink,
+  canGenerateProxy,
+  hasProxy,
+  proxyStatus,
+  proxyProgress,
+  isTranscribable,
+  isTranscribing,
+  hasTranscript,
+  transcriptProgressLabel,
+  onGenerateProxy,
+  onDeleteProxy,
+  onGenerateTranscript,
+  onDelete,
+}: MediaCardActionMenuProps) {
+  return (
+    <>
+      {isBroken && onRelink && (
+        <DropdownMenuItem onClick={(event) => { event.stopPropagation(); onRelink(); }} className="text-primary focus:text-primary">
+          <RefreshCw className="w-3 h-3 mr-2" />
+          Relink File...
+        </DropdownMenuItem>
+      )}
+      {canGenerateProxy && !hasProxy && proxyStatus !== 'generating' && (
+        <DropdownMenuItem onClick={onGenerateProxy}>
+          <Zap className="w-3 h-3 mr-2" />
+          Generate Proxy
+        </DropdownMenuItem>
+      )}
+      {isTranscribable && !isBroken && !isTranscribing && (
+        <DropdownMenuItem onClick={onGenerateTranscript}>
+          <FileText className="w-3 h-3 mr-2" />
+          {hasTranscript ? 'Regenerate Transcript' : 'Transcribe Audio'}
+        </DropdownMenuItem>
+      )}
+      {isTranscribable && !isBroken && isTranscribing && (
+        <DropdownMenuItem disabled>
+          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+          {transcriptProgressLabel}
+        </DropdownMenuItem>
+      )}
+      {proxyStatus === 'generating' && (
+        <DropdownMenuItem disabled>
+          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+          Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
+        </DropdownMenuItem>
+      )}
+      {hasProxy && (
+        <DropdownMenuItem onClick={onDeleteProxy} className="text-destructive focus:text-destructive">
+          <Trash2 className="w-3 h-3 mr-2" />
+          Delete Proxy
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
+        <Trash2 className="w-3 h-3 mr-2" />
+        Delete
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 export function MediaCard({ media, selected = false, isBroken = false, onSelect, onDoubleClick, onDelete, onRelink, viewMode = 'grid' }: MediaCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [skimProgress, setSkimProgress] = useState<number | null>(null);
@@ -356,6 +435,25 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     ? `${getTranscriptionStageLabel(transcriptProgress.stage)} (${Math.round(getTranscriptionOverallPercent(transcriptProgress))}%)`
     : 'Transcribing...';
 
+  const actionMenuItems = (
+    <MediaCardActionMenuItems
+      isBroken={isBroken}
+      onRelink={onRelink}
+      canGenerateProxy={canGenerateProxy}
+      hasProxy={hasProxy}
+      proxyStatus={proxyStatus}
+      proxyProgress={proxyProgress}
+      isTranscribable={isTranscribable}
+      isTranscribing={isTranscribing}
+      hasTranscript={hasTranscript}
+      transcriptProgressLabel={transcriptProgressLabel}
+      onGenerateProxy={handleGenerateProxy}
+      onDeleteProxy={handleDeleteProxy}
+      onGenerateTranscript={handleGenerateTranscript}
+      onDelete={handleDelete}
+    />
+  );
+
   const getIcon = () => {
     switch (mediaType) {
       case 'video':
@@ -500,46 +598,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-                {isBroken && onRelink && (
-                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRelink(); }} className="text-primary focus:text-primary">
-                    <RefreshCw className="w-3 h-3 mr-2" />
-                    Relink File...
-                  </DropdownMenuItem>
-                )}
-                {canGenerateProxy && !hasProxy && proxyStatus !== 'generating' && (
-                  <DropdownMenuItem onClick={handleGenerateProxy}>
-                    <Zap className="w-3 h-3 mr-2" />
-                    Generate Proxy
-                  </DropdownMenuItem>
-                )}
-                {isTranscribable && !isBroken && !isTranscribing && (
-                  <DropdownMenuItem onClick={handleGenerateTranscript}>
-                    <FileText className="w-3 h-3 mr-2" />
-                    {hasTranscript ? 'Regenerate Transcript' : 'Transcribe Audio'}
-                  </DropdownMenuItem>
-                )}
-                {isTranscribable && !isBroken && isTranscribing && (
-                  <DropdownMenuItem disabled>
-                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                    {transcriptProgressLabel}
-                  </DropdownMenuItem>
-                )}
-                {proxyStatus === 'generating' && (
-                  <DropdownMenuItem disabled>
-                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                    Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
-                  </DropdownMenuItem>
-                )}
-                {hasProxy && (
-                  <DropdownMenuItem onClick={handleDeleteProxy} className="text-destructive focus:text-destructive">
-                    <Trash2 className="w-3 h-3 mr-2" />
-                    Delete Proxy
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-                  <Trash2 className="w-3 h-3 mr-2" />
-                  Delete
-                </DropdownMenuItem>
+                {actionMenuItems}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -700,46 +759,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-                {isBroken && onRelink && (
-                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRelink(); }} className="text-primary focus:text-primary">
-                    <RefreshCw className="w-3 h-3 mr-2" />
-                    Relink File...
-                  </DropdownMenuItem>
-                )}
-                {canGenerateProxy && !hasProxy && proxyStatus !== 'generating' && (
-                  <DropdownMenuItem onClick={handleGenerateProxy}>
-                    <Zap className="w-3 h-3 mr-2" />
-                    Generate Proxy
-                  </DropdownMenuItem>
-                )}
-                {isTranscribable && !isBroken && !isTranscribing && (
-                  <DropdownMenuItem onClick={handleGenerateTranscript}>
-                    <FileText className="w-3 h-3 mr-2" />
-                    {hasTranscript ? 'Regenerate Transcript' : 'Transcribe Audio'}
-                  </DropdownMenuItem>
-                )}
-                {isTranscribable && !isBroken && isTranscribing && (
-                  <DropdownMenuItem disabled>
-                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                    {transcriptProgressLabel}
-                  </DropdownMenuItem>
-                )}
-                {proxyStatus === 'generating' && (
-                  <DropdownMenuItem disabled>
-                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                    Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
-                  </DropdownMenuItem>
-                )}
-                {hasProxy && (
-                  <DropdownMenuItem onClick={handleDeleteProxy} className="text-destructive focus:text-destructive">
-                    <Trash2 className="w-3 h-3 mr-2" />
-                    Delete Proxy
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-                  <Trash2 className="w-3 h-3 mr-2" />
-                  Delete
-                </DropdownMenuItem>
+                {actionMenuItems}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
