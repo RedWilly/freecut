@@ -10,30 +10,10 @@ import {
   useCompositionsStore,
   type SubComposition,
 } from '../deps/timeline-contract';
+import { getThumbnailDimensions } from './media-asset-helpers';
 
 const logger = createLogger('CompoundClipThumbnailService');
 const THUMBNAIL_MAX_SIZE = 320;
-
-function getThumbnailDimensions(
-  width: number,
-  height: number,
-  maxSize: number,
-): { width: number; height: number } {
-  const safeWidth = Math.max(1, Math.round(width));
-  const safeHeight = Math.max(1, Math.round(height));
-
-  if (safeWidth >= safeHeight) {
-    return {
-      width: maxSize,
-      height: Math.max(1, Math.floor((maxSize * safeHeight) / safeWidth)),
-    };
-  }
-
-  return {
-    width: Math.max(1, Math.floor((maxSize * safeWidth) / safeHeight)),
-    height: maxSize,
-  };
-}
 
 class CompoundClipThumbnailService {
   private thumbnailUrlCache = new Map<string, { signature: string; url: string }>();
