@@ -19,13 +19,20 @@ const indexedDbMocks = vi.hoisted(() => ({
   getTranscriptMediaIds: vi.fn(),
 }));
 
+const loggerEventMocks = vi.hoisted(() => ({
+  set: vi.fn(),
+  merge: vi.fn(),
+  success: vi.fn(),
+  failure: vi.fn(),
+}));
+
 const loggerMocks = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
   debug: vi.fn(),
   event: vi.fn(),
-  startEvent: vi.fn(),
+  startEvent: vi.fn(() => loggerEventMocks),
   child: vi.fn(),
   setLevel: vi.fn(),
 }));
@@ -59,6 +66,7 @@ vi.mock('./media-relinking-actions', () => ({
 }));
 
 vi.mock('@/shared/logging/logger', () => ({
+  createOperationId: vi.fn(() => 'test-op-id'),
   createLogger: vi.fn(() => loggerMocks),
 }));
 

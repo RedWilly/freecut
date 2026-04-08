@@ -14,8 +14,6 @@ import { PreviewArea } from './preview-area';
 import { InteractionLockRegion } from './interaction-lock-region';
 import { AudioMeterPanel } from './audio-meter-panel';
 import { Timeline, BentoLayoutDialog } from '@/features/editor/deps/timeline-ui';
-import { ClearKeyframesDialog } from './clear-keyframes-dialog';
-import { TtsGenerateDialog } from './tts-generate-dialog';
 import { toast } from 'sonner';
 import { useEditorHotkeys } from '@/features/editor/hooks/use-editor-hotkeys';
 import { useAutoSave } from '../hooks/use-auto-save';
@@ -37,7 +35,9 @@ import { importExportDialog } from '@/features/editor/deps/export-contract';
 import { getEditorLayout, getEditorLayoutCssVars } from '@/shared/ui/editor-layout';
 import { createProjectUpgradeBackup, formatProjectUpgradeBackupName } from '@/features/editor/deps/projects';
 import { ProjectUpgradeDialog } from './project-upgrade-dialog';
-import { ProjectMediaMatchDialog } from './project-media-match-dialog';
+import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog';
+import { useTtsGenerateDialogStore } from '@/shared/state/tts-generate-dialog';
+import { useProjectMediaMatchDialogStore } from '@/shared/state/project-media-match-dialog';
 const logger = createLogger('Editor');
 const EDITOR_PROJECT_ROUTE_ID = '/editor/$projectId';
 const LazyExportDialog = lazy(() =>
@@ -48,6 +48,21 @@ const LazyExportDialog = lazy(() =>
 const LazyBundleExportDialog = lazy(() =>
   importBundleExportDialog().then((module) => ({
     default: module.BundleExportDialog,
+  }))
+);
+const LazyClearKeyframesDialog = lazy(() =>
+  import('./clear-keyframes-dialog').then((module) => ({
+    default: module.ClearKeyframesDialog,
+  }))
+);
+const LazyTtsGenerateDialog = lazy(() =>
+  import('./tts-generate-dialog').then((module) => ({
+    default: module.TtsGenerateDialog,
+  }))
+);
+const LazyProjectMediaMatchDialog = lazy(() =>
+  import('./project-media-match-dialog').then((module) => ({
+    default: module.ProjectMediaMatchDialog,
   }))
 );
 
@@ -165,6 +180,11 @@ export const LoadedEditor = memo(function LoadedEditor({
   const propertiesFullColumn = useEditorStore((s) => s.propertiesFullColumn);
   const mediaFullColumn = useEditorStore((s) => s.mediaFullColumn);
   const isMaskEditingActive = useMaskEditorStore((s) => s.isEditing);
+  const clearKeyframesDialogOpen = useClearKeyframesDialogStore((s) => s.isOpen);
+  const ttsGenerateDialogOpen = useTtsGenerateDialogStore((s) => s.isOpen);
+  const projectMediaMatchDialogOpen = useProjectMediaMatchDialogStore(
+    (s) => s.isOpen && s.projectId === projectId
+  );
   const hasRefreshedMigrationStateRef = useRef(false);
 
   // Guard against concurrent saves (e.g., spamming Ctrl+S)
@@ -504,18 +524,18 @@ export const LoadedEditor = memo(function LoadedEditor({
             fileHandle={bundleFileHandle}
           />
         )}
+
+        {clearKeyframesDialogOpen && <LazyClearKeyframesDialog />}
+
+        {projectMediaMatchDialogOpen && (
+          <LazyProjectMediaMatchDialog projectId={projectId} />
+        )}
+
+        {ttsGenerateDialogOpen && <LazyTtsGenerateDialog />}
       </Suspense>
-
-      {/* Clear Keyframes Confirmation Dialog */}
-      <ClearKeyframesDialog />
-
-      <ProjectMediaMatchDialog projectId={projectId} />
 
       {/* Bento Layout Preset Dialog */}
       <BentoLayoutDialog />
-
-      {/* TTS Generate from Text Dialog */}
-      <TtsGenerateDialog />
 
     </div>
   );
