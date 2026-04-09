@@ -23,9 +23,16 @@ export function getThumbnailDimensions(
   height: number,
   maxSize: number
 ): { width: number; height: number } {
-  const safeWidth = Math.max(1, Math.round(width));
-  const safeHeight = Math.max(1, Math.round(height));
-  const safeMax = Math.max(1, Math.round(Number(maxSize) || 0));
+  let w = Number(width);
+  if (!Number.isFinite(w)) w = 1;
+  let h = Number(height);
+  if (!Number.isFinite(h)) h = 1;
+  let m = Number(maxSize);
+  if (!Number.isFinite(m)) m = 1;
+
+  const safeWidth = Math.max(1, Math.round(w));
+  const safeHeight = Math.max(1, Math.round(h));
+  const safeMax = Math.max(1, Math.round(m));
 
   if (safeWidth >= safeHeight) {
     return {
@@ -120,10 +127,14 @@ export async function persistGeneratedMediaAsset({
 
     await opfsService.saveFile(mediaMetadata.opfsPath, await blobToArrayBuffer(file));
 
-    const sanitizedWidth = Math.max(1, Math.floor(Math.abs(Number(thumbnailWidth) || 0)));
-    const sanitizedHeight = Math.max(1, Math.floor(Math.abs(Number(thumbnailHeight) || 0)));
+    const rawWidth = Number(thumbnailWidth);
+    const rawHeight = Number(thumbnailHeight);
+    const hasDimensions = Number.isFinite(rawWidth) && rawWidth > 0
+      && Number.isFinite(rawHeight) && rawHeight > 0;
 
-    if (thumbnailBlob && sanitizedWidth > 0 && sanitizedHeight > 0) {
+    if (thumbnailBlob && hasDimensions) {
+      const sanitizedWidth = Math.max(1, Math.floor(Math.abs(rawWidth)));
+      const sanitizedHeight = Math.max(1, Math.floor(Math.abs(rawHeight)));
       const thumbnailId = crypto.randomUUID();
 
       await saveThumbnailDB({

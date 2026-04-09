@@ -163,6 +163,34 @@ export const Editor = memo(function Editor({ projectId, project, migration }: Ed
   return <LoadedEditor projectId={projectId} project={project} migration={migration} />;
 });
 
+const EditorDialogHost = memo(function EditorDialogHost({ projectId }: { projectId: string }) {
+  const clearKeyframesDialogOpen = useClearKeyframesDialogStore((s) => s.isOpen);
+  const ttsGenerateDialogOpen = useTtsGenerateDialogStore((s) => s.isOpen);
+  const projectMediaMatchDialogOpen = useProjectMediaMatchDialogStore(
+    (s) => s.isOpen && s.projectId === projectId
+  );
+
+  return (
+    <>
+      {clearKeyframesDialogOpen && (
+        <Suspense fallback={null}>
+          <LazyClearKeyframesDialog />
+        </Suspense>
+      )}
+      {projectMediaMatchDialogOpen && (
+        <Suspense fallback={null}>
+          <LazyProjectMediaMatchDialog projectId={projectId} />
+        </Suspense>
+      )}
+      {ttsGenerateDialogOpen && (
+        <Suspense fallback={null}>
+          <LazyTtsGenerateDialog />
+        </Suspense>
+      )}
+    </>
+  );
+});
+
 export const LoadedEditor = memo(function LoadedEditor({
   projectId,
   project,
@@ -180,11 +208,6 @@ export const LoadedEditor = memo(function LoadedEditor({
   const propertiesFullColumn = useEditorStore((s) => s.propertiesFullColumn);
   const mediaFullColumn = useEditorStore((s) => s.mediaFullColumn);
   const isMaskEditingActive = useMaskEditorStore((s) => s.isEditing);
-  const clearKeyframesDialogOpen = useClearKeyframesDialogStore((s) => s.isOpen);
-  const ttsGenerateDialogOpen = useTtsGenerateDialogStore((s) => s.isOpen);
-  const projectMediaMatchDialogOpen = useProjectMediaMatchDialogStore(
-    (s) => s.isOpen && s.projectId === projectId
-  );
   const hasRefreshedMigrationStateRef = useRef(false);
 
   // Guard against concurrent saves (e.g., spamming Ctrl+S)
@@ -526,23 +549,7 @@ export const LoadedEditor = memo(function LoadedEditor({
         )}
       </Suspense>
 
-      {clearKeyframesDialogOpen && (
-        <Suspense fallback={null}>
-          <LazyClearKeyframesDialog />
-        </Suspense>
-      )}
-
-      {projectMediaMatchDialogOpen && (
-        <Suspense fallback={null}>
-          <LazyProjectMediaMatchDialog projectId={projectId} />
-        </Suspense>
-      )}
-
-      {ttsGenerateDialogOpen && (
-        <Suspense fallback={null}>
-          <LazyTtsGenerateDialog />
-        </Suspense>
-      )}
+      <EditorDialogHost projectId={projectId} />
 
       {/* Bento Layout Preset Dialog */}
       <BentoLayoutDialog />
