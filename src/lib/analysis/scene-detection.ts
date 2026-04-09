@@ -39,9 +39,8 @@ const SAMPLE_INTERVAL_MS = 500;
 /** Minimum gap in seconds between scene cuts — prevents micro-segments from dissolves/pans */
 const MIN_CUT_GAP_SEC = 2.0;
 
-/** Resolution for frames sent to Gemma (larger = better accuracy, slower) */
-const VERIFY_FRAME_WIDTH = 640;
-const VERIFY_FRAME_HEIGHT = 360;
+/** Max dimension (longest side) for frames sent to Gemma — preserves aspect ratio */
+const VERIFY_MAX_DIM = 480;
 
 /** How far before the detected cut to sample the "before" frame (seconds) */
 const VERIFY_BEFORE_OFFSET_SEC = 1.0;
@@ -217,6 +216,7 @@ export async function detectScenes(
   try {
     const verified = await verifyWithGemma(video, deduped, onProgress, signal);
     log.info('Gemma verification complete', { confirmed: verified.length, candidates: deduped.length });
+    disposeGemmaWorker();
     return cacheAndReturn(verified);
   } catch (err) {
     resetGemmaWorker();
@@ -226,17 +226,26 @@ export async function detectScenes(
 }
 
 /**
- * Capture a video frame as a PNG Blob for Gemma input.
+ * Capture a video frame as a JPEG Blob for Gemma input.
+ * Preserves the video's native aspect ratio, scaling so the longest
+ * side fits within VERIFY_MAX_DIM.
  */
 async function captureFrameBlob(
   video: HTMLVideoElement,
   timeSec: number,
 ): Promise<Blob> {
   await seekVideo(video, timeSec);
-  const canvas = new OffscreenCanvas(VERIFY_FRAME_WIDTH, VERIFY_FRAME_HEIGHT);
+
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 360;
+  const scale = Math.min(VERIFY_MAX_DIM / Math.max(vw, vh), 1);
+  const w = Math.round(vw * scale);
+  const h = Math.round(vh * scale);
+
+  const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(video, 0, 0, VERIFY_FRAME_WIDTH, VERIFY_FRAME_HEIGHT);
-  return canvas.convertToBlob({ type: 'image/png' });
+  ctx.drawImage(video, 0, 0, w, h);
+  return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
 }
 
 /**
@@ -257,6 +266,16 @@ function resetGemmaWorker(): void {
     gemmaWorker.terminate();
     gemmaWorker = null;
   }
+}
+
+/** Ask the worker to release VRAM, then terminate it. */
+function disposeGemmaWorker(): void {
+  if (!gemmaWorker) return;
+  gemmaWorker.postMessage({ type: 'dispose' });
+  // Give the worker a moment to release GPU buffers before terminating
+  const w = gemmaWorker;
+  gemmaWorker = null;
+  setTimeout(() => w.terminate(), 500);
 }
 
 /**

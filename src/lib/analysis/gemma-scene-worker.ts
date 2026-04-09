@@ -168,6 +168,18 @@ async function verifyCandidate(
   }
 }
 
+/** Release model and processor to free VRAM. */
+function dispose(): void {
+  if (model) {
+    // transformers.js models expose a dispose() that releases WebGPU buffers
+    if (typeof model.dispose === 'function') model.dispose();
+    model = null;
+  }
+  processor = null;
+  loading = false;
+  post({ type: 'disposed' });
+}
+
 // Use addEventListener (not self.onmessage =) so the bootstrap wrapper
 // can set onmessage for message buffering without conflicting.
 self.addEventListener('message', (event: MessageEvent) => {
@@ -176,5 +188,7 @@ self.addEventListener('message', (event: MessageEvent) => {
     void loadModel();
   } else if (msg.type === 'verify') {
     void verifyCandidate(msg.id, msg.before, msg.after);
+  } else if (msg.type === 'dispose') {
+    dispose();
   }
 });
