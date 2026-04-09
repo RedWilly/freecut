@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { VideoItem } from '@/types/timeline';
+import type { AudioItem, TextItem, VideoItem } from '@/types/timeline';
 import { useItemsStore } from './items-store';
 import { useTimelineSettingsStore } from './timeline-settings-store';
 import { timelineToSourceFrames } from '../utils/source-calculations';
@@ -15,6 +15,34 @@ function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
     label: 'clip.mp4',
     src: 'blob:test',
     mediaId: 'media-1',
+    ...overrides,
+  };
+}
+
+function makeAudioItem(overrides: Partial<AudioItem> = {}): AudioItem {
+  return {
+    id: 'audio-1',
+    type: 'audio',
+    trackId: 'track-audio',
+    from: 0,
+    durationInFrames: 100,
+    label: 'clip.wav',
+    src: 'blob:test',
+    mediaId: 'media-1',
+    ...overrides,
+  };
+}
+
+function makeTextItem(overrides: Partial<TextItem> = {}): TextItem {
+  return {
+    id: 'text-1',
+    type: 'text',
+    trackId: 'track-text',
+    from: 0,
+    durationInFrames: 30,
+    label: 'Caption',
+    text: 'Caption',
+    color: '#ffffff',
     ...overrides,
   };
 }
@@ -209,6 +237,60 @@ describe('items-store rate stretch', () => {
     expect(updated.sourceEnd).toBe(4678);
     expect(updated.sourceStart).toBe(3185);
     expect(updated.sourceDuration).toBe(4809);
+  });
+});
+
+describe('items-store indexes', () => {
+  beforeEach(() => {
+    useTimelineSettingsStore.setState({ fps: 30 });
+    useItemsStore.getState().setItems([]);
+    useItemsStore.getState().setTracks([]);
+  });
+
+  it('indexes legacy generated captions as replaceable for their containing clip', () => {
+    const clip = makeVideoItem({
+      id: 'legacy-clip',
+      from: 200,
+      durationInFrames: 40,
+      mediaId: 'media-legacy',
+    });
+    const legacyCaption = makeTextItem({
+      id: 'legacy-caption',
+      from: 205,
+      durationInFrames: 12,
+      mediaId: 'media-legacy',
+      label: 'Legacy caption',
+      text: 'Legacy caption',
+    });
+
+    useItemsStore.getState().setItems([clip, legacyCaption]);
+
+    expect(useItemsStore.getState().replaceableCaptionClipIds.has('legacy-clip')).toBe(true);
+  });
+
+  it('indexes legacy linked audio/video pairs for O(1) lookups', () => {
+    const video = makeVideoItem({
+      id: 'video-legacy',
+      originId: 'origin-1',
+      mediaId: 'media-legacy',
+      from: 120,
+      durationInFrames: 48,
+    });
+    const audio = makeAudioItem({
+      id: 'audio-legacy',
+      originId: 'origin-1',
+      mediaId: 'media-legacy',
+      from: 120,
+      durationInFrames: 48,
+    });
+
+    useItemsStore.getState().setItems([video, audio]);
+
+    const linkedVideoItems = useItemsStore.getState().linkedItemsByItemId['video-legacy'];
+    const linkedAudioItems = useItemsStore.getState().linkedItemsByItemId['audio-legacy'];
+
+    expect(linkedVideoItems?.map((item) => item.id)).toEqual(['video-legacy', 'audio-legacy']);
+    expect(linkedAudioItems?.map((item) => item.id)).toEqual(['video-legacy', 'audio-legacy']);
   });
 });
 

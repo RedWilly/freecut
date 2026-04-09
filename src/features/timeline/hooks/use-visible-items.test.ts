@@ -10,7 +10,7 @@ import { useItemsStore } from '../stores/items-store';
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
 import { useTimelineViewportStore, _resetViewportThrottle } from '../stores/timeline-viewport-store';
 import { useTransitionsStore } from '../stores/transitions-store';
-import { useZoomStore } from '../stores/zoom-store';
+import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store';
 
 function makeItem(id: string, from: number, duration: number): VideoItem {
   return {
@@ -107,7 +107,7 @@ describe('useVisibleItems filtering logic', () => {
       isDirty: false,
       isTimelineLoading: false,
     });
-    useZoomStore.getState().setZoomLevelImmediate(1);
+    _resetZoomStoreForTest();
     useItemsStore.getState().setItems([]);
     useItemsStore.getState().setTracks([]);
     useTransitionsStore.getState().setTransitions([]);
@@ -211,6 +211,37 @@ describe('useVisibleItems filtering logic', () => {
     });
 
     expect(screen.getByTestId('visible-items')).toHaveTextContent('c');
+    expect(onRender).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it('keeps the mounted item window stable during live zoom-in and settles afterward', () => {
+    vi.useFakeTimers();
+
+    useItemsStore.getState().setItems([
+      makeItem('a', 0, 30),
+      makeItem('b', 500, 30),
+    ]);
+
+    const onRender = vi.fn();
+    render(createElement(VisibleItemsProbe, { onRender }));
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
+    expect(onRender).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(2);
+    });
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
+    expect(onRender).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a');
     expect(onRender).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();

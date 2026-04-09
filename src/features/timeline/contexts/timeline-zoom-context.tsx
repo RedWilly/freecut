@@ -20,15 +20,13 @@ interface TimelineZoomValue {
   fps: number;
 }
 
-/**
- * Hook to get timeline zoom values and helper functions.
- *
- * Reads directly from Zustand stores.
- */
-export function useTimelineZoomContext(): TimelineZoomValue {
-  const zoomLevel = useZoomStore((s) => s.level);
+function useTimelineZoomValue(
+  zoomLevelSelector: (state: ReturnType<typeof useZoomStore.getState>) => number,
+  pixelsPerSecondSelector: (state: ReturnType<typeof useZoomStore.getState>) => number,
+): TimelineZoomValue {
+  const zoomLevel = useZoomStore(zoomLevelSelector);
+  const pixelsPerSecond = useZoomStore(pixelsPerSecondSelector);
   const fps = useTimelineStore((s) => s.fps);
-  const pixelsPerSecond = zoomLevel * 100;
 
   return useMemo(() => ({
     zoomLevel,
@@ -39,4 +37,23 @@ export function useTimelineZoomContext(): TimelineZoomValue {
     frameToPixels: (f: number) => (f / fps) * pixelsPerSecond,
     pixelsToFrame: (p: number) => Math.round((p / pixelsPerSecond) * fps),
   }), [zoomLevel, pixelsPerSecond, fps]);
+}
+
+/**
+ * Hook to get timeline zoom values and helper functions.
+ *
+ * Reads directly from Zustand stores.
+ */
+export function useTimelineZoomContext(): TimelineZoomValue {
+  return useTimelineZoomValue(
+    (s) => s.level,
+    (s) => s.pixelsPerSecond,
+  );
+}
+
+export function useTimelineContentZoomContext(): TimelineZoomValue {
+  return useTimelineZoomValue(
+    (s) => s.contentLevel,
+    (s) => s.contentPixelsPerSecond,
+  );
 }

@@ -1,6 +1,6 @@
 ﻿import { create } from 'zustand';
 import { createLogger } from '@/shared/logging/logger';
-import type { TimelineItem, TimelineTrack } from '@/types/timeline';
+import type { AudioItem, TextItem, TimelineItem, TimelineTrack, VideoItem } from '@/types/timeline';
 import type { TransformProperties } from '@/types/transform';
 import type { VisualEffect, ItemEffect } from '@/types/effects';
 import { clampTrimAmount, clampToAdjacentItems, calculateTrimSourceUpdate } from '../utils/trim-utils';
@@ -129,6 +129,158 @@ function buildItemsByTrackId(
   return next;
 }
 
+function buildItemsByLinkedGroupId(
+  items: TimelineItem[],
+  previous: Record<string, TimelineItem[]>
+): Record<string, TimelineItem[]> {
+  const grouped: Record<string, TimelineItem[]> = {};
+  for (const item of items) {
+    if (item.linkedGroupId) {
+      (grouped[item.linkedGroupId] ??= []).push(item);
+    }
+  }
+
+  const next: Record<string, TimelineItem[]> = {};
+  for (const [groupId, groupItems] of Object.entries(grouped)) {
+    const previousGroupItems = previous[groupId];
+    next[groupId] = previousGroupItems && areItemArraysEqual(previousGroupItems, groupItems)
+      ? previousGroupItems
+      : groupItems;
+  }
+
+  return next;
+}
+
+function isCaptionableClip(item: TimelineItem): item is AudioItem | VideoItem {
+  return (item.type === 'audio' || item.type === 'video')
+    && typeof item.mediaId === 'string'
+    && item.mediaId.length > 0;
+}
+
+function isLegacyGeneratedCaptionItem(item: TimelineItem): item is TextItem {
+  return item.type === 'text'
+    && !item.captionSource
+    && typeof item.mediaId === 'string'
+    && item.mediaId.length > 0
+    && item.text.trim().length > 0
+    && item.label === item.text.slice(0, 48);
+}
+
+function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
+  const ids = new Set<string>();
+  const clipsByMediaId: Record<string, Array<AudioItem | VideoItem>> = {};
+
+  for (const item of items) {
+    if (item.type === 'text' && item.captionSource?.type === 'transcript' && item.captionSource.clipId) {
+      ids.add(item.captionSource.clipId);
+      continue;
+    }
+
+    if (isCaptionableClip(item)) {
+      (clipsByMediaId[item.mediaId] ??= []).push(item);
+    }
+  }
+
+  for (const clips of Object.values(clipsByMediaId)) {
+    clips.sort((left, right) => left.from - right.from);
+  }
+
+  for (const item of items) {
+    if (!isLegacyGeneratedCaptionItem(item) || !item.mediaId) {
+      continue;
+    }
+
+    const itemEnd = item.from + item.durationInFrames;
+    const candidateClips = clipsByMediaId[item.mediaId];
+    if (!candidateClips) {
+      continue;
+    }
+
+    for (const clip of candidateClips) {
+      if (clip.from > item.from) {
+        break;
+      }
+
+      const clipEnd = clip.from + clip.durationInFrames;
+      if (item.from >= clip.from && itemEnd <= clipEnd) {
+        ids.add(clip.id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
+  return (left.type === 'video' && right.type === 'audio')
+    || (left.type === 'audio' && right.type === 'video');
+}
+
+function isLegacyLinkCandidate(item: TimelineItem): item is AudioItem | VideoItem {
+  return !item.linkedGroupId
+    && isCaptionableClip(item)
+    && typeof item.originId === 'string'
+    && item.originId.length > 0;
+}
+
+function isLegacyLinkedPair(anchor: TimelineItem, candidate: TimelineItem): boolean {
+  if (!isMediaPair(anchor, candidate)) return false;
+  if (!anchor.originId || anchor.originId !== candidate.originId) return false;
+  if (!anchor.mediaId || anchor.mediaId !== candidate.mediaId) return false;
+  return anchor.from === candidate.from && anchor.durationInFrames === candidate.durationInFrames;
+}
+
+function buildLinkedItemsByItemId(
+  items: TimelineItem[],
+  itemsByLinkedGroupId: Record<string, TimelineItem[]>,
+  previous: Record<string, TimelineItem[]>
+): Record<string, TimelineItem[]> {
+  const next: Record<string, TimelineItem[]> = {};
+
+  for (const groupItems of Object.values(itemsByLinkedGroupId)) {
+    if (groupItems.length <= 1) {
+      continue;
+    }
+
+    for (const item of groupItems) {
+      next[item.id] = groupItems;
+    }
+  }
+
+  const legacyGroups: Record<string, TimelineItem[]> = {};
+  for (const item of items) {
+    if (!isLegacyLinkCandidate(item)) {
+      continue;
+    }
+
+    const key = `${item.originId}|${item.mediaId}|${item.from}|${item.durationInFrames}`;
+    (legacyGroups[key] ??= []).push(item);
+  }
+
+  for (const groupItems of Object.values(legacyGroups)) {
+    if (groupItems.length <= 1) {
+      continue;
+    }
+
+    for (const anchor of groupItems) {
+      const linkedItems = groupItems.filter((candidate) =>
+        candidate.id === anchor.id || isLegacyLinkedPair(anchor, candidate)
+      );
+
+      if (linkedItems.length <= 1) {
+        continue;
+      }
+
+      const previousLinkedItems = previous[anchor.id];
+      next[anchor.id] = previousLinkedItems && areItemArraysEqual(previousLinkedItems, linkedItems)
+        ? previousLinkedItems
+        : linkedItems;
+    }
+  }
+
+  return next;
+}
+
 function buildItemById(
   items: TimelineItem[],
   previous: Record<string, TimelineItem>
@@ -166,12 +318,16 @@ function computeMaxItemEndFrame(items: TimelineItem[]): number {
 
 function withItemIndexes(
   items: TimelineItem[],
-  previous: Pick<ItemsState, 'itemsByTrackId' | 'itemById'>
-): Pick<ItemsState, 'items' | 'itemsByTrackId' | 'itemById' | 'maxItemEndFrame'> {
+  previous: Pick<ItemsState, 'itemsByTrackId' | 'itemById' | 'itemsByLinkedGroupId' | 'linkedItemsByItemId'>
+): Pick<ItemsState, 'items' | 'itemsByTrackId' | 'itemById' | 'itemsByLinkedGroupId' | 'linkedItemsByItemId' | 'replaceableCaptionClipIds' | 'maxItemEndFrame'> {
+  const itemsByLinkedGroupId = buildItemsByLinkedGroupId(items, previous.itemsByLinkedGroupId);
   return {
     items,
     itemsByTrackId: buildItemsByTrackId(items, previous.itemsByTrackId),
     itemById: buildItemById(items, previous.itemById),
+    itemsByLinkedGroupId,
+    linkedItemsByItemId: buildLinkedItemsByItemId(items, itemsByLinkedGroupId, previous.linkedItemsByItemId),
+    replaceableCaptionClipIds: buildReplaceableCaptionClipIds(items),
     maxItemEndFrame: computeMaxItemEndFrame(items),
   };
 }
@@ -240,6 +396,10 @@ interface ItemsState {
   items: TimelineItem[];
   itemsByTrackId: Record<string, TimelineItem[]>;
   itemById: Record<string, TimelineItem>;
+  itemsByLinkedGroupId: Record<string, TimelineItem[]>;
+  linkedItemsByItemId: Record<string, TimelineItem[]>;
+  /** Set of clip IDs that can regenerate captions, including legacy generated captions */
+  replaceableCaptionClipIds: Set<string>;
   maxItemEndFrame: number;
   mediaDependencyIds: string[];
   mediaDependencyVersion: number;
@@ -289,6 +449,9 @@ export const useItemsStore = create<ItemsState & ItemsActions>()(
     items: [],
     itemsByTrackId: {},
     itemById: {},
+    itemsByLinkedGroupId: {},
+    linkedItemsByItemId: {},
+    replaceableCaptionClipIds: new Set<string>(),
     maxItemEndFrame: 0,
     mediaDependencyIds: [],
     mediaDependencyVersion: 0,

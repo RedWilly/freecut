@@ -151,7 +151,7 @@ export const TimelineContent = memo(function TimelineContent({
   // O(1) pre-computed value from items store instead of O(n) reduce on every change
   const furthestItemEndFrame = useItemsStore((s) => s.maxItemEndFrame);
   const maxTimelineFrame = Math.floor(Math.max(furthestItemEndFrame / fps, 10) * fps);
-  const { timeToPixels, frameToPixels, pixelsToFrame, setZoom, setZoomImmediate, zoomLevel } = useTimelineZoom({
+  const { timeToPixels, frameToPixels, pixelsToFrame, setZoomImmediate, zoomLevel } = useTimelineZoom({
     minZoom: 0.01,
     maxZoom: 2, // Match slider range
   });
@@ -238,6 +238,9 @@ export const TimelineContent = memo(function TimelineContent({
   const lastZoomApplyTimeRef = useRef(0); // Throttle zoom updates in momentum loop
   const ZOOM_UPDATE_INTERVAL = 50; // Match store throttle - update at most 20fps during momentum
   const viewportSyncRafRef = useRef<number | null>(null);
+  const queuedZoomLevelRef = useRef<number | null>(null);
+  const queuedZoomScrollLeftRef = useRef<number | null>(null);
+  const zoomApplyRafRef = useRef<number | null>(null);
 
   const syncViewportFromContainer = useCallback(() => {
     const container = containerRef.current;
@@ -665,11 +668,45 @@ export const TimelineContent = memo(function TimelineContent({
    *
    * Uses refs for dynamic values to avoid callback recreation on every render
    */
+  const scheduleZoomApply = useCallback((nextZoomLevel: number, nextScrollLeft: number) => {
+    queuedZoomLevelRef.current = nextZoomLevel;
+    queuedZoomScrollLeftRef.current = nextScrollLeft;
+
+    if (zoomApplyRafRef.current !== null) {
+      return;
+    }
+
+    zoomApplyRafRef.current = requestAnimationFrame(() => {
+      zoomApplyRafRef.current = null;
+      const queuedZoomLevel = queuedZoomLevelRef.current;
+      const queuedScrollLeft = queuedZoomScrollLeftRef.current;
+      queuedZoomLevelRef.current = null;
+      queuedZoomScrollLeftRef.current = null;
+
+      if (queuedZoomLevel === null || queuedScrollLeft === null) {
+        return;
+      }
+
+      pendingScrollRef.current = queuedScrollLeft;
+      scrollLeftRef.current = queuedScrollLeft;
+      setZoomImmediate(queuedZoomLevel);
+    });
+  }, [setZoomImmediate]);
+
+  const clearQueuedZoomApply = useCallback(() => {
+    queuedZoomLevelRef.current = null;
+    queuedZoomScrollLeftRef.current = null;
+    if (zoomApplyRafRef.current !== null) {
+      cancelAnimationFrame(zoomApplyRafRef.current);
+      zoomApplyRafRef.current = null;
+    }
+  }, []);
+
   const applyZoomWithPlayheadCentering = useCallback((newZoomLevel: number) => {
     const container = containerRef.current;
     if (!container) return;
 
-    const currentZoom = zoomLevelRef.current;
+    const currentZoom = queuedZoomLevelRef.current ?? zoomLevelRef.current;
 
     // Clamp zoom to valid range
     const clampedZoom = Math.max(0.01, Math.min(2, newZoomLevel));
@@ -679,7 +716,8 @@ export const TimelineContent = memo(function TimelineContent({
     const cursorScreenX = zoomCursorXRef.current;
 
     // Calculate cursor's position in CONTENT coordinates (timeline space)
-    const cursorContentX = container.scrollLeft + cursorScreenX;
+    const baseScrollLeft = queuedZoomScrollLeftRef.current ?? pendingScrollRef.current ?? container.scrollLeft;
+    const cursorContentX = baseScrollLeft + cursorScreenX;
 
     // Convert to time using current zoom, clamped to actual content duration
     const currentPixelsPerSecond = currentZoom * 100;
@@ -701,14 +739,9 @@ export const TimelineContent = memo(function TimelineContent({
     // Only clamp to prevent negative scroll (left boundary)
     const clampedScrollLeft = Math.max(0, newScrollLeft);
 
-    // Queue scroll to be applied AFTER render (so DOM has correct width)
-    // Update ref immediately so timelineWidth calculation can use it
-    pendingScrollRef.current = clampedScrollLeft;
-    scrollLeftRef.current = clampedScrollLeft;
-
-    // Apply zoom - this triggers re-render, after which useLayoutEffect applies scroll
-    setZoomImmediate(clampedZoom);
-  }, [setZoomImmediate]);
+    // Coalesce dense wheel updates into a single visual zoom publish per frame.
+    scheduleZoomApply(clampedZoom, clampedScrollLeft);
+  }, [scheduleZoomApply]);
 
   // Create zoom handlers that include playhead centering
   // These callbacks are stable and don't recreate on every render thanks to refs
@@ -735,6 +768,7 @@ export const TimelineContent = memo(function TimelineContent({
   const handleZoomToFit = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
+    clearQueuedZoomApply();
 
     // Use refs for dynamic values to keep callback stable
     const effectiveContainerWidth = containerWidthRef.current > 0 ? containerWidthRef.current : container.clientWidth;
@@ -745,13 +779,16 @@ export const TimelineContent = memo(function TimelineContent({
     const newZoomLevel = getZoomToFitLevel(effectiveContainerWidth, contentDuration);
 
     // Apply zoom and reset scroll to start
-    setZoom(newZoomLevel);
+    pendingScrollRef.current = 0;
+    scrollLeftRef.current = 0;
+    setZoomImmediate(newZoomLevel);
     container.scrollLeft = 0;
-  }, [setZoom]);
+  }, [clearQueuedZoomApply, setZoomImmediate]);
 
   const handleZoomTo100 = useCallback((centerFrame: number) => {
     const container = containerRef.current;
     if (!container) return;
+    clearQueuedZoomApply();
 
     const currentFps = useTimelineStore.getState().fps;
 
@@ -765,7 +802,7 @@ export const TimelineContent = memo(function TimelineContent({
     scrollLeftRef.current = newScrollLeft;
 
     setZoomImmediate(1);
-  }, [setZoomImmediate]);
+  }, [clearQueuedZoomApply, setZoomImmediate]);
 
   // Register zoom-to-100 handler globally so keyboard shortcuts can use it
   useEffect(() => {
@@ -873,6 +910,9 @@ export const TimelineContent = memo(function TimelineContent({
     return () => {
       if (momentumIdRef.current !== null) {
         cancelAnimationFrame(momentumIdRef.current);
+      }
+      if (zoomApplyRafRef.current !== null) {
+        cancelAnimationFrame(zoomApplyRafRef.current);
       }
     };
   }, []);

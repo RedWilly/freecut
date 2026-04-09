@@ -13,6 +13,13 @@ import { mixCompoundClipWaveformPeaks } from '../../utils/compound-clip-waveform
 
 const logger = createLogger('CompoundClipWaveform');
 const WAVEFORM_VERTICAL_PADDING_PX = 3;
+const ZOOM_SETTLE_MS = 80;
+const RENDER_PPS_QUANTUM = 5;
+
+function quantizeRenderPps(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  return Math.max(1, Math.round(value / RENDER_PPS_QUANTUM) * RENDER_PPS_QUANTUM);
+}
 
 interface CompoundClipWaveformProps {
   composition: SubComposition;
@@ -33,10 +40,15 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
 }: CompoundClipWaveformProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const requestTokenRef = useRef(0);
+  const pixelsPerSecondRef = useRef(pixelsPerSecond);
+  pixelsPerSecondRef.current = pixelsPerSecond;
+  const lastPpsRef = useRef(pixelsPerSecond);
+  const zoomSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [height, setHeight] = useState(0);
   const [waveformsByMediaId, setWaveformsByMediaId] = useState<Map<string, CachedWaveform>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [isZooming, setIsZooming] = useState(false);
   const mediaById = useMediaLibraryStore((s) => s.mediaById);
   const compositionById = useCompositionsStore((s) => s.compositionById);
 
@@ -174,6 +186,29 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     return maxPeak > 0 ? maxPeak : 1;
   }, [peaks]);
 
+  useEffect(() => {
+    if (lastPpsRef.current === pixelsPerSecond) return;
+    lastPpsRef.current = pixelsPerSecond;
+
+    setIsZooming(true);
+    if (zoomSettleTimeoutRef.current) {
+      clearTimeout(zoomSettleTimeoutRef.current);
+    }
+
+    zoomSettleTimeoutRef.current = setTimeout(() => {
+      setIsZooming(false);
+      zoomSettleTimeoutRef.current = null;
+    }, ZOOM_SETTLE_MS);
+  }, [pixelsPerSecond]);
+
+  useEffect(() => {
+    return () => {
+      if (zoomSettleTimeoutRef.current) {
+        clearTimeout(zoomSettleTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const renderTile = useCallback((
     ctx: CanvasRenderingContext2D,
     _tileIndex: number,
@@ -184,6 +219,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
       return;
     }
 
+    const currentPps = Math.max(1, pixelsPerSecondRef.current);
     const centerY = height / 2;
     const maxWaveHeight = Math.max(1, (height / 2) - WAVEFORM_VERTICAL_PADDING_PX);
     const amplitudes = new Array<number>(tileWidth + 1).fill(0);
@@ -192,7 +228,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     ctx.moveTo(0, centerY);
 
     for (let x = 0; x <= tileWidth; x += 1) {
-      const timelinePosition = (tileOffset + x) / pixelsPerSecond;
+      const timelinePosition = (tileOffset + x) / currentPps;
       const compoundTime = sourceStart + timelinePosition;
 
       if (compoundTime < 0 || compoundTime > sourceDuration) {
@@ -206,7 +242,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
 
       const pointWindowSeconds = Math.max(
         1 / sampleRate,
-        (1 / pixelsPerSecond) * 0.5,
+        (1 / currentPps) * 0.5,
       );
       const samplesPerPoint = Math.max(1, Math.ceil(pointWindowSeconds * sampleRate));
       const halfWindow = Math.floor(samplesPerPoint / 2);
@@ -254,7 +290,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     ctx.strokeStyle = WAVEFORM_STROKE_COLOR;
     ctx.lineWidth = 0.75;
     ctx.stroke();
-  }, [height, normalizationPeak, peaks, pixelsPerSecond, sampleRate, sourceDuration, sourceStart]);
+  }, [height, normalizationPeak, peaks, sampleRate, sourceDuration, sourceStart]);
 
   if (hasError) {
     return (
@@ -279,8 +315,11 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     );
   }
 
-  const quantizedPps = Math.round(pixelsPerSecond / 5) * 5;
-  const renderVersion = peaks.length * 10000 + quantizedPps + height + waveformsByMediaId.size;
+  const isActiveZoomRender = isZooming || lastPpsRef.current !== pixelsPerSecond;
+  const renderPpsKey = isActiveZoomRender
+    ? `q${quantizeRenderPps(pixelsPerSecond)}`
+    : `e${Math.round(Math.max(1, pixelsPerSecond) * 1000)}`;
+  const renderVersion = `${peaks.length}:${height}:${waveformsByMediaId.size}:${renderPpsKey}`;
 
   return (
     <div ref={containerRef} className="absolute inset-0">

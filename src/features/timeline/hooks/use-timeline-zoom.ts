@@ -11,24 +11,32 @@ interface UseTimelineZoomOptions {
   maxZoom?: number;
 }
 
+interface ZoomSelectors {
+  zoomLevel: (state: ReturnType<typeof useZoomStore.getState>) => number;
+  pixelsPerSecond: (state: ReturnType<typeof useZoomStore.getState>) => number;
+}
+
 /**
  * Timeline zoom hook with utilities for converting between time and pixels
  *
  * Uses granular Zustand selectors for optimal performance
  */
-export function useTimelineZoom(options: UseTimelineZoomOptions = {}) {
+function useTimelineZoomInternal(
+  options: UseTimelineZoomOptions,
+  selectors: ZoomSelectors
+) {
   const {
     minZoom = 0.01,
     maxZoom = 10,
   } = options;
 
   // Use granular selectors - Zustand v5 best practice
-  const zoomLevel = useZoomStore((s) => s.level);
+  const zoomLevel = useZoomStore(selectors.zoomLevel);
   const setZoomLevel = useZoomStore((s) => s.setZoomLevel);
   const setZoomLevelImmediate = useZoomStore((s) => s.setZoomLevelImmediate);
   const zoomInAction = useZoomStore((s) => s.zoomIn);
   const zoomOutAction = useZoomStore((s) => s.zoomOut);
-  const pixelsPerSecond = useZoomStore((s) => s.pixelsPerSecond);
+  const pixelsPerSecond = useZoomStore(selectors.pixelsPerSecond);
   const fps = useTimelineStore((s) => s.fps);
 
   /**
@@ -106,4 +114,18 @@ export function useTimelineZoom(options: UseTimelineZoomOptions = {}) {
     setZoom: (level: number) => setZoomLevel(Math.max(minZoom, Math.min(maxZoom, level))),
     setZoomImmediate: (level: number) => setZoomLevelImmediate(Math.max(minZoom, Math.min(maxZoom, level))),
   };
+}
+
+export function useTimelineZoom(options: UseTimelineZoomOptions = {}) {
+  return useTimelineZoomInternal(options, {
+    zoomLevel: (s) => s.level,
+    pixelsPerSecond: (s) => s.pixelsPerSecond,
+  });
+}
+
+export function useTimelineContentZoom(options: UseTimelineZoomOptions = {}) {
+  return useTimelineZoomInternal(options, {
+    zoomLevel: (s) => s.contentLevel,
+    pixelsPerSecond: (s) => s.contentPixelsPerSecond,
+  });
 }

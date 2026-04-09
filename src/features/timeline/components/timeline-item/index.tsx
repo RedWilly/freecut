@@ -75,10 +75,8 @@ import { getFilteredItemSnapEdges } from '../../utils/timeline-snap-utils';
 import {
   expandSelectionWithLinkedItems,
   getLinkedItemIds,
-  getLinkedItems,
   getLinkedSyncOffsetFrames,
   getSynchronizedLinkedItems,
-  hasLinkedItems,
 } from '../../utils/linked-items';
 import { getVisibleTrackIds } from '../../utils/group-utils';
 import {
@@ -105,6 +103,7 @@ import { getAudioVolumeDbFromDragDelta, getAudioVisualizationScale, getAudioVolu
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { findHandleNeighborWithTransitions, findNearestNeighbors } from '../../utils/transition-linked-neighbors';
 const EMPTY_SEGMENT_OVERLAYS = [] as const;
+const EMPTY_LINKED_ITEMS: TimelineItemType[] = [];
 const ACTIVE_CURSOR_CLASSES = [
   'timeline-cursor-trim-left',
   'timeline-cursor-trim-right',
@@ -186,31 +185,18 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       [item.mediaId]
     )
   );
+  // O(1) index lookup that preserves both explicit captionSource links and
+  // legacy generated-caption detection.
   const hasGeneratedCaptions = useItemsStore(
     useCallback(
-      (s) => s.items.some((timelineItem) =>
-        timelineItem.type === 'text'
-        && (
-          (
-            timelineItem.captionSource?.type === 'transcript'
-            && timelineItem.captionSource.clipId === item.id
-          )
-          || (
-            !timelineItem.captionSource
-            && timelineItem.mediaId === item.mediaId
-            && timelineItem.from >= item.from
-            && timelineItem.from + timelineItem.durationInFrames <= item.from + item.durationInFrames
-            && timelineItem.text.trim().length > 0
-            && timelineItem.label === timelineItem.text.slice(0, 48)
-          )
-        )
-      ),
-      [item.durationInFrames, item.from, item.id, item.mediaId]
+      (s) => s.replaceableCaptionClipIds.has(item.id),
+      [item.id]
     )
   );
   const defaultWhisperModel = useSettingsStore((s) => s.defaultWhisperModel);
+  // O(1) via index, including legacy linked audio/video pairs.
   const isLinked = useItemsStore(
-    useCallback((s) => hasLinkedItems(s.items, item.id), [item.id])
+    useCallback((s) => !!s.linkedItemsByItemId[item.id], [item.id])
   );
   const linkedSelectionEnabled = useEditorStore((s) => s.linkedSelectionEnabled);
   const segmentOverlays = useTimelineItemOverlayStore(
@@ -422,10 +408,15 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const fps = useTimelineStore((s) => s.fps);
   const addEffects = useTimelineStore((s) => s.addEffects);
   const updateTimelineItem = useTimelineStore((s) => s.updateItem);
+  // O(1) via index instead of O(n) getLinkedItems scan.
   const linkedItemsForSync = useItemsStore(
     useShallow(
       useCallback(
-        (s) => getLinkedItems(s.items, item.id).filter((linkedItem) => linkedItem.id !== item.id),
+        (s) => {
+          const linkedItems = s.linkedItemsByItemId[item.id];
+          if (!linkedItems || linkedItems.length <= 1) return EMPTY_LINKED_ITEMS;
+          return linkedItems.filter((linked) => linked.id !== item.id);
+        },
         [item.id],
       ),
     ),

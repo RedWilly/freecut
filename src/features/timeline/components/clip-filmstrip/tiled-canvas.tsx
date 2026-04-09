@@ -18,14 +18,18 @@ interface TiledCanvasProps {
   /** Class name for the container */
   className?: string;
   /** Version number - increment to force re-render */
-  version?: number;
+  version?: string | number;
 }
 
 /**
  * Tiled Canvas Component
  *
  * Renders content across multiple canvas tiles to avoid browser canvas size limits.
- * Each tile is 2000px wide. Only creates canvases when needed.
+ * Each tile is 1000px wide. Only creates canvases when needed.
+ *
+ * Separates layout (CSS positioning — runs on every width change) from content
+ * rendering (canvas draw — runs only when version/renderTile changes). This
+ * prevents full canvas redraws during zoom gestures where only width changes.
  */
 export const TiledCanvas = memo(function TiledCanvas({
   width,
@@ -36,21 +40,31 @@ export const TiledCanvas = memo(function TiledCanvas({
 }: TiledCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasPoolRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
+  const lastRenderedRef = useRef<{ version: string | number; renderTile: unknown; height: number }>({
+    version: -1,
+    renderTile: renderTile as unknown,
+    height: -1,
+  });
 
   // Calculate number of tiles needed
   const tileCount = Math.ceil(width / TILE_WIDTH);
 
-  // Render tiles effect - depends on version which includes zoom level
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const canvasPool = canvasPoolRef.current;
     const dpr = window.devicePixelRatio || 1;
+    const last = lastRenderedRef.current;
+    const needsContentRedraw =
+      version !== last.version ||
+      renderTile !== last.renderTile ||
+      height !== last.height;
 
     // Create or update tiles
     for (let tileIndex = 0; tileIndex < tileCount; tileIndex++) {
       let canvas = canvasPool.get(tileIndex);
+      const isNew = !canvas;
 
       if (!canvas) {
         canvas = document.createElement('canvas');
@@ -67,22 +81,24 @@ export const TiledCanvas = memo(function TiledCanvas({
       const tileOffset = tileIndex * TILE_WIDTH;
       const actualTileWidth = Math.min(TILE_WIDTH, width - tileOffset);
 
-      // Position tile using transform (compositor-only, avoids layout recalculation)
+      // Always update layout (cheap CSS — no canvas redraw)
       canvas.style.transform = `translateX(${tileOffset}px)`;
-
-      // Set canvas size with DPI scaling
-      canvas.width = Math.ceil(actualTileWidth * dpr);
-      canvas.height = Math.ceil(height * dpr);
       canvas.style.width = `${actualTileWidth}px`;
       canvas.style.height = `${height}px`;
 
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(dpr, dpr);
-        ctx.clearRect(0, 0, actualTileWidth, height);
+      // Only redraw canvas content when version/renderTile/height change,
+      // or when the tile is brand new. Width-only changes (zoom) skip the
+      // expensive canvas draw — tiles CSS-stretch until content catches up.
+      if (needsContentRedraw || isNew) {
+        canvas.width = Math.ceil(actualTileWidth * dpr);
+        canvas.height = Math.ceil(height * dpr);
 
-        // Call render function directly (no ref indirection)
-        renderTile(ctx, tileIndex, tileOffset, actualTileWidth);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.scale(dpr, dpr);
+          ctx.clearRect(0, 0, actualTileWidth, height);
+          renderTile(ctx, tileIndex, tileOffset, actualTileWidth);
+        }
       }
     }
 
@@ -92,6 +108,12 @@ export const TiledCanvas = memo(function TiledCanvas({
         canvas.remove();
         canvasPool.delete(index);
       }
+    }
+
+    if (needsContentRedraw) {
+      last.version = version;
+      last.renderTile = renderTile;
+      last.height = height;
     }
   }, [width, height, tileCount, version, renderTile]);
 
