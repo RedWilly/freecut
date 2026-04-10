@@ -247,7 +247,8 @@ export const ClipContent = memo(function ClipContent({
           {showFilmstrips && (
             <ClipFilmstrip
               mediaId={item.mediaId}
-              clipWidth={renderWidth}
+              clipWidth={clipWidth}
+              renderWidth={renderWidth}
               sourceStart={sourceStart}
               sourceDuration={sourceDuration}
               trimStart={trimStart}
@@ -350,7 +351,8 @@ export const ClipContent = memo(function ClipContent({
             {showFilmstrips && (
               <ClipFilmstrip
                 mediaId={compositionVisualMediaId}
-                clipWidth={renderWidth}
+                clipWidth={clipWidth}
+                renderWidth={renderWidth}
                 sourceStart={compositionVisualSourceStart}
                 sourceDuration={compositionVisualSourceDuration}
                 trimStart={0}
@@ -449,7 +451,8 @@ export const ClipContent = memo(function ClipContent({
               mediaId={item.mediaId}
               isAnimated={isAnimated}
               animationFormat={isAnimatedWebp ? 'webp' : 'gif'}
-              clipWidth={renderWidth}
+              clipWidth={clipWidth}
+              renderWidth={renderWidth}
               isVisible={clipVisibility.isVisible}
               src={item.src}
               sourceStart={sourceStart}

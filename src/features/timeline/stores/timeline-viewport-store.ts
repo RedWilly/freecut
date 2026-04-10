@@ -21,8 +21,8 @@ const EPSILON = 0.5;
  * Throttle interval for scroll-only viewport updates. Viewport size changes
  * (resize) always apply immediately; scroll position updates are batched to
  * cut subscriber churn (useClipVisibility, useVisibleItems, etc.) from 60/s
- * to ~20/s. The filmstrip viewport padding (VIEWPORT_PAD_TILES = 2, ~170px)
- * absorbs the 50ms latency at typical scroll speeds without visual gaps.
+ * to ~20/s. Filmstrip rendering keeps a minimum ~600px overscan window so the
+ * throttled viewport can lag briefly without exposing blank leading/trailing edges.
  */
 const SCROLL_THROTTLE_MS = 50;
 let lastScrollUpdate = 0;
@@ -103,4 +103,3 @@ export const useTimelineViewportStore = create<TimelineViewportState & TimelineV
     },
   })
 );
-

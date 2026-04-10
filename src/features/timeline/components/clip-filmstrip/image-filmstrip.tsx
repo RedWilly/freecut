@@ -3,6 +3,7 @@ import { useGifFrames } from '../../hooks/use-gif-frames';
 import { useMediaBlobUrl } from '../../hooks/use-media-blob-url';
 import { resolveMediaUrl } from '@/features/timeline/deps/media-library-resolver';
 import { createLogger } from '@/shared/logging/logger';
+import { computeFilmstripRenderWindow } from './render-window';
 
 const logger = createLogger('ImageFilmstrip');
 
@@ -13,8 +14,10 @@ interface ImageFilmstripProps {
   isAnimated: boolean;
   /** Animation format for frame extraction */
   animationFormat?: 'gif' | 'webp';
-  /** Width of the clip in pixels */
+  /** Visible width of the clip in pixels */
   clipWidth: number;
+  /** Optional overscan width used to hide trailing-edge width commit lag */
+  renderWidth?: number;
   /** Whether the clip is visible (from IntersectionObserver) */
   isVisible: boolean;
   /** Source URL for the image (blob URL) */
@@ -73,6 +76,7 @@ const AnimatedTile = memo(function AnimatedTile({
 });
 
 const VIEWPORT_PAD_TILES = 2;
+const VIEWPORT_PAD_PX = 600;
 
 /**
  * Image Filmstrip Component
@@ -85,6 +89,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
   isAnimated,
   animationFormat = 'gif',
   clipWidth,
+  renderWidth,
   isVisible,
   src,
   sourceStart,
@@ -137,6 +142,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
 
   // Calculate thumbnail tile width based on height (maintain source aspect ratio roughly as 16:9)
   const tileWidth = Math.round(height * (16 / 9)) || 80;
+  const renderClipWidth = Math.max(clipWidth, renderWidth ?? clipWidth);
 
   // Resolve the URL to use: prefer freshly resolved blobUrl, fall back to item.src
   const resolvedSrc = blobUrl || src;
@@ -150,16 +156,19 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
       return [];
     }
 
-    const tileCount = Math.ceil(clipWidth / tileWidth);
+    const tileCount = Math.ceil(renderClipWidth / tileWidth);
     if (tileCount <= 0) return [];
 
     // Viewport culling — only generate tiles in the visible range + padding
-    const visibleStartX = clipWidth * Math.max(0, Math.min(1, visibleStartRatio));
-    const visibleEndX = clipWidth * Math.max(visibleStartRatio, Math.min(1, visibleEndRatio));
-    const paddedStartX = Math.max(0, visibleStartX - tileWidth * VIEWPORT_PAD_TILES);
-    const paddedEndX = Math.min(clipWidth, visibleEndX + tileWidth * VIEWPORT_PAD_TILES);
-    const startTile = Math.max(0, Math.floor(paddedStartX / tileWidth));
-    const endTile = Math.min(tileCount, Math.ceil(paddedEndX / tileWidth));
+    const { startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: clipWidth,
+      tileWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: VIEWPORT_PAD_TILES,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    });
 
     // Build cumulative durations for frame lookup
     const cumDurations: number[] = [];
@@ -173,7 +182,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
 
     for (let i = startTile; i < endTile; i++) {
       const x = i * tileWidth;
-      const w = Math.min(tileWidth, clipWidth - x);
+      const w = Math.min(tileWidth, renderClipWidth - x);
       if (w <= 0) break;
 
       // Map tile center pixel to source time in seconds, then to animation time (looped)
@@ -198,7 +207,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
     }
 
     return result;
-  }, [isAnimated, frames, durations, totalDuration, clipWidth, tileWidth, height, speed, effectiveStart, pixelsPerSecond, visibleStartRatio, visibleEndRatio]);
+  }, [isAnimated, frames, durations, totalDuration, clipWidth, renderClipWidth, tileWidth, height, speed, effectiveStart, pixelsPerSecond, visibleStartRatio, visibleEndRatio]);
 
   // Static image filmstrip: tile the image using CSS background-repeat
   if (!isAnimated) {
@@ -211,7 +220,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
         <div
           className="absolute left-0 top-0 pointer-events-none"
           style={{
-            width: clipWidth,
+            width: renderClipWidth,
             height,
             backgroundImage: `url(${resolvedSrc})`,
             backgroundRepeat: 'repeat-x',

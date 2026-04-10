@@ -5,6 +5,7 @@ import { resolveMediaUrl } from '@/features/timeline/deps/media-library-resolver
 import { useMediaBlobUrl } from '../../hooks/use-media-blob-url';
 import { THUMBNAIL_WIDTH } from '../../services/filmstrip-cache';
 import { createLogger } from '@/shared/logging/logger';
+import { computeFilmstripRenderWindow } from './render-window';
 
 const logger = createLogger('ClipFilmstrip');
 
@@ -17,6 +18,7 @@ const MAX_TILES_DURING_ZOOM_HIGH = 16;
 const MAX_TILES_IDLE = 260;
 const VIEWPORT_PAD_TILES = 2;
 const VIEWPORT_PAD_TILES_INTERACTION = 1;
+const VIEWPORT_PAD_PX = 600;
 const INTERACTION_PPS_QUANTUM = 8;
 const INTERACTION_PPS_QUANTUM_MID = 12;
 const INTERACTION_PPS_QUANTUM_HIGH = 18;
@@ -26,8 +28,10 @@ const HIGH_INTERACTION_PPS = 170;
 interface ClipFilmstripProps {
   /** Media ID from the timeline item */
   mediaId: string;
-  /** Width of the clip in pixels */
+  /** Visible width of the clip in pixels */
   clipWidth: number;
+  /** Optional overscan width used to hide trailing-edge width commit lag */
+  renderWidth?: number;
   /** Source start time in seconds (for trimmed clips) */
   sourceStart: number;
   /** Total source duration in seconds */
@@ -210,6 +214,7 @@ const FilmstripTile = memo(function FilmstripTile({
 export const ClipFilmstrip = memo(function ClipFilmstrip({
   mediaId,
   clipWidth,
+  renderWidth,
   sourceStart,
   sourceDuration,
   trimStart,
@@ -252,7 +257,8 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
   const thumbnailWidth = Math.round(height * (16 / 9)) || THUMBNAIL_WIDTH;
 
   const renderPixelsPerSecond = pixelsPerSecond;
-  const renderClipWidth = clipWidth;
+  const visibleClipWidth = clipWidth;
+  const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth);
   const effectiveStart = Math.max(0, sourceStart + trimStart);
   const isInteractionLod = !preferImmediateRendering && isZooming;
   const samplingPixelsPerSecond = isInteractionLod
@@ -375,16 +381,16 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     const tileCount = Math.ceil(renderClipWidth / thumbnailWidth);
     if (tileCount <= 0) return [];
 
-    const clampedStartRatio = Math.max(0, Math.min(1, visibleStartRatio));
-    const clampedEndRatio = Math.max(clampedStartRatio, Math.min(1, visibleEndRatio));
-    const visibleStartX = renderClipWidth * clampedStartRatio;
-    const visibleEndX = renderClipWidth * clampedEndRatio;
     const viewportPadTiles = isInteractionLod ? VIEWPORT_PAD_TILES_INTERACTION : VIEWPORT_PAD_TILES;
-    const paddedStartX = Math.max(0, visibleStartX - thumbnailWidth * viewportPadTiles);
-    const paddedEndX = Math.min(renderClipWidth, visibleEndX + thumbnailWidth * viewportPadTiles);
-
-    const startTile = Math.max(0, Math.floor(paddedStartX / thumbnailWidth));
-    const endTile = Math.min(tileCount, Math.ceil(paddedEndX / thumbnailWidth));
+    const { paddedEndX, startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      tileWidth: thumbnailWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: viewportPadTiles,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    });
     const visibleTileCount = Math.max(0, endTile - startTile);
     if (visibleTileCount <= 0) return [];
 
@@ -415,7 +421,9 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
   }, [
     frames,
     frameByIndex,
+    renderPixelsPerSecond,
     renderClipWidth,
+    visibleClipWidth,
     samplingPixelsPerSecond,
     effectiveStart,
     speed,
@@ -436,7 +444,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     }
     return (
       <div ref={containerRef} className="absolute inset-0">
-        <FilmstripSkeleton clipWidth={clipWidth} height={height || 40} />
+        <FilmstripSkeleton clipWidth={visibleClipWidth} height={height || 40} />
       </div>
     );
   }
@@ -445,7 +453,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     <div ref={containerRef} className="absolute inset-0">
       {/* Show shimmer skeleton behind while loading */}
       {!isComplete && (
-        <FilmstripSkeleton clipWidth={clipWidth} height={height} />
+        <FilmstripSkeleton clipWidth={visibleClipWidth} height={height} />
       )}
       <div
         className="absolute inset-0 overflow-hidden pointer-events-none"
