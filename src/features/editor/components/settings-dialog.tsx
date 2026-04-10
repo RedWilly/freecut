@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -35,6 +36,7 @@ import {
 } from 'lucide-react';
 import {
   LocalInferenceUnloadControl,
+  LocalModelCacheControl,
   useSettingsStore,
 } from '@/features/editor/deps/settings';
 import {
@@ -275,7 +277,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
+      <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0 sm:top-16 sm:max-h-[calc(100vh-4rem)] sm:translate-y-0 sm:origin-top">
         <DialogHeader className="flex flex-row items-center justify-between border-b px-6 py-4 pr-14">
           <DialogTitle>Editor Settings</DialogTitle>
           <Button variant="ghost" size="sm" onClick={resetToDefaults} className="h-8 shrink-0 gap-1.5">
@@ -524,6 +526,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       {proxyState === 'clearing' ? 'Deleting...' : proxyState === 'done' ? 'Deleted' : 'Delete'}
                     </Button>
                   </div>
+                  <Separator className="bg-white/8" />
+                  <LocalModelCacheControl />
                 </div>
               )}
             </div>

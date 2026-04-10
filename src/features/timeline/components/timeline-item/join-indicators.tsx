@@ -44,6 +44,11 @@ export const JoinIndicators = memo(function JoinIndicators({
     !isTrimming &&
     !isStretching;
 
+  const joinIndicatorStyle = {
+    backgroundColor: 'var(--color-timeline-join)',
+    boxShadow: '0 0 3px 0 var(--color-timeline-join)',
+  } as const;
+
   return (
     <>
       <div
@@ -51,7 +56,7 @@ export const JoinIndicators = memo(function JoinIndicators({
           "absolute left-0 top-0 bottom-0 w-px pointer-events-none transition-opacity duration-75",
           showLeft ? "opacity-100" : "opacity-0"
         )}
-        style={{ backgroundColor: 'var(--color-timeline-join)', boxShadow: '0 0 6px 1px var(--color-timeline-join)' }}
+        style={joinIndicatorStyle}
         title="Can join with previous clip (J)"
       />
       <div
@@ -59,10 +64,9 @@ export const JoinIndicators = memo(function JoinIndicators({
           "absolute right-0 top-0 bottom-0 w-px pointer-events-none transition-opacity duration-75",
           showRight ? "opacity-100" : "opacity-0"
         )}
-        style={{ backgroundColor: 'var(--color-timeline-join)', boxShadow: '0 0 6px 1px var(--color-timeline-join)' }}
+        style={joinIndicatorStyle}
         title="Can join with next clip (J)"
       />
     </>
   );
 });
-

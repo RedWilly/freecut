@@ -1,4 +1,5 @@
 import { createLogger } from '@/shared/logging/logger';
+import { KITTEN_TTS_MODEL_CACHE_NAME as MODEL_CACHE_NAME } from '@/shared/utils/local-model-cache';
 import {
   localInferenceRuntimeRegistry,
   useLocalInferenceStore,
@@ -6,8 +7,6 @@ import {
 import type { ModelSize, KittenTTSEngine } from 'kitten-tts-webgpu';
 
 const logger = createLogger('KittenTtsService');
-
-const MODEL_CACHE_NAME = 'kitten-tts-models';
 
 /**
  * Fetch a URL with persistent Cache API caching.
