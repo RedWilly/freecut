@@ -24,11 +24,13 @@ import {
 import { useMediaLibraryStore } from '../stores/media-library-store';
 import { useProjectStore } from '@/features/media-library/deps/projects';
 import { showMediaFilePicker } from '@/features/media-library/utils/media-file-picker';
+import { getProjectBrokenMediaInfo } from '@/features/media-library/utils/broken-media';
 
 export function MissingMediaDialog() {
   const showDialog = useMediaLibraryStore((s) => s.showMissingMediaDialog);
   const closeDialog = useMediaLibraryStore((s) => s.closeMissingMediaDialog);
   const brokenMediaInfo = useMediaLibraryStore((s) => s.brokenMediaInfo);
+  const mediaById = useMediaLibraryStore((s) => s.mediaById);
   const relinkMedia = useMediaLibraryStore((s) => s.relinkMedia);
   const relinkMediaBatch = useMediaLibraryStore((s) => s.relinkMediaBatch);
   const markMediaHealthy = useMediaLibraryStore((s) => s.markMediaHealthy);
@@ -46,10 +48,10 @@ export function MissingMediaDialog() {
 
   const brokenItems = useMemo(
     () =>
-      Array.from(brokenMediaInfo.values()).filter(
+      getProjectBrokenMediaInfo(brokenMediaInfo, mediaById).filter(
         (item) => !relinkedIds.has(item.mediaId)
       ),
-    [brokenMediaInfo, relinkedIds]
+    [brokenMediaInfo, mediaById, relinkedIds]
   );
 
   const permissionDenied = brokenItems.filter(

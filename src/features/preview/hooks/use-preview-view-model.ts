@@ -12,7 +12,10 @@ import {
   useSlideEditPreviewStore,
 } from '@/features/preview/deps/timeline-edit-preview';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useMediaLibraryStore } from '@/features/preview/deps/media-library';
+import {
+  getProjectBrokenMediaIds,
+  useMediaLibraryStore,
+} from '@/features/preview/deps/media-library';
 import { useBlobUrlVersion } from '@/infrastructure/browser/blob-url-manager';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { useGizmoStore } from '../stores/gizmo-store';
@@ -52,7 +55,9 @@ export function usePreviewViewModel({
   const mediaDependencyVersion = useMediaDependencyStore((s) => s.mediaDependencyVersion);
   const transitions = useTransitionsStore((s) => s.transitions);
   const mediaById = useMediaLibraryStore((s) => s.mediaById);
-  const brokenMediaCount = useMediaLibraryStore((s) => s.brokenMediaIds.length);
+  const brokenMediaCount = useMediaLibraryStore((s) =>
+    getProjectBrokenMediaIds(s.brokenMediaIds, s.mediaById).length
+  );
   const hasRolling2Up = useRollingEditPreviewStore((s) => Boolean(s.trimmedItemId && s.neighborItemId && s.handle));
   const hasRipple2Up = useRippleEditPreviewStore((s) => Boolean(s.trimmedItemId && s.handle));
   const hasSlip4Up = useSlipEditPreviewStore((s) => Boolean(s.itemId));

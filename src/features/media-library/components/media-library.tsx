@@ -50,6 +50,7 @@ import { mediaLibraryService } from '../services/media-library-service';
 import { extractValidMediaFileEntriesFromDataTransfer } from '../utils/file-drop';
 import { getSharedProxyKey } from '../utils/proxy-key';
 import { getMediaType } from '../utils/validation';
+import { getProjectBrokenMediaIds } from '../utils/broken-media';
 import type { MediaMetadata } from '@/types/storage';
 import { isMarqueeJustFinished, useMarqueeSelection, type MarqueeItem } from '@/hooks/use-marquee-selection';
 
@@ -432,6 +433,11 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     return count;
   }, [proxyStatus]);
 
+  const currentProjectBrokenMediaIds = useMemo(
+    () => getProjectBrokenMediaIds(brokenMediaIds, mediaById),
+    [brokenMediaIds, mediaById]
+  );
+
   // Average progress of all generating proxies
   const generatingAvgProgress = useMemo(() => {
     if (generatingCount === 0) return 0;
@@ -566,7 +572,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           </button>
 
           {/* Missing media indicator */}
-          {brokenMediaIds.length > 0 && (
+          {currentProjectBrokenMediaIds.length > 0 && (
             <button
               onClick={openMissingMediaDialog}
               className="flex items-center gap-1.5 h-7 px-2.5 rounded-md
@@ -576,7 +582,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
               title="View missing media files"
             >
               <Link2Off className="w-3.5 h-3.5" />
-              <span>{brokenMediaIds.length} Missing</span>
+              <span>{currentProjectBrokenMediaIds.length} Missing</span>
             </button>
           )}
 

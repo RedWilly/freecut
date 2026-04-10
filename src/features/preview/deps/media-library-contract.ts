@@ -7,6 +7,7 @@ export { useMediaLibraryStore } from '@/features/media-library/stores/media-libr
 export { proxyService } from '@/features/media-library/services/proxy-service';
 export { mediaProcessorService } from '@/features/media-library/services/media-processor-service';
 export { getMediaType, getMimeType } from '@/features/media-library/utils/validation';
+export { getProjectBrokenMediaIds } from '@/features/media-library/utils/broken-media';
 export {
   resolveMediaUrl,
   resolveProxyUrl,
