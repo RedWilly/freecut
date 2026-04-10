@@ -92,12 +92,12 @@ export const ClipContent = memo(function ClipContent({
     () => Math.max(0, fps > 0 ? (clipWidthFrames / fps) * pixelsPerSecond : 0),
     [clipWidthFrames, fps, pixelsPerSecond],
   );
-  // Only transitions twice per gesture (false→true, true→false) — no per-tick cost.
-  const isZoomInteracting = useZoomStore((s) => s.isZoomInteracting);
-  // Pre-render filmstrip/waveform slightly wider than the quantized clip width.
-  // The parent's overflow:hidden clips the excess; when zoom-in expands the
-  // container it reveals pre-rendered content instead of a visible gap.
-  const renderWidth = isZoomInteracting ? Math.ceil(clipWidth * ZOOM_RENDER_BUFFER) : clipWidth;
+  // Pre-render filmstrip/waveform slightly wider than the computed clip width.
+  // The parent's overflow:hidden clips the excess at rest; during zoom-in the
+  // expanding container reveals pre-rendered tiles instead of a gap.  Applied
+  // unconditionally so there is no pop when zoom settles (removing the buffer
+  // conditionally caused a visible 18% contraction on settle).
+  const renderWidth = Math.ceil(clipWidth * ZOOM_RENDER_BUFFER);
   const clipVisibility = useClipVisibility(clipLeftPx, clipWidth);
   const isCompositionAudioWrapper = item.type === 'audio' && !!item.compositionId;
 
