@@ -1,7 +1,6 @@
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
-import { getLinkedAudioCompanion, getLinkedVideoCompanion } from '@/shared/utils/linked-media';
 import { applyMovePreview, type PreviewItemUpdate } from './item-edit-preview';
-import { getSourceProperties, sourceToTimelineFrames } from './source-calculations';
+import { getSourceProperties } from './source-calculations';
 
 function isMediaPair(left: TimelineItem, right: TimelineItem): boolean {
   return (left.type === 'video' && right.type === 'audio')
@@ -127,28 +126,52 @@ export function getSynchronizedLinkedCounterpartPair(
   return null;
 }
 
-function getLinkedSyncAnchorFrame(item: TimelineItem, timelineFps: number): number {
-  const { sourceStart, sourceFps, speed } = getSourceProperties(item);
-  const sourceOffsetOnTimeline = sourceToTimelineFrames(
-    sourceStart,
-    speed,
-    sourceFps ?? timelineFps,
-    timelineFps,
-  );
-
-  return item.from - sourceOffsetOnTimeline;
+interface SyncFrameInterval {
+  min: number;
+  max: number;
+  center: number;
 }
 
-function getLinkedSyncCompanion(items: TimelineItem[], anchor: TimelineItem): TimelineItem | null {
-  if (anchor.type === 'video' || anchor.type === 'composition') {
-    return getLinkedAudioCompanion(items, anchor);
+function getLinkedSyncAnchorFrameInterval(item: TimelineItem, timelineFps: number): SyncFrameInterval {
+  const { sourceStart, sourceFps, speed } = getSourceProperties(item);
+  const effectiveSourceFps = sourceFps ?? timelineFps;
+  const effectiveSpeed = speed || 1;
+  const clampedLowerSourceFrame = Math.max(0, sourceStart - 0.5);
+  const upperSourceFrame = sourceStart + 0.5;
+  const lowerOffsetOnTimeline = (clampedLowerSourceFrame / effectiveSourceFps) * timelineFps / effectiveSpeed;
+  const upperOffsetOnTimeline = (upperSourceFrame / effectiveSourceFps) * timelineFps / effectiveSpeed;
+  const centerOffsetOnTimeline = (sourceStart / effectiveSourceFps) * timelineFps / effectiveSpeed;
+
+  return {
+    min: item.from - upperOffsetOnTimeline,
+    max: item.from - lowerOffsetOnTimeline,
+    center: item.from - centerOffsetOnTimeline,
+  };
+}
+
+function getLinkedSyncOffsetBetweenItems(
+  anchor: TimelineItem,
+  companion: TimelineItem,
+  timelineFps: number,
+): number {
+  const anchorInterval = getLinkedSyncAnchorFrameInterval(anchor, timelineFps);
+  const companionInterval = getLinkedSyncAnchorFrameInterval(companion, timelineFps);
+  const overlap = Math.min(anchorInterval.max, companionInterval.max) - Math.max(anchorInterval.min, companionInterval.min);
+
+  if (overlap > 1e-6) {
+    return 0;
   }
 
-  if (anchor.type === 'audio') {
-    return getLinkedVideoCompanion(items, anchor);
-  }
+  return anchorInterval.center - companionInterval.center;
+}
 
-  return null;
+function getLinkedSyncCandidates(items: TimelineItem[], anchor: TimelineItem): TimelineItem[] {
+  const linkedItems = getLinkedItems(items, anchor.id);
+  const targetTypes = anchor.type === 'audio'
+    ? new Set<TimelineItem['type']>(['video', 'composition'])
+    : new Set<TimelineItem['type']>(['audio']);
+
+  return linkedItems.filter((item) => item.id !== anchor.id && targetTypes.has(item.type));
 }
 
 function applyPreviewUpdate(
@@ -169,15 +192,47 @@ export function getLinkedSyncOffsetFrames(
   const anchorBase = items.find((item) => item.id === itemId);
   if (!anchorBase) return null;
 
-  const companionBase = getLinkedSyncCompanion(items, anchorBase);
-  if (!companionBase) return null;
-
   const anchor = applyPreviewUpdate(anchorBase, previewUpdatesById[anchorBase.id]);
-  const companion = applyPreviewUpdate(companionBase, previewUpdatesById[companionBase.id]);
+  const candidateCompanions = getLinkedSyncCandidates(items, anchorBase)
+    .map((candidate) => applyPreviewUpdate(candidate, previewUpdatesById[candidate.id]));
 
-  const anchorSyncFrame = getLinkedSyncAnchorFrame(anchor, timelineFps);
-  const candidateOffset = anchorSyncFrame - getLinkedSyncAnchorFrame(companion, timelineFps);
-  return candidateOffset === 0 ? null : candidateOffset;
+  if (candidateCompanions.length === 0) return null;
+
+  const rankedCandidates = candidateCompanions
+    .map((companion) => {
+      const exactOffset = getLinkedSyncOffsetBetweenItems(anchor, companion, timelineFps);
+      const roundedOffset = Math.round(exactOffset);
+      const sameVisibleWindow = companion.from === anchor.from
+        && companion.durationInFrames === anchor.durationInFrames
+        && (companion.speed ?? 1) === (anchor.speed ?? 1);
+      const sameSourceBounds = (companion.sourceStart ?? null) === (anchor.sourceStart ?? null)
+        && (companion.sourceEnd ?? null) === (anchor.sourceEnd ?? null);
+      const sameMediaSource = companion.mediaId !== undefined
+        && companion.mediaId === anchor.mediaId;
+
+      return {
+        companion,
+        exactOffset,
+        roundedOffset,
+        sameVisibleWindow,
+        sameSourceBounds,
+        sameMediaSource,
+      };
+    })
+    .sort((left, right) => {
+      const leftMagnitude = Math.abs(left.exactOffset);
+      const rightMagnitude = Math.abs(right.exactOffset);
+      if (leftMagnitude !== rightMagnitude) return leftMagnitude - rightMagnitude;
+      if (left.sameVisibleWindow !== right.sameVisibleWindow) return left.sameVisibleWindow ? -1 : 1;
+      if (left.sameSourceBounds !== right.sameSourceBounds) return left.sameSourceBounds ? -1 : 1;
+      if (left.sameMediaSource !== right.sameMediaSource) return left.sameMediaSource ? -1 : 1;
+      return left.companion.id.localeCompare(right.companion.id);
+    });
+
+  const bestCandidate = rankedCandidates[0];
+  if (!bestCandidate) return null;
+
+  return bestCandidate.roundedOffset === 0 ? null : bestCandidate.roundedOffset;
 }
 
 export function buildSynchronizedLinkedMoveUpdates(

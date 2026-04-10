@@ -168,6 +168,42 @@ describe('linked items', () => {
     expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30)).toBe(10);
   });
 
+  it('chooses the closest opposite-type companion inside a larger linked group', () => {
+    const items = [
+      makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 0, sourceFps: 30 }),
+      makeItem({ id: 'audio-1', linkedGroupId: 'group-1', type: 'audio', from: 0, sourceStart: 0, sourceFps: 30 }),
+      makeItem({ id: 'video-2', linkedGroupId: 'group-1', type: 'video', from: 60, sourceStart: 10, sourceFps: 30, mediaId: 'media-2', originId: 'origin-2' }),
+      makeItem({ id: 'audio-2', linkedGroupId: 'group-1', type: 'audio', from: 60, sourceStart: 10, sourceFps: 30, mediaId: 'media-2', originId: 'origin-2' }),
+    ];
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-2', 30)).toBeNull();
+    expect(getLinkedSyncOffsetFrames(items, 'audio-2', 30)).toBeNull();
+  });
+
+  it('suppresses rounding-only sync drift after linked splits at slightly different source fps', () => {
+    const items = [
+      makeItem({
+        id: 'video-1',
+        linkedGroupId: 'group-1',
+        type: 'video',
+        from: 127,
+        sourceStart: 101,
+        sourceFps: 23.976,
+      }),
+      makeItem({
+        id: 'audio-1',
+        linkedGroupId: 'group-1',
+        type: 'audio',
+        from: 127,
+        sourceStart: 102,
+        sourceFps: 23.981,
+      }),
+    ];
+
+    expect(getLinkedSyncOffsetFrames(items, 'video-1', 30)).toBeNull();
+    expect(getLinkedSyncOffsetFrames(items, 'audio-1', 30)).toBeNull();
+  });
+
   it('ignores trim preview drift while linked companions preview together', () => {
     const items = [
       makeItem({ id: 'video-1', linkedGroupId: 'group-1', type: 'video', from: 0, sourceStart: 0, sourceFps: 30 }),

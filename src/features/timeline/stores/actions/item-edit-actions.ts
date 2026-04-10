@@ -202,15 +202,58 @@ export function splitItemAtFrames(
   let splitCount = 0;
 
   execute('SPLIT_ITEM_MULTI', () => {
-    const itemsStore = useItemsStore.getState();
-    const allRightIds: string[] = [];
+    const itemsToSplit = getLinkedItemsForEdit(
+      useItemsStore.getState().items,
+      id,
+      isLinkedSelectionEnabled(),
+    );
+    if (itemsToSplit.length === 0) return;
+
+    const rightIdsByOriginalId = new Map(itemsToSplit.map((item) => [item.id, [] as string[]]));
 
     for (const frame of sorted) {
-      const result = itemsStore._splitItem(id, frame);
-      if (result) {
-        splitCount++;
-        allRightIds.push(result.rightItem.id);
-        applyTransitionRepairs([result.leftItem.id, result.rightItem.id]);
+      const currentItemsById = useItemsStore.getState().itemById;
+      const canSplitFrame = itemsToSplit.every((item) => {
+        const currentItem = currentItemsById[item.id];
+        if (!currentItem) return false;
+        if (frame <= currentItem.from || frame >= currentItem.from + currentItem.durationInFrames) {
+          return false;
+        }
+
+        const relativeFrame = frame - currentItem.from;
+        return !isInTransitionOverlap(currentItem.id, relativeFrame, currentItem.durationInFrames);
+      });
+
+      if (!canSplitFrame) {
+        continue;
+      }
+
+      const frameSplitResults = itemsToSplit
+        .map((item) => ({
+          originalId: item.id,
+          result: useItemsStore.getState()._splitItem(item.id, frame),
+        }))
+        .filter((entry): entry is { originalId: string; result: { leftItem: TimelineItem; rightItem: TimelineItem } } => entry.result !== null);
+
+      if (frameSplitResults.length !== itemsToSplit.length) {
+        continue;
+      }
+
+      if (itemsToSplit.some((item) => item.linkedGroupId)) {
+        const leftLinkedGroupId = frameSplitResults.length > 1 ? crypto.randomUUID() : undefined;
+        const rightLinkedGroupId = frameSplitResults.length > 1 ? crypto.randomUUID() : undefined;
+
+        for (const entry of frameSplitResults) {
+          useItemsStore.getState()._updateItem(entry.result.leftItem.id, { linkedGroupId: leftLinkedGroupId });
+          useItemsStore.getState()._updateItem(entry.result.rightItem.id, { linkedGroupId: rightLinkedGroupId });
+        }
+      }
+
+      splitCount++;
+
+      for (const entry of frameSplitResults) {
+        rightIdsByOriginalId.get(entry.originalId)?.push(entry.result.rightItem.id);
+        applyTransitionRepairs([entry.result.leftItem.id, entry.result.rightItem.id]);
       }
     }
 
@@ -219,15 +262,17 @@ export function splitItemAtFrames(
     // - Every right piece except the last (outermost) gets fadeOut cleared
     // - The left piece (original ID) gets fadeOut cleared (its right edge is an inner cut)
     if (splitCount > 0) {
-      for (const rightId of allRightIds) {
-        itemsStore._updateItem(rightId, { fadeIn: 0 });
+      for (const [originalId, rightIds] of rightIdsByOriginalId) {
+        for (const rightId of rightIds) {
+          useItemsStore.getState()._updateItem(rightId, { fadeIn: 0 });
+        }
+        // Clear fadeOut on all right pieces except the very last one (which has the original clip's end)
+        for (let index = 1; index < rightIds.length; index += 1) {
+          useItemsStore.getState()._updateItem(rightIds[index]!, { fadeOut: 0 });
+        }
+        // Clear fadeOut on the left piece (original ID) — its right edge is now an inner cut
+        useItemsStore.getState()._updateItem(originalId, { fadeOut: 0 });
       }
-      // Clear fadeOut on all right pieces except the very last one (which has the original clip's end)
-      for (let i = 1; i < allRightIds.length; i++) {
-        itemsStore._updateItem(allRightIds[i]!, { fadeOut: 0 });
-      }
-      // Clear fadeOut on the left piece (original ID) — its right edge is now an inner cut
-      itemsStore._updateItem(id, { fadeOut: 0 });
     }
 
     useTimelineSettingsStore.getState().markDirty();

@@ -14,8 +14,10 @@ import {
   removeItems,
   rippleDeleteItems,
   splitItem,
+  splitItemAtFrames,
   unlinkItems,
 } from './item-actions';
+import { getLinkedSyncOffsetFrames } from '../../utils/linked-items';
 
 function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
   return {
@@ -84,6 +86,51 @@ describe('linked timeline items', () => {
     expect(rightVideo?.linkedGroupId).toBe(rightAudio?.linkedGroupId);
     expect(leftVideo?.linkedGroupId).not.toBe(rightVideo?.linkedGroupId);
     expect(useSelectionStore.getState().selectedItemIds).toEqual(['video-1', 'audio-1']);
+  });
+
+  it('multi-splits linked video/audio items together without creating sync drift badges', () => {
+    useItemsStore.getState().setItems([
+      makeVideoItem({ sourceStart: 0, sourceEnd: 60, sourceDuration: 180, sourceFps: 30 }),
+      makeAudioItem({ sourceStart: 0, sourceEnd: 60, sourceDuration: 180, sourceFps: 30 }),
+    ]);
+
+    const splitCount = splitItemAtFrames('video-1', [15, 30, 45]);
+
+    expect(splitCount).toBe(3);
+
+    const items = useItemsStore.getState().items;
+    const videos = items
+      .filter((item): item is VideoItem => item.type === 'video')
+      .toSorted((left, right) => left.from - right.from);
+    const audios = items
+      .filter((item): item is AudioItem => item.type === 'audio')
+      .toSorted((left, right) => left.from - right.from);
+
+    expect(videos).toHaveLength(4);
+    expect(audios).toHaveLength(4);
+    expect(videos.map((item) => ({ from: item.from, durationInFrames: item.durationInFrames }))).toEqual([
+      { from: 0, durationInFrames: 15 },
+      { from: 15, durationInFrames: 15 },
+      { from: 30, durationInFrames: 15 },
+      { from: 45, durationInFrames: 15 },
+    ]);
+    expect(audios.map((item) => ({ from: item.from, durationInFrames: item.durationInFrames }))).toEqual([
+      { from: 0, durationInFrames: 15 },
+      { from: 15, durationInFrames: 15 },
+      { from: 30, durationInFrames: 15 },
+      { from: 45, durationInFrames: 15 },
+    ]);
+
+    for (let index = 0; index < videos.length; index += 1) {
+      expect(videos[index]?.linkedGroupId).toBe(audios[index]?.linkedGroupId);
+      if (index > 0) {
+        expect(videos[index]?.linkedGroupId).not.toBe(videos[index - 1]?.linkedGroupId);
+      }
+    }
+
+    for (const clip of [...videos, ...audios]) {
+      expect(getLinkedSyncOffsetFrames(items, clip.id, 30)).toBeNull();
+    }
   });
 
   it('unlinks a selected linked pair together', () => {
