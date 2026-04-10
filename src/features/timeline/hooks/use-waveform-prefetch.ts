@@ -79,9 +79,16 @@ export function useWaveformPrefetch() {
 
     prefetchVisibleWaveforms();
 
+    // Skip prefetch during active zoom — waveform prefetch only matters when
+    // the viewport settles. The zoom subscription only fires when interaction ends.
+    const prefetchIfSettled = () => {
+      if (useZoomStore.getState().isZoomInteracting) return;
+      prefetchVisibleWaveforms();
+    };
+
     const unsubscribers = [
-      useTimelineViewportStore.subscribe(prefetchVisibleWaveforms),
-      useZoomStore.subscribe(prefetchVisibleWaveforms),
+      useTimelineViewportStore.subscribe(prefetchIfSettled),
+      useZoomStore.subscribe(prefetchIfSettled),
       useTimelineSettingsStore.subscribe(prefetchVisibleWaveforms),
       useItemsStore.subscribe(prefetchVisibleWaveforms),
     ];

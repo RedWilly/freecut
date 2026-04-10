@@ -32,6 +32,15 @@ function quantizeZoomPps(pps: number): number {
   return Math.pow(2, Math.round(Math.log2(pps) / ZOOM_INTERACTION_LOG_STEP) * ZOOM_INTERACTION_LOG_STEP);
 }
 
+/**
+ * Render buffer for filmstrip/waveform during zoom.
+ * With 1.3x quantization steps, the quantized value can be up to sqrt(1.3)≈1.14x
+ * below the live value. A buffer of 1.18x ensures pre-rendered content always
+ * covers the clip container so zoom-in reveals existing tiles instead of a gap.
+ * The parent's overflow:hidden clips the excess during normal rendering.
+ */
+const ZOOM_RENDER_BUFFER = 1.18;
+
 interface ClipContentProps {
   item: TimelineItem;
   clipLeftFrames: number;
@@ -83,6 +92,12 @@ export const ClipContent = memo(function ClipContent({
     () => Math.max(0, fps > 0 ? (clipWidthFrames / fps) * pixelsPerSecond : 0),
     [clipWidthFrames, fps, pixelsPerSecond],
   );
+  // Only transitions twice per gesture (false→true, true→false) — no per-tick cost.
+  const isZoomInteracting = useZoomStore((s) => s.isZoomInteracting);
+  // Pre-render filmstrip/waveform slightly wider than the quantized clip width.
+  // The parent's overflow:hidden clips the excess; when zoom-in expands the
+  // container it reveals pre-rendered content instead of a visible gap.
+  const renderWidth = isZoomInteracting ? Math.ceil(clipWidth * ZOOM_RENDER_BUFFER) : clipWidth;
   const clipVisibility = useClipVisibility(clipLeftPx, clipWidth);
   const isCompositionAudioWrapper = item.type === 'audio' && !!item.compositionId;
 
@@ -256,7 +271,7 @@ export const ClipContent = memo(function ClipContent({
           {showFilmstrips && (
             <ClipFilmstrip
               mediaId={item.mediaId}
-              clipWidth={clipWidth}
+              clipWidth={renderWidth}
               sourceStart={sourceStart}
               sourceDuration={sourceDuration}
               trimStart={trimStart}
@@ -300,7 +315,7 @@ export const ClipContent = memo(function ClipContent({
             >
               <ClipWaveform
                 mediaId={item.mediaId}
-                clipWidth={clipWidth}
+                clipWidth={renderWidth}
                 sourceStart={sourceStart}
                 sourceDuration={sourceDuration}
                 trimStart={trimStart}
@@ -324,7 +339,7 @@ export const ClipContent = memo(function ClipContent({
           <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
             <CompoundClipWaveform
               composition={composition}
-              clipWidth={clipWidth}
+              clipWidth={renderWidth}
               sourceStart={compoundClipSourceStart}
               sourceDuration={compoundClipSourceDuration}
               isVisible={clipVisibility.isVisible}
@@ -359,7 +374,7 @@ export const ClipContent = memo(function ClipContent({
             {showFilmstrips && (
               <ClipFilmstrip
                 mediaId={compositionVisualMediaId}
-                clipWidth={clipWidth}
+                clipWidth={renderWidth}
                 sourceStart={compositionVisualSourceStart}
                 sourceDuration={compositionVisualSourceDuration}
                 trimStart={0}
@@ -381,7 +396,7 @@ export const ClipContent = memo(function ClipContent({
             >
               <CompoundClipWaveform
                 composition={composition}
-                clipWidth={clipWidth}
+                clipWidth={renderWidth}
                 sourceStart={compoundClipSourceStart}
                 sourceDuration={compoundClipSourceDuration}
                 isVisible={clipVisibility.isVisible}
@@ -400,7 +415,7 @@ export const ClipContent = memo(function ClipContent({
             <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
               <CompoundClipWaveform
                 composition={composition}
-                clipWidth={clipWidth}
+                clipWidth={renderWidth}
                 sourceStart={compoundClipSourceStart}
                 sourceDuration={compoundClipSourceDuration}
                 isVisible={clipVisibility.isVisible}
@@ -458,7 +473,7 @@ export const ClipContent = memo(function ClipContent({
               mediaId={item.mediaId}
               isAnimated={isAnimated}
               animationFormat={isAnimatedWebp ? 'webp' : 'gif'}
-              clipWidth={clipWidth}
+              clipWidth={renderWidth}
               isVisible={clipVisibility.isVisible}
               src={item.src}
               sourceStart={sourceStart}

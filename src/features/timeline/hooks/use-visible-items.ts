@@ -151,11 +151,21 @@ export function useVisibleItems(trackId: string) {
       setSnapshot((prevSnap) => (areVisibleSnapshotsEqual(prevSnap, next) ? prevSnap : next));
     };
 
+    // Zoom-specific subscriber: skip when the quantized culling pps hasn't
+    // changed — avoids redundant store reads on every wheel tick.
+    let lastCullingPps = getCullingPixelsPerSecond(useZoomStore.getState());
+    const applyZoom = () => {
+      const nextPps = getCullingPixelsPerSecond(useZoomStore.getState());
+      if (nextPps === lastCullingPps) return;
+      lastCullingPps = nextPps;
+      apply();
+    };
+
     apply();
 
     const unsubscribers = [
       useTimelineViewportStore.subscribe(apply),
-      useZoomStore.subscribe(apply),
+      useZoomStore.subscribe(applyZoom),
       useTimelineSettingsStore.subscribe(apply),
       useItemsStore.subscribe(apply),
       useTransitionsStore.subscribe(apply),
