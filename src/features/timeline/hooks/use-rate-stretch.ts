@@ -5,7 +5,7 @@ import { usePlaybackStore } from '@/shared/state/playback';
 import type { SnapTarget } from '../types/drag';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useSelectionStore } from '@/shared/state/selection';
-import { pixelsToTimeNow } from '../utils/zoom-conversions';
+import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions';
 import { useSnapCalculator } from './use-snap-calculator';
 import {
   MIN_SPEED,
@@ -258,7 +258,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
 
   // Use snap calculator - pass item.id to exclude self from magnetic snaps
   // Only use magnetic snap targets (item edges), not grid lines
-  const { magneticSnapTargets, snapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { magneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id
   );
@@ -294,7 +294,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       }
 
       let nearestTarget: SnapTarget | null = null;
-      let minDistance = snapThresholdFrames;
+      let minDistance = getSnapThresholdFrames();
 
       for (const target of magneticSnapTargets) {
         const distance = Math.abs(targetFrame - target.frame);
@@ -310,7 +310,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
 
       return { snappedFrame: targetFrame, snapTarget: null };
     },
-    [snapEnabled, magneticSnapTargets, snapThresholdFrames]
+    [snapEnabled, magneticSnapTargets, getSnapThresholdFrames]
   );
 
   // Mouse move handler - only updates local state for visual feedback

@@ -10,6 +10,7 @@
 import { createLogger } from '@/shared/logging/logger';
 import type { MotionResult } from './optical-flow-analyzer';
 import type { SceneCut, SceneDetectionProgress } from './scene-detection';
+import { seekVideo, deduplicateCuts } from './scene-detection-utils';
 
 const log = createLogger('HistogramSceneDetection');
 
@@ -75,25 +76,6 @@ export function chiSquaredDistance(a: Float32Array, b: Float32Array): number {
     }
   }
   return distance;
-}
-
-/**
- * Seek video and wait for the seeked event with a timeout fallback.
- */
-async function seekVideo(video: HTMLVideoElement, timeSec: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
-      clearTimeout(timeout);
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      video.removeEventListener('seeked', onSeeked);
-      resolve();
-    }, 1000);
-    video.addEventListener('seeked', onSeeked);
-    video.currentTime = timeSec;
-  });
 }
 
 export interface HistogramDetectOptions {
@@ -185,29 +167,4 @@ export async function detectScenesHistogram(
   log.info('Deduplication complete', { cuts: deduped.length });
 
   return deduped;
-}
-
-/**
- * Cluster cuts closer than minGapSec and keep the strongest per cluster.
- */
-function deduplicateCuts(cuts: SceneCut[], minGapSec: number): SceneCut[] {
-  if (cuts.length <= 1) return cuts;
-
-  const result: SceneCut[] = [];
-  let clusterBest = cuts[0]!;
-
-  for (let i = 1; i < cuts.length; i++) {
-    const cut = cuts[i]!;
-    if (cut.time - clusterBest.time < minGapSec) {
-      if (cut.motion.totalMotion > clusterBest.motion.totalMotion) {
-        clusterBest = cut;
-      }
-    } else {
-      result.push(clusterBest);
-      clusterBest = cut;
-    }
-  }
-  result.push(clusterBest);
-
-  return result;
 }

@@ -77,7 +77,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
   // Use snap calculator - pass item.id to exclude self from magnetic snaps
   // Only use magnetic snap targets (item edges), not grid lines
-  const { getMagneticSnapTargets, snapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id
   );
@@ -128,7 +128,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
       }
 
       let nearestTarget: SnapTarget | null = null;
-      let minDistance = snapThresholdFrames;
+      let minDistance = getSnapThresholdFrames();
 
       for (const target of targets) {
         if (excludeItemIds && target.itemId && excludeItemIds.has(target.itemId)) continue;
@@ -145,7 +145,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       return { snappedFrame: targetFrame, snapTarget: null };
     },
-    [snapEnabled, getMagneticSnapTargets, snapThresholdFrames]
+    [snapEnabled, getMagneticSnapTargets, getSnapThresholdFrames]
   );
 
   // Mouse move handler - only updates local state for visual feedback

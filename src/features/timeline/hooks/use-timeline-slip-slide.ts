@@ -67,7 +67,7 @@ export function useTimelineSlipSlide(
   const fps = useTimelineStore((s) => s.fps);
   const setDragState = useSelectionStore((s) => s.setDragState);
 
-  const { getMagneticSnapTargets, snapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id,
   );
@@ -405,7 +405,7 @@ export function useTimelineSlipSlide(
 
             // Snap start edge
             const startDist = Math.abs(newStart - target.frame);
-            if (startDist < snapThresholdFrames) {
+            if (startDist < getSnapThresholdFrames()) {
               if (!bestSnap || startDist < Math.abs(bestSnap.offset)) {
                 bestSnap = { frame: target.frame, offset: target.frame - newStart };
               }
@@ -413,7 +413,7 @@ export function useTimelineSlipSlide(
 
             // Snap end edge
             const endDist = Math.abs(newEnd - target.frame);
-            if (endDist < snapThresholdFrames) {
+            if (endDist < getSnapThresholdFrames()) {
               if (!bestSnap || endDist < Math.abs(bestSnap.offset)) {
                 bestSnap = { frame: target.frame, offset: target.frame - newEnd };
               }
@@ -513,7 +513,7 @@ export function useTimelineSlipSlide(
 
       }
     },
-    [pixelsToTime, fps, trackLocked, item.id, getItemFromStore, clampSlipDelta, clampSlideDelta, snapEnabled, getMagneticSnapTargets, snapThresholdFrames],
+    [pixelsToTime, fps, trackLocked, item.id, getItemFromStore, clampSlipDelta, clampSlideDelta, snapEnabled, getMagneticSnapTargets, getSnapThresholdFrames],
   );
 
   // Mouse up handler — commits changes

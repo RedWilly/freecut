@@ -218,7 +218,7 @@ export const ImageFilmstrip = memo(function ImageFilmstrip({
     return (
       <div ref={containerRef} className="absolute inset-0">
         <div
-          className="absolute left-0 top-0 pointer-events-none"
+          className="absolute left-0 top-0 overflow-hidden pointer-events-none"
           style={{
             width: renderClipWidth,
             height,

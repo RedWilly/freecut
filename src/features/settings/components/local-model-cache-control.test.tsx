@@ -54,7 +54,7 @@ describe('LocalModelCacheControl', () => {
     ]);
   });
 
-  it('leaves checking state after async inspection in StrictMode', async () => {
+  it('exits checking state after async inspection in StrictMode and displays cache data', async () => {
     render(
       <StrictMode>
         <LocalModelCacheControl />

@@ -5,7 +5,7 @@ import type { DragState, UseTimelineDragReturn, SnapTarget } from '../types/drag
 import { useTimelineStore } from '../stores/timeline-store';
 import { useEditorStore } from '@/shared/state/editor';
 import { useSelectionStore } from '@/shared/state/selection';
-import { pixelsToFramePreciseNow, frameToPixelsNow } from '../utils/zoom-conversions';
+import { pixelsToFramePreciseNow, frameToPixelsNow } from '@/features/timeline/utils/zoom-conversions';
 import { useSnapCalculator } from './use-snap-calculator';
 import { findNearestAvailableSpace } from '../utils/collision-utils';
 import { getTrackKind } from '../utils/classic-tracks';
@@ -344,7 +344,7 @@ export function useTimelineDrag(
     return item.id;
   }, [selectedItemIds, item.id, isAltDragActive]);
 
-  const { magneticSnapTargets, snapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { magneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     excludeFromSnap,
     { includeTransitionMidpoints: false }
@@ -366,8 +366,8 @@ export function useTimelineDrag(
   // Update refs synchronously (not in useEffect) so they're always current
   const magneticSnapTargetsRef = useRef(magneticSnapTargets);
   magneticSnapTargetsRef.current = magneticSnapTargets;
-  const snapThresholdFramesRef = useRef(snapThresholdFrames);
-  snapThresholdFramesRef.current = snapThresholdFrames;
+  const getSnapThresholdFramesRef = useRef(getSnapThresholdFrames);
+  getSnapThresholdFramesRef.current = getSnapThresholdFrames;
   const snapEnabledRef = useRef(snapEnabled);
   snapEnabledRef.current = snapEnabled;
 
@@ -503,7 +503,7 @@ export function useTimelineDrag(
     itemDurationInFrames: number
   ): { snappedFrame: number; snapTarget: SnapTarget | null } => {
     const targets = magneticSnapTargetsRef.current;
-    const threshold = snapThresholdFramesRef.current;
+    const threshold = getSnapThresholdFramesRef.current();
     const enabled = snapEnabledRef.current;
 
     if (!enabled || targets.length === 0) {

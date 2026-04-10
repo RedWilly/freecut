@@ -50,7 +50,7 @@ import { mediaLibraryService } from '../services/media-library-service';
 import { extractValidMediaFileEntriesFromDataTransfer } from '../utils/file-drop';
 import { getSharedProxyKey } from '../utils/proxy-key';
 import { getMediaType } from '../utils/validation';
-import { getProjectBrokenMediaIds } from '../utils/broken-media';
+import { getProjectBrokenMediaIds } from '@/features/media-library/utils/broken-media';
 import type { MediaMetadata } from '@/types/storage';
 import { isMarqueeJustFinished, useMarqueeSelection, type MarqueeItem } from '@/hooks/use-marquee-selection';
 

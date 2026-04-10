@@ -249,6 +249,15 @@ export async function clearLocalModelCache(definition: LocalModelCacheDefinition
     return cacheStorage.delete(definition.cacheName);
   }
 
+  const hasMethod = 'has' in cacheStorage && typeof cacheStorage.has === 'function';
+  const cacheExists = hasMethod
+    ? await withTimeout(cacheStorage.has(definition.cacheName), `Checking ${definition.cacheName}`)
+    : (await withTimeout(cacheStorage.keys(), 'Listing cache buckets')).includes(definition.cacheName);
+
+  if (!cacheExists) {
+    return false;
+  }
+
   const cache = await withTimeout(cacheStorage.open(definition.cacheName), `Opening ${definition.cacheName}`);
   const requests = await withTimeout(cache.keys(), `Reading ${definition.cacheName}`);
   const matchingRequests = requests.filter((request) => matchesDefinitionRequest(definition, request));

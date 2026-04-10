@@ -72,8 +72,15 @@ export function useClipVisibility(
     };
 
     apply(useTimelineViewportStore.getState());
-    const unsubscribe = useTimelineViewportStore.subscribe(apply);
-    return unsubscribe;
+    const unsubViewport = useTimelineViewportStore.subscribe(apply);
+    // Recompute when zoom interaction ends — the FULLY_VISIBLE override
+    // leaves stale ratios that won't refresh until the next viewport change.
+    const unsubZoom = useZoomStore.subscribe((curr, prev) => {
+      if (prev.isZoomInteracting && !curr.isZoomInteracting) {
+        apply(useTimelineViewportStore.getState());
+      }
+    });
+    return () => { unsubViewport(); unsubZoom(); };
   }, [clipLeftPx, clipWidthPx]);
 
   // Force visible during zoom — coordinate spaces are mismatched

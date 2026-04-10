@@ -32,6 +32,8 @@ let processor: any = null;
 let model: any = null;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 let loading = false;
+let disposed = false;
+let loadGeneration = 0;
 
 function post(msg: Record<string, unknown>): void {
   self.postMessage(msg);
@@ -41,25 +43,29 @@ async function loadModel(): Promise<void> {
   if (model && processor) { post({ type: 'ready' }); return; }
   if (loading) return;
   loading = true;
+  disposed = false;
+  const thisGen = ++loadGeneration;
 
   try {
     post({ type: 'progress', stage: 'loading-transformers', percent: 0 });
     post({ type: 'progress', stage: 'loading-model', percent: 5 });
 
     let lastPct = 5;
-    processor = await AutoProcessor.from_pretrained(MODEL_ID);
+    const loadedProcessor = await AutoProcessor.from_pretrained(MODEL_ID);
+
+    if (disposed || thisGen !== loadGeneration) return;
 
     // Model card recommends 70–140 tokens for classification/video understanding.
     // Default 280 is more than needed; 140 halves the image tokens while keeping
     // enough visual detail to distinguish different scenes.
-    if (processor.image_processor) {
-      processor.image_processor.max_soft_tokens = 140;
+    if (loadedProcessor.image_processor) {
+      loadedProcessor.image_processor.max_soft_tokens = 140;
     }
 
-    model = await Gemma4ForConditionalGeneration.from_pretrained(MODEL_ID, {
+    const loadedModel = await Gemma4ForConditionalGeneration.from_pretrained(MODEL_ID, {
       dtype: 'q4f16',
       device: 'webgpu',
-      progress_callback: (info: { status?: string; total?: number; loaded?: number }) => {
+      progress_callback: disposed ? undefined : (info: { status?: string; total?: number; loaded?: number }) => {
         if (info.status === 'progress' && info.total && info.loaded) {
           const pct = 5 + (info.loaded / info.total) * 90;
           if (pct - lastPct > 2) {
@@ -70,10 +76,19 @@ async function loadModel(): Promise<void> {
       },
     });
 
+    if (disposed || thisGen !== loadGeneration) {
+      if (typeof loadedModel.dispose === 'function') loadedModel.dispose();
+      return;
+    }
+
+    processor = loadedProcessor;
+    model = loadedModel;
     post({ type: 'progress', stage: 'ready', percent: 100 });
     post({ type: 'ready' });
   } catch (err) {
-    post({ type: 'error', message: `Model load failed: ${(err as Error).message}` });
+    if (!disposed) {
+      post({ type: 'error', message: `Model load failed: ${(err as Error).message}` });
+    }
   } finally {
     loading = false;
   }
@@ -170,6 +185,7 @@ async function verifyCandidate(
 
 /** Release model and processor to free VRAM. */
 function dispose(): void {
+  disposed = true;
   if (model) {
     // transformers.js models expose a dispose() that releases WebGPU buffers
     if (typeof model.dispose === 'function') model.dispose();

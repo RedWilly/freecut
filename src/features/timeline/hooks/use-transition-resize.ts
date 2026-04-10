@@ -4,7 +4,7 @@ import { usePlaybackStore } from '@/shared/state/playback';
 import { TRANSITION_CONFIGS } from '@/types/transition';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useItemsStore } from '../stores/items-store';
-import { pixelsToTimeNow } from '../utils/zoom-conversions';
+import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions';
 import type { TimelineState, TimelineActions } from '../types';
 import { getMaxTransitionDurationForHandles } from '../utils/transition-utils';
 

@@ -12,6 +12,7 @@ import { OpticalFlowAnalyzer } from './optical-flow-analyzer';
 import type { MotionResult } from './optical-flow-analyzer';
 import { ANALYSIS_WIDTH, ANALYSIS_HEIGHT } from './optical-flow-shaders';
 import { detectScenesHistogram } from './histogram-scene-detection';
+import { seekVideo, deduplicateCuts } from './scene-detection-utils';
 import { createGemmaSceneWorker } from './create-gemma-worker';
 import { createLogger } from '@/shared/logging/logger';
 
@@ -65,25 +66,6 @@ export interface SceneDetectionProgress {
   sceneCuts: number;
   /** Current stage of the pipeline */
   stage?: 'optical-flow' | 'loading-model' | 'verifying';
-}
-
-/**
- * Seek video and wait for the seeked event with a timeout fallback.
- */
-async function seekVideo(video: HTMLVideoElement, timeSec: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
-      clearTimeout(timeout);
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      video.removeEventListener('seeked', onSeeked);
-      resolve();
-    }, 1000);
-    video.addEventListener('seeked', onSeeked);
-    video.currentTime = timeSec;
-  });
 }
 
 export interface DetectScenesOptions {
@@ -377,10 +359,9 @@ async function verifyWithGemma(
       stage: 'verifying',
     });
 
-    const [beforeBlob, afterBlob] = await Promise.all([
-      captureFrameBlob(video, beforeTime),
-      captureFrameBlob(video, cut.time),
-    ]);
+    // Serialize seeks — both mutate video.currentTime
+    const beforeBlob = await captureFrameBlob(video, beforeTime);
+    const afterBlob = await captureFrameBlob(video, cut.time);
 
     const result = await new Promise<{ isSceneCut: boolean; reason: string }>((resolve) => {
       const onMsg = (e: MessageEvent) => {
@@ -389,6 +370,9 @@ async function verifyWithGemma(
         } else if (e.data.type === 'result' && e.data.id === i) {
           worker.removeEventListener('message', onMsg);
           resolve({ isSceneCut: e.data.isSceneCut, reason: e.data.reason });
+        } else if (e.data.type === 'error') {
+          worker.removeEventListener('message', onMsg);
+          resolve({ isSceneCut: false, reason: `worker error: ${e.data.message}` });
         }
       };
       worker.addEventListener('message', onMsg);
@@ -403,32 +387,4 @@ async function verifyWithGemma(
   }
 
   return verified;
-}
-
-/**
- * Cluster scene cuts that are closer than `minGapSec` and keep only
- * the one with the highest total motion in each cluster.
- */
-function deduplicateCuts(cuts: SceneCut[], minGapSec: number): SceneCut[] {
-  if (cuts.length <= 1) return cuts;
-
-  const result: SceneCut[] = [];
-  let clusterBest = cuts[0]!;
-
-  for (let i = 1; i < cuts.length; i++) {
-    const cut = cuts[i]!;
-    if (cut.time - clusterBest.time < minGapSec) {
-      // Same cluster — keep the stronger cut
-      if (cut.motion.totalMotion > clusterBest.motion.totalMotion) {
-        clusterBest = cut;
-      }
-    } else {
-      // New cluster — emit previous best and start new cluster
-      result.push(clusterBest);
-      clusterBest = cut;
-    }
-  }
-  result.push(clusterBest);
-
-  return result;
 }

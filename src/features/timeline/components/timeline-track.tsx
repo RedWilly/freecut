@@ -63,7 +63,7 @@ import {
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
-import { useZoomStore } from '../stores/zoom-store';
+import { frameToPixelsNow, pixelsToFrameNow } from '@/features/timeline/utils/zoom-conversions';
 
 interface TimelineTrackProps {
   track: TimelineTrackType;
@@ -82,20 +82,6 @@ function areTrackPropsEqual(
   next: TimelineTrackProps
 ): boolean {
   return prev.track === next.track;
-}
-
-function frameToPixelsNow(frame: number): number {
-  const fps = useTimelineStore.getState().fps;
-  const pixelsPerSecond = useZoomStore.getState().pixelsPerSecond;
-  return fps > 0 ? (frame / fps) * pixelsPerSecond : 0;
-}
-
-function pixelsToFrameNow(pixels: number): number {
-  const fps = useTimelineStore.getState().fps;
-  const pixelsPerSecond = useZoomStore.getState().pixelsPerSecond;
-  return fps > 0 && pixelsPerSecond > 0
-    ? Math.round((pixels / pixelsPerSecond) * fps)
-    : 0;
 }
 
 /**

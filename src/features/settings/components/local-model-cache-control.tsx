@@ -74,6 +74,7 @@ export function LocalModelCacheControl({ className }: LocalModelCacheControlProp
   const scheduleReset = useCallback((cacheId: LocalModelCacheSummary['id']) => {
     if (resetTimerRef.current !== null) {
       window.clearTimeout(resetTimerRef.current);
+      setClearedCacheId(null);
     }
 
     setClearedCacheId(cacheId);

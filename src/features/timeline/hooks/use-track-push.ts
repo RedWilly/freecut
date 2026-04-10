@@ -5,7 +5,7 @@ import { useSelectionStore } from '@/shared/state/selection';
 import { useTimelineStore } from '../stores/timeline-store';
 import { useItemsStore } from '../stores/items-store';
 import { useTrackPushPreviewStore } from '../stores/track-push-preview-store';
-import { pixelsToTimeNow } from '../utils/zoom-conversions';
+import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions';
 import { useSnapCalculator } from './use-snap-calculator';
 import { trackPushItems } from '../stores/actions/item-actions';
 import type { SnapTarget } from '../types/drag';
@@ -28,7 +28,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
   const pixelsToTime = pixelsToTimeNow;
   const fps = useTimelineStore((s) => s.fps);
   const setDragState = useSelectionStore((s) => s.setDragState);
-  const { getMagneticSnapTargets, snapThresholdFrames, snapEnabled } = useSnapCalculator(
+  const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id
   );
@@ -49,7 +49,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
       if (!snapEnabled) return { snappedFrame: targetFrame, snapTarget: null };
       const targets = getMagneticSnapTargets();
       let nearest: SnapTarget | null = null;
-      let minDist = snapThresholdFrames;
+      let minDist = getSnapThresholdFrames();
       for (const t of targets) {
         if (excludeIds && t.itemId && excludeIds.has(t.itemId)) continue;
         const d = Math.abs(targetFrame - t.frame);
@@ -59,7 +59,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
         ? { snappedFrame: nearest.frame, snapTarget: nearest }
         : { snappedFrame: targetFrame, snapTarget: null };
     },
-    [snapEnabled, getMagneticSnapTargets, snapThresholdFrames],
+    [snapEnabled, getMagneticSnapTargets, getSnapThresholdFrames],
   );
 
   const handleMouseMove = useCallback((e: MouseEvent) => {

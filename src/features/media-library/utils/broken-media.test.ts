@@ -3,7 +3,7 @@ import type { MediaMetadata } from '@/types/storage';
 import {
   getProjectBrokenMediaIds,
   getProjectBrokenMediaInfo,
-} from './broken-media';
+} from '@/features/media-library/utils/broken-media';
 
 function makeMedia(id: string, fileName = `${id}.mp4`): MediaMetadata {
   return {

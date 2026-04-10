@@ -6,8 +6,8 @@
  * etc.) where a subscription would cause unnecessary re-renders.
  */
 
-import { useZoomStore } from '../stores/zoom-store';
-import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
+import { useZoomStore } from '@/features/timeline/stores/zoom-store';
+import { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store';
 
 export function getPixelsPerSecondNow(): number {
   return useZoomStore.getState().pixelsPerSecond;

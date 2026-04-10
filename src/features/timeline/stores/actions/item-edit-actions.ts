@@ -228,6 +228,14 @@ export function splitItemAtFrames(
         continue;
       }
 
+      // Preflight: verify all items still exist and are splittable before mutating
+      const store = useItemsStore.getState();
+      const allSplittable = itemsToSplit.every((item) => {
+        const current = store.itemById[item.id];
+        return current && frame > current.from && frame < current.from + current.durationInFrames;
+      });
+      if (!allSplittable) continue;
+
       const frameSplitResults = itemsToSplit
         .map((item) => ({
           originalId: item.id,

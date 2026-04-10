@@ -39,6 +39,7 @@ export function getAudioFadeSecondsFromOffset(params: {
     params.maxDurationFrames,
     Math.round(fadeRatio * params.maxDurationFrames),
   ));
+  if (params.fps <= 0) return 0;
   return fadeFrames / params.fps;
 }
 
