@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useEffectEvent, useMemo } from 'react';
 import { filmstripCache, type Filmstrip, type FilmstripFrame } from '../services/filmstrip-cache';
+import { getPreviewStartupDelayMs, schedulePreviewWork } from './preview-work-budget';
 
 export type { FilmstripFrame };
 
@@ -36,6 +37,7 @@ interface UseFilmstripResult {
  *
  * Returns object URLs for use in <img src> tags.
  * Progressive loading: updates as frames are extracted.
+ * Startup is deferred to idle/interaction budget so timeline creation stays responsive.
  */
 export function useFilmstrip({
   mediaId,
@@ -57,14 +59,15 @@ export function useFilmstrip({
   const [error, setError] = useState<string | null>(null);
 
   const isGeneratingRef = useRef(false);
+  const hasPendingStartRef = useRef(false);
   const lastMediaIdRef = useRef<string>(mediaId);
 
   // Reset state when mediaId changes (e.g., after relinking orphaned clip)
   useEffect(() => {
     if (lastMediaIdRef.current !== mediaId) {
-      // Media ID changed - reset to load new filmstrip
       lastMediaIdRef.current = mediaId;
       isGeneratingRef.current = false;
+      hasPendingStartRef.current = false;
       const cached = filmstripCache.getFromCacheSync(mediaId);
       setFilmstrip(cached);
       setIsLoading(false);
@@ -73,9 +76,8 @@ export function useFilmstrip({
     }
   }, [mediaId]);
 
-  // Progress callback
-  const onProgress = useEffectEvent((p: number) => {
-    setProgress(p);
+  const onProgress = useEffectEvent((nextProgress: number) => {
+    setProgress(nextProgress);
   });
 
   // Filmstrip extraction runs at 1fps, so quantize the requested source
@@ -87,6 +89,7 @@ export function useFilmstrip({
     const endIndex = Math.max(startIndex + 1, Math.ceil(priorityWindow.endTime));
     return { startIndex, endIndex };
   }, [priorityWindow]);
+
   // Subscribe to progressive updates
   useEffect(() => {
     if (!enabled || !blobUrl || !duration || duration <= 0) {
@@ -108,53 +111,74 @@ export function useFilmstrip({
       return;
     }
 
-    if (!isVisible && !isGeneratingRef.current) {
+    if (!isVisible && !isGeneratingRef.current && !hasPendingStartRef.current) {
       return;
     }
 
     const needsPriorityRefinement = filmstripCache.needsPriorityRefinement(
       mediaId,
       duration,
-      priorityRange
+      priorityRange,
     );
 
     if (filmstrip?.isComplete && !needsPriorityRefinement) {
       return;
     }
 
-    isGeneratingRef.current = true;
+    if (isGeneratingRef.current || hasPendingStartRef.current) {
+      return;
+    }
+
+    hasPendingStartRef.current = true;
     setIsLoading(true);
     setError(null);
+
     let cancelled = false;
     const requestMediaId = mediaId;
+    const cancelScheduledStart = schedulePreviewWork(() => {
+      if (cancelled || lastMediaIdRef.current !== requestMediaId) {
+        hasPendingStartRef.current = false;
+        return;
+      }
 
-    filmstripCache
-      .getFilmstrip(mediaId, blobUrl, duration, onProgress, priorityRange ?? undefined)
-      .then((result) => {
-        if (cancelled || lastMediaIdRef.current !== requestMediaId) {
-          return;
-        }
-        setFilmstrip(result);
-        setProgress(result.progress);
-        setIsLoading(result.isExtracting);
-      })
-      .catch((err) => {
-        if (cancelled || lastMediaIdRef.current !== requestMediaId) {
-          return;
-        }
-        if (err.message !== 'Aborted') {
-          setError(err.message || 'Failed to generate filmstrip');
-        }
-        setIsLoading(false);
-      })
-      .finally(() => {
-        if (lastMediaIdRef.current === requestMediaId) {
-          isGeneratingRef.current = false;
-        }
-      });
+      hasPendingStartRef.current = false;
+      isGeneratingRef.current = true;
+
+      filmstripCache
+        .getFilmstrip(mediaId, blobUrl, duration, onProgress, priorityRange ?? undefined)
+        .then((result) => {
+          if (cancelled || lastMediaIdRef.current !== requestMediaId) {
+            return;
+          }
+          setFilmstrip(result);
+          setProgress(result.progress);
+          setIsLoading(result.isExtracting);
+        })
+        .catch((err) => {
+          if (cancelled || lastMediaIdRef.current !== requestMediaId) {
+            return;
+          }
+          if (err.message !== 'Aborted') {
+            setError(err.message || 'Failed to generate filmstrip');
+          }
+          setIsLoading(false);
+        })
+        .finally(() => {
+          if (lastMediaIdRef.current === requestMediaId) {
+            isGeneratingRef.current = false;
+            hasPendingStartRef.current = false;
+          }
+        });
+    }, {
+      delayMs: getPreviewStartupDelayMs(duration),
+    });
 
     return () => {
       cancelled = true;
+      if (!isGeneratingRef.current) {
+        hasPendingStartRef.current = false;
+      }
+      cancelScheduledStart();
     };
   }, [mediaId, blobUrl, duration, isVisible, enabled, filmstrip?.isComplete, priorityRange]);
 

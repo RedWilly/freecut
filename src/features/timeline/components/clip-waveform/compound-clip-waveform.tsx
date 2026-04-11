@@ -10,6 +10,7 @@ import { waveformCache, type CachedWaveform } from '../../services/waveform-cach
 import { WAVEFORM_FILL_COLOR, WAVEFORM_STROKE_COLOR } from '../../constants';
 import { getCompositionOwnedAudioSources } from '../../utils/composition-clip-summary';
 import { mixCompoundClipWaveformPeaks } from '../../utils/compound-clip-waveform';
+import { computeWaveformRenderWindow } from './render-window';
 
 const logger = createLogger('CompoundClipWaveform');
 const WAVEFORM_VERTICAL_PADDING_PX = 3;
@@ -24,18 +25,24 @@ function quantizeRenderPps(value: number): number {
 interface CompoundClipWaveformProps {
   composition: SubComposition;
   clipWidth: number;
+  renderWidth?: number;
   sourceStart: number;
   sourceDuration: number;
   isVisible: boolean;
+  visibleStartRatio?: number;
+  visibleEndRatio?: number;
   pixelsPerSecond: number;
 }
 
 export const CompoundClipWaveform = memo(function CompoundClipWaveform({
   composition,
   clipWidth,
+  renderWidth,
   sourceStart,
   sourceDuration,
   isVisible,
+  visibleStartRatio = 0,
+  visibleEndRatio = 1,
   pixelsPerSecond,
 }: CompoundClipWaveformProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -96,6 +103,8 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     [ownedAudioSources]
   );
   const mediaIdsKey = useMemo(() => mediaIds.join('|'), [mediaIds]);
+  const visibleClipWidth = clipWidth;
+  const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth);
 
   useEffect(() => {
     requestTokenRef.current += 1;
@@ -174,6 +183,15 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
 
   const peaks = mixedWaveform?.peaks ?? null;
   const sampleRate = mixedWaveform?.sampleRate ?? 0;
+  const { visibleStartPx, visibleEndPx } = useMemo(
+    () => computeWaveformRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+    }),
+    [renderClipWidth, visibleClipWidth, visibleStartRatio, visibleEndRatio]
+  );
   const normalizationPeak = useMemo(() => {
     if (!peaks || peaks.length === 0) return 1;
     let maxPeak = 0;
@@ -310,7 +328,7 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     }
     return (
       <div ref={containerRef} className="absolute inset-0">
-        <WaveformSkeleton clipWidth={clipWidth} height={height || 24} />
+        <WaveformSkeleton clipWidth={visibleClipWidth} height={height || 24} />
       </div>
     );
   }
@@ -323,12 +341,15 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
 
   return (
     <div ref={containerRef} className="absolute inset-0">
-      {isLoading && <WaveformSkeleton clipWidth={clipWidth} height={height} />}
+      {isLoading && <WaveformSkeleton clipWidth={visibleClipWidth} height={height} />}
       <TiledCanvas
-        width={clipWidth}
+        width={renderClipWidth}
         height={height}
         renderTile={renderTile}
         version={renderVersion}
+        visibleStartPx={visibleStartPx}
+        visibleEndPx={visibleEndPx}
+        overscanTiles={1}
       />
     </div>
   );

@@ -19,6 +19,11 @@ interface TiledCanvasProps {
   className?: string;
   /** Version number - increment to force re-render */
   version?: string | number;
+  /** Visible pixel range to virtualize tile creation for very long clips */
+  visibleStartPx?: number;
+  visibleEndPx?: number;
+  /** Extra tiles to keep on either side of the visible window */
+  overscanTiles?: number;
 }
 
 /**
@@ -37,6 +42,9 @@ export const TiledCanvas = memo(function TiledCanvas({
   renderTile,
   className = '',
   version = 0,
+  visibleStartPx,
+  visibleEndPx,
+  overscanTiles = 0,
 }: TiledCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasPoolRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -48,6 +56,19 @@ export const TiledCanvas = memo(function TiledCanvas({
 
   // Calculate number of tiles needed
   const tileCount = Math.ceil(width / TILE_WIDTH);
+  const hasVisibleWindow = Number.isFinite(visibleStartPx) && Number.isFinite(visibleEndPx);
+  const clampedVisibleStart = hasVisibleWindow
+    ? Math.max(0, Math.min(width, visibleStartPx ?? 0))
+    : 0;
+  const clampedVisibleEnd = hasVisibleWindow
+    ? Math.max(clampedVisibleStart, Math.min(width, visibleEndPx ?? width))
+    : width;
+  const activeTileStart = hasVisibleWindow
+    ? Math.max(0, Math.floor(clampedVisibleStart / TILE_WIDTH) - overscanTiles)
+    : 0;
+  const activeTileEnd = hasVisibleWindow
+    ? Math.min(tileCount, Math.ceil(clampedVisibleEnd / TILE_WIDTH) + overscanTiles)
+    : tileCount;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -62,7 +83,7 @@ export const TiledCanvas = memo(function TiledCanvas({
       height !== last.height;
 
     // Create or update tiles
-    for (let tileIndex = 0; tileIndex < tileCount; tileIndex++) {
+    for (let tileIndex = activeTileStart; tileIndex < activeTileEnd; tileIndex++) {
       let canvas = canvasPool.get(tileIndex);
       const isNew = !canvas;
 
@@ -105,7 +126,7 @@ export const TiledCanvas = memo(function TiledCanvas({
 
     // Remove extra tiles that are no longer needed
     for (const [index, canvas] of canvasPool) {
-      if (index >= tileCount) {
+      if (index < activeTileStart || index >= activeTileEnd) {
         canvas.remove();
         canvasPool.delete(index);
       }
@@ -116,7 +137,15 @@ export const TiledCanvas = memo(function TiledCanvas({
       last.renderTile = renderTile;
       last.height = height;
     }
-  }, [width, height, tileCount, version, renderTile]);
+  }, [
+    width,
+    height,
+    tileCount,
+    version,
+    renderTile,
+    activeTileStart,
+    activeTileEnd,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
