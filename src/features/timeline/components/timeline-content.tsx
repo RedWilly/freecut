@@ -61,65 +61,33 @@ const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
   'timeline-cursor-gauge',
 ] as const;
 
-interface TrackSectionScrollMetrics {
-  clientHeight: number;
-  scrollHeight: number;
-  scrollTop: number;
-}
-
 type TrackScrollbarSection = 'video' | 'audio' | 'single';
 
-const EMPTY_TRACK_SECTION_SCROLL_METRICS: TrackSectionScrollMetrics = {
-  clientHeight: 0,
-  scrollHeight: 0,
-  scrollTop: 0,
-};
-
-function useTrackSectionScrollMetrics(
+/**
+ * Tracks whether a scroll container has vertical overflow.
+ * Only re-renders the parent when overflow state changes (resize/content change),
+ * NOT on scroll events.
+ */
+function useTrackSectionHasOverflow(
   scrollRef?: React.RefObject<HTMLDivElement | null>,
   deps: readonly unknown[] = []
 ) {
-  const [metrics, setMetrics] = useState<TrackSectionScrollMetrics>(EMPTY_TRACK_SECTION_SCROLL_METRICS);
+  const [hasOverflow, setHasOverflow] = useState(false);
 
   useLayoutEffect(() => {
     const element = scrollRef?.current;
     if (!element) {
-      setMetrics(EMPTY_TRACK_SECTION_SCROLL_METRICS);
+      setHasOverflow(false);
       return;
     }
 
-    let frameId = 0;
-
-    const updateMetrics = () => {
-      frameId = 0;
-      const nextMetrics = {
-        clientHeight: element.clientHeight,
-        scrollHeight: element.scrollHeight,
-        scrollTop: element.scrollTop,
-      };
-
-      setMetrics((currentMetrics) => (
-        currentMetrics.clientHeight === nextMetrics.clientHeight
-        && currentMetrics.scrollHeight === nextMetrics.scrollHeight
-        && currentMetrics.scrollTop === nextMetrics.scrollTop
-      )
-        ? currentMetrics
-        : nextMetrics);
+    const checkOverflow = () => {
+      setHasOverflow(element.scrollHeight > element.clientHeight);
     };
 
-    const scheduleMetricsUpdate = () => {
-      if (frameId !== 0) {
-        return;
-      }
-      frameId = window.requestAnimationFrame(updateMetrics);
-    };
+    checkOverflow();
 
-    scheduleMetricsUpdate();
-
-    element.addEventListener('scroll', scheduleMetricsUpdate, { passive: true });
-    window.addEventListener('resize', scheduleMetricsUpdate);
-
-    const resizeObserver = new ResizeObserver(scheduleMetricsUpdate);
+    const resizeObserver = new ResizeObserver(checkOverflow);
     resizeObserver.observe(element);
 
     const contentElement = element.firstElementChild;
@@ -128,51 +96,120 @@ function useTrackSectionScrollMetrics(
     }
 
     return () => {
-      if (frameId !== 0) {
-        window.cancelAnimationFrame(frameId);
-      }
-      element.removeEventListener('scroll', scheduleMetricsUpdate);
-      window.removeEventListener('resize', scheduleMetricsUpdate);
       resizeObserver.disconnect();
     };
   }, [scrollRef, ...deps]);
 
-  return metrics;
+  return hasOverflow;
 }
 
+/**
+ * Scrollbar that tracks scroll position imperatively via DOM manipulation.
+ * No React state for scrollTop — thumb updates bypass the React render cycle.
+ */
 function TrackSectionScrollbarOverlay({
   section,
   height,
-  metrics,
   scrollRef,
 }: {
   section: TrackScrollbarSection;
   height: number;
-  metrics: TrackSectionScrollMetrics;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 }) {
-  const overflowHeight = metrics.scrollHeight - metrics.clientHeight;
   const railRef = useRef<HTMLDivElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const dragOffsetRef = useRef(0);
   const detachDragListenersRef = useRef<(() => void) | null>(null);
+  // Cache layout-derived values in refs so drag/scroll handlers use current values
+  // without needing React re-renders
+  const layoutRef = useRef({ railHeight: 0, thumbHeight: 0, maxThumbTravel: 0, overflowHeight: 0 });
   const railInset = 4;
-  const railHeight = Math.max(0, height - railInset * 2);
-  const thumbHeight = Math.min(
-    railHeight,
-    Math.max(24, (metrics.clientHeight / metrics.scrollHeight) * railHeight)
-  );
-  const maxThumbTravel = Math.max(0, railHeight - thumbHeight);
-  const thumbTop = overflowHeight > 0
-    ? (metrics.scrollTop / overflowHeight) * maxThumbTravel
-    : 0;
+
+  // Compute layout metrics and update thumb size/position imperatively
+  const updateThumbLayout = useCallback(() => {
+    const element = scrollRef?.current;
+    const thumb = thumbRef.current;
+    if (!element || !thumb) return;
+
+    const clientHeight = element.clientHeight;
+    const scrollHeight = element.scrollHeight;
+    const overflowHeight = scrollHeight - clientHeight;
+    const railHeight = Math.max(0, height - railInset * 2);
+    const thumbHeight = overflowHeight > 0
+      ? Math.min(railHeight, Math.max(24, (clientHeight / scrollHeight) * railHeight))
+      : 0;
+    const maxThumbTravel = Math.max(0, railHeight - thumbHeight);
+    const scrollTop = element.scrollTop;
+    const thumbTop = overflowHeight > 0
+      ? (scrollTop / overflowHeight) * maxThumbTravel
+      : 0;
+
+    layoutRef.current = { railHeight, thumbHeight, maxThumbTravel, overflowHeight };
+
+    thumb.style.height = `${thumbHeight}px`;
+    thumb.style.top = `${railInset + thumbTop}px`;
+    thumb.style.display = thumbHeight > 0 ? '' : 'none';
+  }, [height, scrollRef]);
+
+  // Update thumb position only (cheaper — called on scroll)
+  const updateThumbPosition = useCallback(() => {
+    const element = scrollRef?.current;
+    const thumb = thumbRef.current;
+    if (!element || !thumb) return;
+
+    const { maxThumbTravel, overflowHeight } = layoutRef.current;
+    if (overflowHeight <= 0 || maxThumbTravel <= 0) return;
+
+    const thumbTop = (element.scrollTop / overflowHeight) * maxThumbTravel;
+    thumb.style.top = `${railInset + thumbTop}px`;
+  }, [scrollRef]);
+
+  // Listen for scroll + resize, update thumb imperatively (no setState)
+  useEffect(() => {
+    const element = scrollRef?.current;
+    if (!element) return;
+
+    let scrollFrameId = 0;
+    const scheduleThumbUpdate = () => {
+      if (scrollFrameId !== 0) return;
+      scrollFrameId = window.requestAnimationFrame(() => {
+        scrollFrameId = 0;
+        updateThumbPosition();
+      });
+    };
+
+    // Full layout recalc on resize
+    const resizeObserver = new ResizeObserver(() => {
+      updateThumbLayout();
+    });
+    resizeObserver.observe(element);
+    const contentElement = element.firstElementChild;
+    if (contentElement instanceof HTMLElement) {
+      resizeObserver.observe(contentElement);
+    }
+
+    element.addEventListener('scroll', scheduleThumbUpdate, { passive: true });
+
+    // Initial layout
+    updateThumbLayout();
+
+    return () => {
+      if (scrollFrameId !== 0) cancelAnimationFrame(scrollFrameId);
+      element.removeEventListener('scroll', scheduleThumbUpdate);
+      resizeObserver.disconnect();
+    };
+  }, [scrollRef, updateThumbLayout, updateThumbPosition]);
+
+  // Also recalc on height prop change
+  useEffect(() => {
+    updateThumbLayout();
+  }, [height, updateThumbLayout]);
 
   const syncScrollFromClientY = useCallback((clientY: number) => {
     const rail = railRef.current;
     const scrollElement = scrollRef?.current;
-    if (!rail || !scrollElement || maxThumbTravel <= 0 || overflowHeight <= 0) {
-      return;
-    }
+    const { maxThumbTravel, overflowHeight } = layoutRef.current;
+    if (!rail || !scrollElement || maxThumbTravel <= 0 || overflowHeight <= 0) return;
 
     const railRect = rail.getBoundingClientRect();
     const nextThumbTop = Math.max(
@@ -181,7 +218,7 @@ function TrackSectionScrollbarOverlay({
     );
 
     scrollElement.scrollTop = (nextThumbTop / maxThumbTravel) * overflowHeight;
-  }, [maxThumbTravel, overflowHeight, scrollRef]);
+  }, [scrollRef]);
 
   const stopDragging = useCallback(() => {
     if (detachDragListenersRef.current) {
@@ -206,7 +243,7 @@ function TrackSectionScrollbarOverlay({
 
     dragOffsetRef.current = pointerStartedOnThumb && thumbRect
       ? event.clientY - thumbRect.top
-      : thumbHeight / 2;
+      : layoutRef.current.thumbHeight / 2;
 
     syncScrollFromClientY(event.clientY);
 
@@ -229,14 +266,10 @@ function TrackSectionScrollbarOverlay({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [stopDragging, syncScrollFromClientY, thumbHeight]);
+  }, [stopDragging, syncScrollFromClientY]);
 
   if (height <= 0) {
     return null;
-  }
-
-  if (overflowHeight <= 0 || metrics.clientHeight <= 0 || !scrollRef?.current) {
-    return <div className="shrink-0" style={{ height: `${height}px` }} aria-hidden="true" />;
   }
 
   return (
@@ -248,8 +281,7 @@ function TrackSectionScrollbarOverlay({
       aria-controls="timeline-track-sections"
       aria-orientation="vertical"
       aria-valuemin={0}
-      aria-valuemax={Math.max(overflowHeight, 0)}
-      aria-valuenow={Math.round(metrics.scrollTop)}
+      aria-valuemax={100}
       tabIndex={-1}
       onPointerDown={handlePointerDown}
     >
@@ -257,10 +289,6 @@ function TrackSectionScrollbarOverlay({
         <div
           ref={thumbRef}
           className="absolute inset-x-0 rounded-sm bg-muted-foreground/55 hover:bg-muted-foreground/70 transition-colors cursor-grab active:cursor-grabbing active:bg-muted-foreground/75"
-          style={{
-            height: `${thumbHeight}px`,
-            top: `${railInset + thumbTop}px`,
-          }}
         />
       </div>
     </div>
@@ -1315,31 +1343,25 @@ export const TimelineContent = memo(function TimelineContent({
   const singleSectionHeight = videoTracks.length > 0 ? videoPaneHeight : audioPaneHeight;
   const singleSectionZoneHeight = videoTracks.length > 0 ? videoZoneHeight : audioZoneHeight;
   const singleSectionAnchorTrackId = videoTracks.length > 0 ? topZoneAnchorTrackId : bottomZoneAnchorTrackId;
-  const videoSectionScrollMetrics = useTrackSectionScrollMetrics(videoTracksScrollRef, [
+  const videoSectionHasOverflow = useTrackSectionHasOverflow(videoTracksScrollRef, [
     hasTrackSections,
-    timelineWidth,
     videoPaneHeight,
     videoTracks.length,
     videoSectionContentHeight,
   ]);
-  const audioSectionScrollMetrics = useTrackSectionScrollMetrics(audioTracksScrollRef, [
+  const audioSectionHasOverflow = useTrackSectionHasOverflow(audioTracksScrollRef, [
     hasTrackSections,
-    timelineWidth,
     audioPaneHeight,
     audioTracks.length,
     audioSectionContentHeight,
   ]);
-  const singleSectionScrollMetrics = useTrackSectionScrollMetrics(allTracksScrollRef, [
+  const singleSectionHasOverflow = useTrackSectionHasOverflow(allTracksScrollRef, [
     hasTrackSections,
-    timelineWidth,
     singleSectionHeight,
     singleSectionTracks.length,
     videoSectionContentHeight,
     audioSectionContentHeight,
   ]);
-  const videoSectionHasOverflow = videoSectionScrollMetrics.scrollHeight > videoSectionScrollMetrics.clientHeight;
-  const audioSectionHasOverflow = audioSectionScrollMetrics.scrollHeight > audioSectionScrollMetrics.clientHeight;
-  const singleSectionHasOverflow = singleSectionScrollMetrics.scrollHeight > singleSectionScrollMetrics.clientHeight;
   const renderTrackSection = (
     sectionTracks: TimelineTrackType[],
     options: {
@@ -1484,14 +1506,12 @@ export const TimelineContent = memo(function TimelineContent({
               <TrackSectionScrollbarOverlay
                 section="video"
                 height={videoPaneHeight}
-                metrics={videoSectionScrollMetrics}
                 scrollRef={videoTracksScrollRef}
               />
               <div className="shrink-0" style={{ height: `${TRACK_SECTION_DIVIDER_HEIGHT}px` }} />
               <TrackSectionScrollbarOverlay
                 section="audio"
                 height={audioPaneHeight}
-                metrics={audioSectionScrollMetrics}
                 scrollRef={audioTracksScrollRef}
               />
             </>
@@ -1499,7 +1519,6 @@ export const TimelineContent = memo(function TimelineContent({
             <TrackSectionScrollbarOverlay
               section="single"
               height={singleSectionHeight}
-              metrics={singleSectionScrollMetrics}
               scrollRef={allTracksScrollRef}
             />
           )}
