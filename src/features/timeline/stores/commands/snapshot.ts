@@ -9,6 +9,10 @@ import { usePlaybackStore } from '@/shared/state/playback';
 import { useProjectStore } from '@/features/timeline/deps/projects';
 import { updateProject } from '@/infrastructure/storage/indexeddb';
 import { createLogger } from '@/shared/logging/logger';
+import {
+  getEffectiveTimelineMaxFrame,
+  sanitizeInOutPoints,
+} from '../../utils/in-out-points';
 
 const logger = createLogger('TimelineSnapshot');
 
@@ -125,8 +129,13 @@ export function restoreSnapshot(snapshot: TimelineSnapshot): void {
 
   // Restore markers and in/out points
   useMarkersStore.getState().setMarkers(snapshot.markers);
-  useMarkersStore.getState().setInPoint(snapshot.inPoint);
-  useMarkersStore.getState().setOutPoint(snapshot.outPoint);
+  const sanitizedInOutPoints = sanitizeInOutPoints({
+    inPoint: snapshot.inPoint,
+    outPoint: snapshot.outPoint,
+    maxFrame: getEffectiveTimelineMaxFrame(snapshot.items, snapshot.fps),
+  });
+  useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint);
+  useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint);
 
   // Restore compositions
   useCompositionsStore.getState().setCompositions(snapshot.compositions);

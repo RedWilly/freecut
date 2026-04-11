@@ -7,20 +7,12 @@ import { useItemsStore } from '../items-store';
 import { useMarkersStore } from '../markers-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
 import { execute } from './shared';
-
-const MIN_TIMELINE_SECONDS = 10;
+import { getEffectiveTimelineMaxFrame } from '../../utils/in-out-points';
 
 function getEffectiveMaxFrame(): number {
   const items = useItemsStore.getState().items;
   const fps = useTimelineSettingsStore.getState().fps;
-
-  const contentMaxFrame = items.reduce(
-    (max, item) => Math.max(max, item.from + item.durationInFrames),
-    0
-  );
-  const minimumFrame = Math.max(1, Math.floor(MIN_TIMELINE_SECONDS * fps));
-
-  return Math.max(contentMaxFrame, minimumFrame);
+  return getEffectiveTimelineMaxFrame(items, fps);
 }
 
 export function addMarker(frame: number, color?: string, label?: string): void {

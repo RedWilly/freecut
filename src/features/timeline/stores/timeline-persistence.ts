@@ -45,6 +45,10 @@ import {
   getLinkedCompositionAudioCompanion,
   isCompositionAudioItem,
 } from '@/shared/utils/linked-media';
+import {
+  getEffectiveTimelineMaxFrame,
+  sanitizeInOutPoints,
+} from '../utils/in-out-points';
 
 const logger = createLogger('TimelineStore');
 
@@ -820,13 +824,19 @@ export async function loadTimeline(
         }));
 
       // Restore all state to domain stores
+      const projectFps = project.metadata?.fps || 30;
+      const sanitizedInOutPoints = sanitizeInOutPoints({
+        inPoint: t.inPoint ?? null,
+        outPoint: t.outPoint ?? null,
+        maxFrame: getEffectiveTimelineMaxFrame((t.items || []) as TimelineItem[], projectFps),
+      });
       useItemsStore.getState().setTracks(sortedTracks as TimelineTrack[]);
       useItemsStore.getState().setItems((t.items || []) as TimelineItem[]);
       useTransitionsStore.getState().setTransitions((t.transitions || []) as Transition[]);
       useKeyframesStore.getState().setKeyframes((t.keyframes || []) as ItemKeyframes[]);
       useMarkersStore.getState().setMarkers(t.markers || []);
-      useMarkersStore.getState().setInPoint(t.inPoint ?? null);
-      useMarkersStore.getState().setOutPoint(t.outPoint ?? null);
+      useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint);
+      useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint);
       useTimelineSettingsStore.getState().setScrollPosition(t.scrollPosition || 0);
 
       // Restore sub-compositions
@@ -917,4 +927,3 @@ export async function loadTimeline(
     throw error;
   }
 }
-
