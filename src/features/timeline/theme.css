@@ -173,8 +173,8 @@ body.timeline-external-media-drag [data-transition-id] * {
   height: 0;
 }
 
-/* Hide track section vertical scrollbars so they don't shrink content width,
-   matching the .timeline-container horizontal scrollbar pattern */
+/* Hide native section scrollbars; the timeline renders a viewport-edge
+   indicator because these section scrollers span the full timeline width. */
 [data-track-section-scroll] {
   scrollbar-width: none;
 }
