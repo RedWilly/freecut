@@ -1,5 +1,9 @@
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
-import { findNearestAvailableSpace, type CollisionRect } from './collision-utils';
+import {
+  buildCollisionTrackItemsMap,
+  findNearestAvailableSpaceInTrackItems,
+  type CollisionRect,
+} from './collision-utils';
 import { resolveCreateNewDragTrackTargets } from './linked-drag-targeting';
 import type { DroppableMediaType } from './dropped-media';
 
@@ -40,16 +44,15 @@ function resolveSyncedDropFrame(
   proposedFrom: number,
   durationInFrames: number,
   trackIds: string[],
-  itemsToCheck: CollisionRect[]
+  getTrackItemsToCheck: (trackId: string) => ReadonlyArray<CollisionRect>
 ): number | null {
   let candidate = Math.max(0, proposedFrom);
 
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const positions = trackIds.map((trackId) => findNearestAvailableSpace(
+    const positions = trackIds.map((trackId) => findNearestAvailableSpaceInTrackItems(
       candidate,
       durationInFrames,
-      trackId,
-      itemsToCheck
+      getTrackItemsToCheck(trackId),
     ));
 
     if (positions.some((position) => position === null)) {
@@ -112,6 +115,17 @@ export function planNewTrackZonePlacements<T>(params: {
   let workingTracks = [...params.tracks];
   let zoneVideoTrackId: string | null = null;
   let zoneAudioTrackId: string | null = null;
+  const baseTrackItemsById = buildCollisionTrackItemsMap(params.existingItems);
+
+  const getTrackItemsToCheck = (trackId: string): ReadonlyArray<CollisionRect> => {
+    const baseTrackItems = baseTrackItemsById.get(trackId) ?? [];
+    const reservedTrackItems = reservedRanges.filter((item) => item.trackId === trackId);
+    if (reservedTrackItems.length === 0) {
+      return baseTrackItems;
+    }
+
+    return [...baseTrackItems, ...reservedTrackItems].sort((a, b) => a.from - b.from);
+  };
 
   const ensureZoneTrack = (trackZone: 'video' | 'audio'): string | null => {
     const existingTrackId = trackZone === 'video' ? zoneVideoTrackId : zoneAudioTrackId;
@@ -139,7 +153,6 @@ export function planNewTrackZonePlacements<T>(params: {
   };
 
   for (const entry of params.entries) {
-    const itemsToCheck: CollisionRect[] = [...params.existingItems, ...reservedRanges];
     const isVideoWithAudio = entry.mediaType === 'video' && !!entry.hasLinkedAudio;
     const isVisualMedia = entry.mediaType === 'video' || entry.mediaType === 'image';
 
@@ -165,7 +178,7 @@ export function planNewTrackZonePlacements<T>(params: {
           currentPosition,
           entry.durationInFrames,
           [primaryTrackId, companionTrackId],
-          itemsToCheck,
+          getTrackItemsToCheck,
         );
 
         if (syncFrom === null) {
@@ -187,11 +200,10 @@ export function planNewTrackZonePlacements<T>(params: {
           },
         ];
       } else {
-        const finalPosition = findNearestAvailableSpace(
+        const finalPosition = findNearestAvailableSpaceInTrackItems(
           currentPosition,
           entry.durationInFrames,
-          primaryTrackId,
-          itemsToCheck,
+          getTrackItemsToCheck(primaryTrackId),
         );
 
         if (finalPosition === null) {
@@ -215,11 +227,10 @@ export function planNewTrackZonePlacements<T>(params: {
         continue;
       }
 
-      const finalPosition = findNearestAvailableSpace(
+      const finalPosition = findNearestAvailableSpaceInTrackItems(
         currentPosition,
         entry.durationInFrames,
-        audioTrackId,
-        itemsToCheck,
+        getTrackItemsToCheck(audioTrackId),
       );
 
       if (finalPosition === null) {

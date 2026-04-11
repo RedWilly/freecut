@@ -1,5 +1,6 @@
 export interface SelectionState {
   selectedItemIds: string[];
+  selectedItemIdSet: Set<string>;
   selectedMarkerId: string | null; // Selected marker ID
   selectedTransitionId: string | null; // Selected transition ID
   selectedTrackId: string | null; // Deprecated: use activeTrackId

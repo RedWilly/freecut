@@ -1,5 +1,9 @@
 import type { TimelineTrack } from '@/types/timeline';
-import { findNearestAvailableSpace, type CollisionRect } from './collision-utils';
+import {
+  buildCollisionTrackItemsMap,
+  findNearestAvailableSpaceInTrackItems,
+  type CollisionRect,
+} from './collision-utils';
 import {
   createClassicTrack,
   findNearestTrackByKind,
@@ -44,16 +48,15 @@ function resolveSyncedDropFrame(
   proposedFrom: number,
   durationInFrames: number,
   trackIds: string[],
-  itemsToCheck: CollisionRect[]
+  getTrackItemsToCheck: (trackId: string) => ReadonlyArray<CollisionRect>
 ): number | null {
   let candidate = Math.max(0, proposedFrom);
 
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const positions = trackIds.map((trackId) => findNearestAvailableSpace(
+    const positions = trackIds.map((trackId) => findNearestAvailableSpaceInTrackItems(
       candidate,
       durationInFrames,
-      trackId,
-      itemsToCheck
+      getTrackItemsToCheck(trackId),
     ));
 
     if (positions.some((position) => position === null)) {
@@ -121,6 +124,17 @@ export function planTrackMediaDropPlacements<T>(params: {
   const reservedRanges: CollisionRect[] = [];
   const plannedItems: Array<TrackMediaDropPlannedItem<T>> = [];
   let workingTracks = [...params.tracks];
+  const baseTrackItemsById = buildCollisionTrackItemsMap(params.existingItems);
+
+  const getTrackItemsToCheck = (trackId: string): ReadonlyArray<CollisionRect> => {
+    const baseTrackItems = baseTrackItemsById.get(trackId) ?? [];
+    const reservedTrackItems = reservedRanges.filter((item) => item.trackId === trackId);
+    if (reservedTrackItems.length === 0) {
+      return baseTrackItems;
+    }
+
+    return [...baseTrackItems, ...reservedTrackItems].sort((a, b) => a.from - b.from);
+  };
 
   for (const entry of params.entries) {
     const targetTrack = workingTracks.find((candidate) => candidate.id === params.dropTargetTrackId);
@@ -128,7 +142,6 @@ export function planTrackMediaDropPlacements<T>(params: {
       continue;
     }
 
-    const itemsToCheck: CollisionRect[] = [...params.existingItems, ...reservedRanges];
     const isVideoWithAudio = entry.mediaType === 'video' && !!entry.hasLinkedAudio;
     const isVisualMedia = entry.mediaType === 'video' || entry.mediaType === 'image';
     const targetTrackKind = getTrackKind(targetTrack);
@@ -167,7 +180,7 @@ export function planTrackMediaDropPlacements<T>(params: {
         currentPosition,
         entry.durationInFrames,
         [linkedTrackTargets.videoTrackId, linkedTrackTargets.audioTrackId],
-        itemsToCheck,
+        getTrackItemsToCheck,
       );
 
       if (syncFrom === null) {
@@ -189,11 +202,10 @@ export function planTrackMediaDropPlacements<T>(params: {
         },
       ];
     } else {
-      const finalPosition = findNearestAvailableSpace(
+      const finalPosition = findNearestAvailableSpaceInTrackItems(
         currentPosition,
         entry.durationInFrames,
-        primaryTrackState.trackId,
-        itemsToCheck,
+        getTrackItemsToCheck(primaryTrackState.trackId),
       );
 
       if (finalPosition === null) {

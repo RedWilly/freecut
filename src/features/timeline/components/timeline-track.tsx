@@ -1,4 +1,5 @@
-import { useState, useRef, memo, useCallback, useMemo } from 'react';
+import { useState, useRef, memo, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('TimelineTrack');
@@ -63,7 +64,48 @@ import {
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
+import { isDragPointInsideElement } from '../utils/effect-drop';
 import { frameToPixelsNow, pixelsToFrameNow } from '@/features/timeline/utils/zoom-conversions';
+
+/**
+ * Lightweight on-demand context menu for track gaps.
+ * Only mounts the Radix ContextMenu tree when the user actually right-clicks a gap,
+ * avoiding the per-frame Popper/Menu provider cascade during drag operations.
+ */
+function TrackGapContextMenu({ onCloseGap, onDismiss }: { onCloseGap: () => void; onDismiss: () => void }) {
+  return (
+    <ContextMenu modal={false} onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <ContextMenuTrigger asChild>
+        <span className="sr-only">Gap context menu anchor</span>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onCloseGap}>
+          Ripple Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+const TrackDropGhostOverlay = memo(function TrackDropGhostOverlay({
+  trackId,
+  showEmptyOverlay,
+}: {
+  trackId: string;
+  showEmptyOverlay: boolean;
+}) {
+  const ghostPreviews = useTrackDropPreviewStore(
+    useShallow((s) => s.ghostPreviews.filter((ghost) => ghost.targetTrackId === trackId))
+  );
+
+  return (
+    <TimelineDropGhostPreviews
+      ghostPreviews={ghostPreviews}
+      showEmptyOverlay={showEmptyOverlay && ghostPreviews.length === 0}
+      variant="track"
+    />
+  );
+});
 
 interface TimelineTrackProps {
   track: TimelineTrackType;
@@ -85,6 +127,31 @@ function areTrackPropsEqual(
 }
 
 /**
+ * Memoized item list — prevents the items `.map()` from running when the parent
+ * TimelineTrack re-renders for drag-preview or state changes that don't affect items.
+ * Without this, every track re-render recreates JSX for all items, and even though
+ * individual TimelineItem components are memo'd, the parent reconciliation cost
+ * (prop diffing × items) adds up across frequent drag-over events.
+ */
+const TimelineTrackItems = memo(function TimelineTrackItems({
+  trackItems,
+  trackLocked,
+  trackHidden,
+}: {
+  trackItems: ReadonlyArray<TimelineItemType>;
+  trackLocked: boolean;
+  trackHidden: boolean;
+}) {
+  return (
+    <>
+      {trackItems.map((item) => (
+        <TimelineItem key={item.id} item={item} timelineDuration={30} trackLocked={trackLocked} trackHidden={trackHidden} />
+      ))}
+    </>
+  );
+});
+
+/**
  * Timeline Track Component
  *
  * Renders a single timeline track with:
@@ -98,8 +165,20 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
   const [contextMenuFrame, setContextMenuFrame] = useState<number | null>(null);
-  const [menuKey, setMenuKey] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
+  const dragPreviewCacheRef = useRef<{
+    dropFrame: number | null;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }>({
+    dropFrame: null,
+    dragData: null,
+    hasExternalFiles: false,
+    externalPreviewItems: null,
+    fileItemCount: 0,
+  });
 
   // Resolve whether this track is effectively disabled for drops.
   // Uses the shared resolveEffectiveTrackStates helper so group-inherited
@@ -122,16 +201,10 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const addItems = useTimelineStore((s) => s.addItems);
   const fps = useTimelineStore((s) => s.fps);
   const closeGapAtPosition = useTimelineStore((s) => s.closeGapAtPosition);
-  const allGhostPreviews = useTrackDropPreviewStore((s) => s.ghostPreviews);
   const setTrackGhostPreviews = useTrackDropPreviewStore((s) => s.setGhostPreviews);
   const clearTrackGhostPreviews = useTrackDropPreviewStore((s) => s.clearGhostPreviews);
   const getMedia = useMediaLibraryStore((s) => s.mediaItems);
   const importHandlesForPlacement = useMediaLibraryStore((s) => s.importHandlesForPlacement);
-
-  const ghostPreviews = useMemo(
-    () => allGhostPreviews.filter((ghost) => ghost.targetTrackId === track.id),
-    [allGhostPreviews, track.id]
-  );
 
   const getDropFrame = useCallback((event: React.DragEvent): number | null => {
     if (!trackRef.current) {
@@ -343,6 +416,37 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     },
   });
 
+  const resetDragPreviewCache = useCallback(() => {
+    dragPreviewCacheRef.current = {
+      dropFrame: null,
+      dragData: null,
+      hasExternalFiles: false,
+      externalPreviewItems: null,
+      fileItemCount: 0,
+    };
+  }, []);
+
+  const shouldSkipDragPreviewUpdate = useCallback((params: {
+    dropFrame: number;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }) => {
+    const previous = dragPreviewCacheRef.current;
+    const shouldSkip = previous.dropFrame === params.dropFrame
+      && previous.dragData === params.dragData
+      && previous.hasExternalFiles === params.hasExternalFiles
+      && previous.externalPreviewItems === params.externalPreviewItems
+      && previous.fileItemCount === params.fileItemCount;
+
+    if (!shouldSkip) {
+      dragPreviewCacheRef.current = params;
+    }
+
+    return shouldSkip;
+  }, []);
+
   const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): TimelineItemType | null => {
     if (!isTimelineTemplateDragData(template)) {
       return null;
@@ -385,16 +489,20 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     });
   }, [fps, getCurrentCanvasSize, track.id]);
 
-  // Get item IDs from the full store (not virtualized subset) so drag detection
-  // works even if the source item scrolls out of the visible buffer mid-drag.
-  const allTrackItems = useItemsStore((s) => s.itemsByTrackId[track.id]);
-  const trackItemIds = useMemo(() => allTrackItems?.map(item => item.id) ?? [], [allTrackItems]);
-
-  // Check if any item on this track is being dragged (granular selector)
+  // Check if any item on this track is being dragged.
+  // Reads items from getState() inside the selector to avoid a separate useItemsStore
+  // subscription that would cause ALL tracks to re-render on every items-store change.
   const hasItemBeingDragged = useSelectionStore(
     useCallback(
-      (s) => s.dragState?.isDragging && s.dragState.draggedItemIds.some(id => trackItemIds.includes(id)),
-      [trackItemIds]
+      (s) => {
+        if (!s.dragState?.isDragging) return false;
+        const trackItems = useItemsStore.getState().itemsByTrackId[track.id];
+        if (!trackItems) return false;
+        return s.dragState.draggedItemIds.some(
+          (dragId) => trackItems.some((item) => item.id === dragId)
+        );
+      },
+      [track.id]
     )
   );
 
@@ -456,17 +564,11 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     }
   }, [contextMenuFrame, closeGapAtPosition, track.id]);
 
-  // Force menu remount on right-click to fix positioning
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 2) { // Right click
-      setMenuKey((k) => k + 1);
-    }
-  }, []);
-
   const handleDragOver = (e: React.DragEvent) => {
     if (isDropDisabled) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'none';
+      resetDragPreviewCache();
       return;
     }
 
@@ -475,6 +577,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     if (!data && !hasExternalFiles) {
       setIsExternalDragOver(false);
       clearTrackGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
 
@@ -486,21 +589,36 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     const dropFrame = getDropFrame(e);
     if (dropFrame === null) {
       clearTrackGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
     lastDragFrameRef.current = dropFrame;
 
+    const externalPreviewItems = externalPreviewItemsRef.current;
+    const fileItemCount = hasExternalFiles && !externalPreviewItems
+      ? Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length
+      : 0;
+    if (shouldSkipDragPreviewUpdate({
+      dropFrame,
+      dragData: data,
+      hasExternalFiles,
+      externalPreviewItems,
+      fileItemCount,
+    })) {
+      return;
+    }
+
     if (hasExternalFiles) {
-      if (externalPreviewItemsRef.current && externalPreviewItemsRef.current.length > 0) {
-        const previews = buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame);
+      if (externalPreviewItems && externalPreviewItems.length > 0) {
+        const previews = buildGhostPreviewsForEntries(externalPreviewItems, dropFrame);
         if (previews.length === 0) {
           e.dataTransfer.dropEffect = 'none';
           setIsDragOver(false);
           setIsExternalDragOver(false);
+          resetDragPreviewCache();
         }
         setTrackGhostPreviews(previews);
       } else {
-        const fileItemCount = Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length;
         setTrackGhostPreviews(buildGenericExternalGhostPreviews(dropFrame, Math.max(1, fileItemCount)));
         primeExternalPreviewEntries(e.dataTransfer);
       }
@@ -509,6 +627,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     if (!data) {
       clearTrackGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
 
@@ -523,6 +642,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       })) {
         e.dataTransfer.dropEffect = 'none';
         clearTrackGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -532,6 +652,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       if (!composition) {
         e.dataTransfer.dropEffect = 'none';
         clearTrackGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
       const hasOwnedAudio = compositionHasOwnedAudio({ composition, compositionById });
@@ -553,6 +674,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
         clearTrackGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
       previews.push(
@@ -574,6 +696,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       if (previews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       setTrackGhostPreviews(previews);
       return;
@@ -601,6 +724,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       if (nextPreviews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       previews.push(...nextPreviews);
       setTrackGhostPreviews(previews);
@@ -611,6 +735,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       const media = getMedia.find((entry) => entry.id === data.mediaId);
       if (!media || !isDroppableMediaType(data.mediaType)) {
         clearTrackGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -626,6 +751,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       if (nextPreviews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       previews.push(...nextPreviews);
     }
@@ -635,9 +761,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
+    if (isDragPointInsideElement(e, e.currentTarget)) {
+      return;
+    }
     setIsDragOver(false);
     setIsExternalDragOver(false);
     clearTrackGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
   };
 
@@ -646,6 +776,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     setIsDragOver(false);
     setIsExternalDragOver(false);
     clearTrackGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
 
     if (isDropDisabled) {
@@ -781,59 +912,50 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   };
 
   return (
-    <ContextMenu key={menuKey} modal={false}>
-      <ContextMenuTrigger asChild disabled={track.locked}>
-        <div
-          ref={trackRef}
-          data-track-id={track.id}
-          className="relative"
-          style={{
-            height: `${track.height}px`,
-            // CSS containment tells browser this element's layout is independent
-            // This significantly improves scroll/paint performance for large timelines
-            contain: 'layout style',
-            // Elevate track above others when it contains a dragging clip
-            zIndex: hasItemBeingDragged ? 100 : undefined,
-          }}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onMouseDown={handleMouseDown}
-          onContextMenu={handleContextMenu}
-        >
-          {!isDropDisabled && (
-            <TimelineDropGhostPreviews
-              ghostPreviews={ghostPreviews}
-              showEmptyOverlay={isDragOver && !isExternalDragOver && ghostPreviews.length === 0}
-              variant="track"
-            />
-          )}
+    <>
+      <div
+        ref={trackRef}
+        data-track-id={track.id}
+        className="relative"
+        style={{
+          height: `${track.height}px`,
+          // CSS containment tells browser this element's layout is independent
+          // This significantly improves scroll/paint performance for large timelines
+          contain: 'layout style',
+          // Elevate track above others when it contains a dragging clip
+          zIndex: hasItemBeingDragged ? 100 : undefined,
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onContextMenu={handleContextMenu}
+      >
+        {!isDropDisabled && (
+          <TrackDropGhostOverlay
+            trackId={track.id}
+            showEmptyOverlay={isDragOver && !isExternalDragOver}
+          />
+        )}
 
-          {/* Render all items for this track - dimmed when track is hidden */}
-          {trackItems.map((item) => (
-            <TimelineItem key={item.id} item={item} timelineDuration={30} trackLocked={track.locked} trackHidden={!track.visible} />
-          ))}
+        {/* Render all items for this track - dimmed when track is hidden */}
+        <TimelineTrackItems trackItems={trackItems} trackLocked={track.locked} trackHidden={!track.visible} />
 
-          {/* Render transitions for this track */}
-          {track.kind !== 'audio' && trackTransitions.map((transition) => (
-            <TransitionItem key={transition.id} transition={transition} trackHidden={!track.visible} />
-          ))}
+        {/* Render transitions for this track */}
+        {track.kind !== 'audio' && trackTransitions.map((transition) => (
+          <TransitionItem key={transition.id} transition={transition} trackHidden={!track.visible} />
+        ))}
 
-          {/* Locked track overlay indicator */}
-          {track.locked && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="text-xs text-muted-foreground/50 font-mono">LOCKED</div>
-            </div>
-          )}
-        </div>
-      </ContextMenuTrigger>
+        {/* Locked track overlay indicator */}
+        {track.locked && (
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="text-xs text-muted-foreground/50 font-mono">LOCKED</div>
+          </div>
+        )}
+      </div>
+      {/* Lazy ContextMenu: only mount Radix tree when the menu is triggered on a gap */}
       {hasAnyItems && contextMenuFrame !== null && (
-        <ContextMenuContent>
-          <ContextMenuItem onClick={handleCloseGap}>
-            Ripple Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
+        <TrackGapContextMenu onCloseGap={handleCloseGap} onDismiss={() => setContextMenuFrame(null)} />
       )}
-    </ContextMenu>
+    </>
   );
 }, areTrackPropsEqual);

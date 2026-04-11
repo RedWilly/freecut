@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import { Video, FileAudio, Image as ImageIcon, MoreVertical, Trash2, Loader2, Link2Off, RefreshCw, Zap, FileText, Play, Square, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
@@ -146,12 +146,21 @@ function MediaCardActionMenuItems({
   );
 }
 
-export function MediaCard({ media, selected = false, isBroken = false, onSelect, onDoubleClick, onDelete, onRelink, viewMode = 'grid' }: MediaCardProps) {
+export const MediaCard = memo(function MediaCard({
+  media,
+  selected = false,
+  isBroken = false,
+  onSelect,
+  onDoubleClick,
+  onDelete,
+  onRelink,
+  viewMode = 'grid',
+}: MediaCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [skimProgress, setSkimProgress] = useState<number | null>(null);
-  const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
-  const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
-  const importingIds = useMediaLibraryStore((s) => s.importingIds);
+  const isImporting = useMediaLibraryStore(
+    useCallback((s) => s.importingIds.includes(media.id), [media.id])
+  );
 
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus.get(media.id));
   const proxyProgress = useMediaLibraryStore((s) => s.proxyProgress.get(media.id));
@@ -159,7 +168,6 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   const transcriptProgress = useMediaLibraryStore((s) => s.transcriptProgress.get(media.id));
 
   const mediaType = getMediaType(media.mimeType);
-  const isImporting = importingIds.includes(media.id);
   const isTranscribable = mediaType === 'video' || mediaType === 'audio';
   const canGenerateProxy =
     mediaType === 'video'
@@ -353,6 +361,9 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   const handleDragStart = useCallback((e: React.DragEvent) => {
     // Set drag data for timeline drop
     e.dataTransfer.effectAllowed = 'copy';
+    const mediaStore = useMediaLibraryStore.getState();
+    const selectedMediaIds = mediaStore.selectedMediaIds;
+    const mediaItems = mediaStore.mediaItems;
 
     // If this item is selected and there are multiple selected items, drag all of them
     const isPartOfSelection = selectedMediaIds.includes(media.id);
@@ -414,7 +425,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
 
       e.dataTransfer.setDragImage(ghost, w / 2, h / 2);
     }
-  }, [selectedMediaIds, media.id, media.fileName, media.duration, mediaItems, mediaType]);
+  }, [media.id, media.fileName, media.duration, mediaType]);
 
   const handleDragEnd = useCallback(() => {
     clearMediaDragData();
@@ -906,4 +917,4 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
       <div className="absolute right-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-border via-muted to-border opacity-50" />
     </div>
   );
-}
+});

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { MutableRefObject, RefObject } from 'react';
 import type { TimelineItem } from '@/types/timeline';
+import { useItemsStore } from '../../stores/items-store';
 import { useSelectionStore } from '@/shared/state/selection';
-import { useTimelineStore } from '../../stores/timeline-store';
 import { DRAG_OPACITY } from '../../constants';
 import { dragOffsetRef, dragPreviewOffsetByItemRef } from '../../hooks/use-timeline-drag';
 import {
@@ -34,30 +35,6 @@ interface UseDragVisualStateResult {
   shouldDimForDrag: boolean;
 }
 
-function getJoinDragStateForItem(params: {
-  item: DragVisualItem;
-  items: TimelineItem[];
-  draggedItemIds: string[];
-}): JoinDragState {
-  const { item, items, draggedItemIds } = params;
-
-  const leftNeighbor = items.find(
-    (other) => other.id !== item.id
-      && other.trackId === item.trackId
-      && other.from + other.durationInFrames === item.from,
-  );
-  const rightNeighbor = items.find(
-    (other) => other.id !== item.id
-      && other.trackId === item.trackId
-      && other.from === item.from + item.durationInFrames,
-  );
-
-  return {
-    left: draggedItemIds.includes(item.id) || !!(leftNeighbor && draggedItemIds.includes(leftNeighbor.id)),
-    right: draggedItemIds.includes(item.id) || !!(rightNeighbor && draggedItemIds.includes(rightNeighbor.id)),
-  };
-}
-
 export function useDragVisualState({
   item,
   gestureMode,
@@ -65,57 +42,77 @@ export function useDragVisualState({
   transformRef,
   ghostRef,
 }: UseDragVisualStateParams): UseDragVisualStateResult {
-  const [dragAffectsJoin, setDragAffectsJoin] = useState<JoinDragState>({ left: false, right: false });
   const wasDraggingRef = useRef(false);
   const isAnyDragActiveRef = useRef(false);
   const dragWasActiveRef = useRef(false);
-  const dragParticipationRef = useRef<0 | 1 | 2>(0);
   const rafIdRef = useRef<number | null>(null);
+  const dragWasActiveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const itemFromRef = useRef(item.from);
-  const itemDurationRef = useRef(item.durationInFrames);
-  const itemTrackIdRef = useRef(item.trackId);
-  itemFromRef.current = item.from;
-  itemDurationRef.current = item.durationInFrames;
-  itemTrackIdRef.current = item.trackId;
+  const neighboringJoinIds = useItemsStore(
+    useShallow((state) => {
+      const trackItems = state.itemsByTrackId[item.trackId] ?? [];
+      let leftId: string | null = null;
+      let rightId: string | null = null;
+      const itemStart = item.from;
+      const itemEnd = item.from + item.durationInFrames;
 
-  useEffect(() => {
-    const updateTransform = () => {
-      if (!transformRef.current) return;
+      for (const other of trackItems) {
+        if (other.id === item.id) continue;
 
-      const participation = dragParticipationRef.current;
-      const isPartOfDrag = participation > 0 && !isDragging;
-      const isAltDrag = participation === 2;
-
-      if (isPartOfDrag) {
-        const offset = dragPreviewOffsetByItemRef.current[item.id] ?? dragOffsetRef.current;
-
-        if (isAltDrag) {
-          transformRef.current.style.transform = '';
-          transformRef.current.style.opacity = '';
-          transformRef.current.style.transition = 'none';
-          transformRef.current.style.pointerEvents = 'none';
-
-          if (ghostRef.current) {
-            ghostRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
-            ghostRef.current.style.display = 'block';
-          }
-        } else {
-          transformRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
-          transformRef.current.style.opacity = String(DRAG_OPACITY);
-          transformRef.current.style.transition = 'none';
-          transformRef.current.style.pointerEvents = 'none';
-          transformRef.current.style.zIndex = '50';
-
-          if (ghostRef.current) {
-            ghostRef.current.style.display = 'none';
-          }
+        if (other.from + other.durationInFrames === itemStart) {
+          leftId = other.id;
+        } else if (other.from === itemEnd) {
+          rightId = other.id;
         }
 
-        rafIdRef.current = requestAnimationFrame(updateTransform);
+        if (leftId && rightId) break;
       }
-    };
 
+      return { leftId, rightId };
+    })
+  );
+
+  const isDragActive = useSelectionStore((state) => !!state.dragState?.isDragging);
+  const dragParticipation = useSelectionStore((state) => getTimelineItemDragParticipation({
+    itemId: item.id,
+    dragState: state.dragState,
+    gestureMode,
+  }));
+  const dragAffectsJoin = useSelectionStore(
+    useShallow((state) => {
+      const draggedItemIds = state.dragState?.draggedItemIds ?? [];
+      const itemDragged = draggedItemIds.includes(item.id);
+
+      if (!state.dragState?.isDragging) {
+        return { left: false, right: false };
+      }
+
+      return {
+        left: itemDragged || !!(neighboringJoinIds.leftId && draggedItemIds.includes(neighboringJoinIds.leftId)),
+        right: itemDragged || !!(neighboringJoinIds.rightId && draggedItemIds.includes(neighboringJoinIds.rightId)),
+      };
+    })
+  );
+  const dragParticipationRef = useRef(dragParticipation);
+  dragParticipationRef.current = dragParticipation;
+
+  useEffect(() => {
+    const previousWasActive = isAnyDragActiveRef.current;
+    isAnyDragActiveRef.current = isDragActive;
+
+    if (previousWasActive && !isDragActive) {
+      dragWasActiveRef.current = true;
+      if (dragWasActiveTimeoutRef.current) {
+        clearTimeout(dragWasActiveTimeoutRef.current);
+      }
+      dragWasActiveTimeoutRef.current = setTimeout(() => {
+        dragWasActiveRef.current = false;
+        dragWasActiveTimeoutRef.current = null;
+      }, 100);
+    }
+  }, [isDragActive]);
+
+  useEffect(() => {
     const cleanupDragStyles = () => {
       if (rafIdRef.current) {
         cancelAnimationFrame(rafIdRef.current);
@@ -135,67 +132,53 @@ export function useDragVisualState({
       }
     };
 
-    let dragWasActiveTimeout: ReturnType<typeof setTimeout> | null = null;
+    const updateTransform = () => {
+      if (!transformRef.current) return;
 
-    const unsubscribe = useSelectionStore.subscribe((state) => {
-      const wasDragActive = isAnyDragActiveRef.current;
-      const isDragActive = !!state.dragState?.isDragging;
-      isAnyDragActiveRef.current = isDragActive;
+      const participation = dragParticipationRef.current;
+      const isPartOfDrag = participation > 0 && !isDragging;
+      const isAltPreviewDrag = participation === 2;
 
-      if (isDragActive && state.dragState?.draggedItemIds) {
-        const nextJoinState = getJoinDragStateForItem({
-          item: {
-            id: item.id,
-            from: itemFromRef.current,
-            durationInFrames: itemDurationRef.current,
-            trackId: itemTrackIdRef.current,
-          },
-          items: useTimelineStore.getState().items,
-          draggedItemIds: state.dragState.draggedItemIds,
-        });
-
-        setDragAffectsJoin((previous) => (
-          previous.left === nextJoinState.left && previous.right === nextJoinState.right
-            ? previous
-            : nextJoinState
-        ));
-      } else if (wasDragActive && !isDragActive) {
-        setDragAffectsJoin((previous) => (
-          !previous.left && !previous.right ? previous : { left: false, right: false }
-        ));
-      }
-
-      if (wasDragActive && !isDragActive) {
-        dragWasActiveRef.current = true;
-        if (dragWasActiveTimeout) clearTimeout(dragWasActiveTimeout);
-        dragWasActiveTimeout = setTimeout(() => {
-          dragWasActiveRef.current = false;
-        }, 100);
-      }
-
-      const nextParticipation = getTimelineItemDragParticipation({
-        itemId: item.id,
-        dragState: state.dragState,
-        gestureMode,
-      });
-      const previousParticipation = dragParticipationRef.current;
-      dragParticipationRef.current = nextParticipation;
-
-      if (previousParticipation === 0 && nextParticipation > 0 && !isDragging) {
-        rafIdRef.current = requestAnimationFrame(updateTransform);
-      }
-
-      if (previousParticipation > 0 && nextParticipation === 0) {
+      if (!isPartOfDrag) {
         cleanupDragStyles();
+        return;
       }
-    });
 
-    return () => {
-      unsubscribe();
-      cleanupDragStyles();
-      if (dragWasActiveTimeout) clearTimeout(dragWasActiveTimeout);
+      const offset = dragPreviewOffsetByItemRef.current[item.id] ?? dragOffsetRef.current;
+
+      if (isAltPreviewDrag) {
+        transformRef.current.style.transform = '';
+        transformRef.current.style.opacity = '';
+        transformRef.current.style.transition = 'none';
+        transformRef.current.style.pointerEvents = 'none';
+
+        if (ghostRef.current) {
+          ghostRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+          ghostRef.current.style.display = 'block';
+        }
+      } else {
+        transformRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+        transformRef.current.style.opacity = String(DRAG_OPACITY);
+        transformRef.current.style.transition = 'none';
+        transformRef.current.style.pointerEvents = 'none';
+        transformRef.current.style.zIndex = '50';
+
+        if (ghostRef.current) {
+          ghostRef.current.style.display = 'none';
+        }
+      }
+
+      rafIdRef.current = requestAnimationFrame(updateTransform);
     };
-  }, [gestureMode, item.id, isDragging]);
+
+    if (dragParticipation > 0 && !isDragging) {
+      rafIdRef.current = requestAnimationFrame(updateTransform);
+      return cleanupDragStyles;
+    }
+
+    cleanupDragStyles();
+    return cleanupDragStyles;
+  }, [dragParticipation, ghostRef, isDragging, item.id, transformRef]);
 
   useEffect(() => {
     if (wasDraggingRef.current && !isDragging && transformRef.current) {
@@ -210,8 +193,16 @@ export function useDragVisualState({
     wasDraggingRef.current = isDragging;
   }, [isDragging]);
 
-  const isPartOfMultiDrag = dragParticipationRef.current > 0;
-  const isAltDrag = dragParticipationRef.current === 2;
+  useEffect(() => {
+    return () => {
+      if (dragWasActiveTimeoutRef.current) {
+        clearTimeout(dragWasActiveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const isPartOfMultiDrag = dragParticipation > 0;
+  const isAltDrag = dragParticipation === 2;
   const isPartOfDrag = isPartOfMultiDrag && !isDragging;
   const isBeingDragged = isDragging || isPartOfDrag;
 

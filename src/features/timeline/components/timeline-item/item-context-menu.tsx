@@ -1,4 +1,4 @@
-import { memo, ReactNode, useMemo } from 'react';
+import { memo, ReactNode, useMemo, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -78,6 +78,11 @@ interface ItemContextMenuProps {
 /**
  * Context menu for timeline items
  * Provides delete, ripple delete, join, and keyframe clearing operations
+ *
+ * Uses lazy mounting: the heavy Radix ContextMenu tree (10+ provider components)
+ * is only mounted after the user first right-clicks. Before that, children render
+ * directly without the ContextMenu wrapper, eliminating thousands of unnecessary
+ * re-renders during drag operations (119 items × ~10 Radix components each).
  */
 export const ItemContextMenu = memo(function ItemContextMenu({
   children,
@@ -120,6 +125,142 @@ export const ItemContextMenu = memo(function ItemContextMenu({
   isDetectingScenes,
   onDetectScenes,
 }: ItemContextMenuProps) {
+  // Lazy mount: defer the full Radix ContextMenu tree until first right-click.
+  // This eliminates ~10 Radix provider components per item from the render tree
+  // during normal operation (drag, playback, scrub), where context menus are never
+  // needed. With 100+ items, this avoids millions of unnecessary re-renders.
+  const [hasActivated, setHasActivated] = useState(false);
+
+  if (!hasActivated) {
+    return (
+      <ItemContextMenuTriggerOnly
+        trackLocked={trackLocked}
+        onActivate={() => setHasActivated(true)}
+      >
+        {children}
+      </ItemContextMenuTriggerOnly>
+    );
+  }
+
+  return (
+    <ItemContextMenuFull
+      trackLocked={trackLocked}
+      isSelected={isSelected}
+      canJoinSelected={canJoinSelected}
+      hasJoinableLeft={hasJoinableLeft}
+      hasJoinableRight={hasJoinableRight}
+      closerEdge={closerEdge}
+      keyframedProperties={keyframedProperties}
+      canLinkSelected={canLinkSelected}
+      canUnlinkSelected={canUnlinkSelected}
+      onJoinSelected={onJoinSelected}
+      onJoinLeft={onJoinLeft}
+      onJoinRight={onJoinRight}
+      onLinkSelected={onLinkSelected}
+      onUnlinkSelected={onUnlinkSelected}
+      onRippleDelete={onRippleDelete}
+      onDelete={onDelete}
+      onClearAllKeyframes={onClearAllKeyframes}
+      onClearPropertyKeyframes={onClearPropertyKeyframes}
+      onBentoLayout={onBentoLayout}
+      isVideoItem={isVideoItem}
+      playheadInBounds={playheadInBounds}
+      onFreezeFrame={onFreezeFrame}
+      canGenerateCaptions={canGenerateCaptions}
+      canRegenerateCaptions={canRegenerateCaptions}
+      isGeneratingCaptions={isGeneratingCaptions}
+      defaultCaptionModel={defaultCaptionModel}
+      onGenerateCaptions={onGenerateCaptions}
+      onRegenerateCaptions={onRegenerateCaptions}
+      isCompositionItem={isCompositionItem}
+      onEnterComposition={onEnterComposition}
+      onDissolveComposition={onDissolveComposition}
+      canCreatePreComp={canCreatePreComp}
+      onCreatePreComp={onCreatePreComp}
+      isTextItem={isTextItem}
+      onGenerateAudioFromText={onGenerateAudioFromText}
+      canDetectScenes={canDetectScenes}
+      isDetectingScenes={isDetectingScenes}
+      onDetectScenes={onDetectScenes}
+    >
+      {children}
+    </ItemContextMenuFull>
+  );
+});
+
+/**
+ * Lightweight placeholder: just renders children with a contextmenu listener.
+ * No Radix providers, no Popper, no Menu — zero overhead.
+ */
+const ItemContextMenuTriggerOnly = memo(function ItemContextMenuTriggerOnly({
+  children,
+  trackLocked,
+  onActivate,
+}: {
+  children: ReactNode;
+  trackLocked: boolean;
+  onActivate: () => void;
+}) {
+  return (
+    <div
+      data-item-context-pending
+      style={{ display: 'contents' }}
+      onContextMenu={(e) => {
+        if (trackLocked) return;
+        // Prevent the browser default so Radix can handle it after activation
+        e.preventDefault();
+        onActivate();
+      }}
+    >
+      {children}
+    </div>
+  );
+});
+
+/**
+ * Full Radix ContextMenu tree — only mounted after first right-click activation.
+ */
+const ItemContextMenuFull = memo(function ItemContextMenuFull({
+  children,
+  trackLocked,
+  isSelected,
+  canJoinSelected,
+  hasJoinableLeft,
+  hasJoinableRight,
+  closerEdge,
+  keyframedProperties,
+  canLinkSelected,
+  canUnlinkSelected,
+  onJoinSelected,
+  onJoinLeft,
+  onJoinRight,
+  onLinkSelected,
+  onUnlinkSelected,
+  onRippleDelete,
+  onDelete,
+  onClearAllKeyframes,
+  onClearPropertyKeyframes,
+  onBentoLayout,
+  isVideoItem,
+  playheadInBounds,
+  onFreezeFrame,
+  canGenerateCaptions,
+  canRegenerateCaptions,
+  isGeneratingCaptions,
+  defaultCaptionModel,
+  onGenerateCaptions,
+  onRegenerateCaptions,
+  isCompositionItem,
+  onEnterComposition,
+  onDissolveComposition,
+  canCreatePreComp,
+  onCreatePreComp,
+  isTextItem,
+  onGenerateAudioFromText,
+  canDetectScenes,
+  isDetectingScenes,
+  onDetectScenes,
+}: Omit<ItemContextMenuProps, 'children'> & { children: ReactNode }) {
   const hotkeys = useResolvedHotkeys();
   const selectedCount = useSelectionStore((s) => s.selectedItemIds.length);
   // Filter to only properties that actually have keyframes

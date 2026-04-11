@@ -1,4 +1,5 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
@@ -49,6 +50,7 @@ import {
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
+import { isDragPointInsideElement } from '../utils/effect-drop';
 
 const logger = createLogger('TimelineMediaDropZone');
 
@@ -62,6 +64,26 @@ export type GhostPreviewItem = NewTrackZoneGhostPreview;
 
 const MULTI_DROP_METADATA_CONCURRENCY = 3;
 
+const NewTrackZoneGhostOverlay = memo(function NewTrackZoneGhostOverlay({
+  zone,
+  showEmptyOverlay,
+}: {
+  zone: 'video' | 'audio';
+  showEmptyOverlay: boolean;
+}) {
+  const ghostPreviews = useNewTrackZonePreviewStore(
+    useShallow((s) => s.ghostPreviews.filter((ghost) => ghost.targetZone === zone))
+  );
+
+  return (
+    <TimelineDropGhostPreviews
+      ghostPreviews={ghostPreviews}
+      showEmptyOverlay={showEmptyOverlay && ghostPreviews.length === 0}
+      variant="zone"
+    />
+  );
+});
+
 export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   height,
   zone,
@@ -70,20 +92,28 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
   const zoneRef = useRef<HTMLDivElement>(null);
+  const dragPreviewCacheRef = useRef<{
+    dropFrame: number | null;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }>({
+    dropFrame: null,
+    dragData: null,
+    hasExternalFiles: false,
+    externalPreviewItems: null,
+    fileItemCount: 0,
+  });
 
   const addItem = useTimelineStore((s) => s.addItem);
   const addItems = useTimelineStore((s) => s.addItems);
   const fps = useTimelineStore((s) => s.fps);
-  const allGhostPreviews = useNewTrackZonePreviewStore((s) => s.ghostPreviews);
   const setZoneGhostPreviews = useNewTrackZonePreviewStore((s) => s.setGhostPreviews);
   const clearZoneGhostPreviews = useNewTrackZonePreviewStore((s) => s.clearGhostPreviews);
   const getMedia = useMediaLibraryStore((s) => s.mediaItems);
   const importHandlesForPlacement = useMediaLibraryStore((s) => s.importHandlesForPlacement);
   const { pixelsToFrame, frameToPixels } = useTimelineZoomContext();
-  const ghostPreviews = useMemo(
-    () => allGhostPreviews.filter((ghost) => ghost.targetZone === zone),
-    [allGhostPreviews, zone]
-  );
 
   const getDropFrame = useCallback((event: React.DragEvent): number | null => {
     if (!zoneRef.current) {
@@ -308,6 +338,37 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     },
   });
 
+  const resetDragPreviewCache = useCallback(() => {
+    dragPreviewCacheRef.current = {
+      dropFrame: null,
+      dragData: null,
+      hasExternalFiles: false,
+      externalPreviewItems: null,
+      fileItemCount: 0,
+    };
+  }, []);
+
+  const shouldSkipDragPreviewUpdate = useCallback((params: {
+    dropFrame: number;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }) => {
+    const previous = dragPreviewCacheRef.current;
+    const shouldSkip = previous.dropFrame === params.dropFrame
+      && previous.dragData === params.dragData
+      && previous.hasExternalFiles === params.hasExternalFiles
+      && previous.externalPreviewItems === params.externalPreviewItems
+      && previous.fileItemCount === params.fileItemCount;
+
+    if (!shouldSkip) {
+      dragPreviewCacheRef.current = params;
+    }
+
+    return shouldSkip;
+  }, []);
+
   const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): {
     item: TimelineItemType;
     tracks: ReturnType<typeof useTimelineStore.getState>['tracks'];
@@ -357,6 +418,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       setIsExternalDragOver(false);
       setIsDragOver(false);
       clearZoneGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
 
@@ -368,21 +430,36 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     const dropFrame = getDropFrame(e);
     if (dropFrame === null) {
       clearZoneGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
     lastDragFrameRef.current = dropFrame;
 
+    const externalPreviewItems = externalPreviewItemsRef.current;
+    const fileItemCount = hasExternalFiles && !externalPreviewItems
+      ? Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length
+      : 0;
+    if (shouldSkipDragPreviewUpdate({
+      dropFrame,
+      dragData: data,
+      hasExternalFiles,
+      externalPreviewItems,
+      fileItemCount,
+    })) {
+      return;
+    }
+
     if (hasExternalFiles) {
-      if (externalPreviewItemsRef.current && externalPreviewItemsRef.current.length > 0) {
-        const previews = buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame);
+      if (externalPreviewItems && externalPreviewItems.length > 0) {
+        const previews = buildGhostPreviewsForEntries(externalPreviewItems, dropFrame);
         if (previews.length === 0) {
           e.dataTransfer.dropEffect = 'none';
           setIsDragOver(false);
           setIsExternalDragOver(false);
+          resetDragPreviewCache();
         }
         setZoneGhostPreviews(previews);
       } else {
-        const fileItemCount = Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length;
         setZoneGhostPreviews(buildGenericExternalGhostPreviews(dropFrame, Math.max(1, fileItemCount)));
         primeExternalPreviewEntries(e.dataTransfer);
       }
@@ -391,6 +468,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
 
     if (!data) {
       clearZoneGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
 
@@ -407,6 +485,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
         clearZoneGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -416,6 +495,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
         clearZoneGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -450,6 +530,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       if (previews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       setZoneGhostPreviews(previews);
       return;
@@ -459,6 +540,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       if (zone !== 'video') {
         e.dataTransfer.dropEffect = 'none';
         clearZoneGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -466,6 +548,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       if (previews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       setZoneGhostPreviews(previews);
       return;
@@ -493,6 +576,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       if (previews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       setZoneGhostPreviews(previews);
       return;
@@ -504,6 +588,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
         clearZoneGhostPreviews();
+        resetDragPreviewCache();
         return;
       }
 
@@ -519,6 +604,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       if (previews.length === 0) {
         e.dataTransfer.dropEffect = 'none';
         setIsDragOver(false);
+        resetDragPreviewCache();
       }
       setZoneGhostPreviews(previews);
       return;
@@ -527,33 +613,41 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     e.dataTransfer.dropEffect = 'none';
     setIsDragOver(false);
     clearZoneGhostPreviews();
+    resetDragPreviewCache();
   }, [
     buildGenericExternalGhostPreviews,
     buildGhostPreviewForTemplate,
     buildGhostPreviewsForEntries,
     clearZoneGhostPreviews,
+    resetDragPreviewCache,
     fps,
     frameToPixels,
     getDropFrame,
     getMedia,
     primeExternalPreviewEntries,
+    shouldSkipDragPreviewUpdate,
     setZoneGhostPreviews,
     zone,
   ]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    if (isDragPointInsideElement(e, e.currentTarget)) {
+      return;
+    }
     setIsDragOver(false);
     setIsExternalDragOver(false);
     clearZoneGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
-  }, [clearExternalPreviewSession, clearZoneGhostPreviews]);
+  }, [clearExternalPreviewSession, clearZoneGhostPreviews, resetDragPreviewCache]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     setIsExternalDragOver(false);
     clearZoneGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
 
     const dropFrame = getDropFrame(e);
@@ -703,6 +797,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     getDropFrame,
     getMedia,
     importHandlesForPlacement,
+    resetDragPreviewCache,
     resolveTimelineItemsForEntries,
     zone,
   ]);
@@ -720,10 +815,9 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <TimelineDropGhostPreviews
-        ghostPreviews={ghostPreviews}
-        showEmptyOverlay={isDragOver && !isExternalDragOver && ghostPreviews.length === 0}
-        variant="zone"
+      <NewTrackZoneGhostOverlay
+        zone={zone}
+        showEmptyOverlay={isDragOver && !isExternalDragOver}
       />
     </div>
   );

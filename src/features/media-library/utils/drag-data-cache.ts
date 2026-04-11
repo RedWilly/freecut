@@ -43,10 +43,28 @@ export interface TimelineTemplateDragData {
 
 export type DragData = MediaDragData | CompositionDragData | TimelineTemplateDragData;
 
+const TIMELINE_EXTERNAL_MEDIA_DRAG_CLASS = 'timeline-external-media-drag';
+
 let cachedDragData: DragData | null = null;
+
+function shouldEnableTimelinePointerPassthrough(data: DragData | null): boolean {
+  return data?.type === 'media-item' || data?.type === 'media-items' || data?.type === 'composition';
+}
+
+function syncTimelinePointerPassthrough(data: DragData | null): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  document.body.classList.toggle(
+    TIMELINE_EXTERNAL_MEDIA_DRAG_CLASS,
+    shouldEnableTimelinePointerPassthrough(data)
+  );
+}
 
 export function setMediaDragData(data: DragData): void {
   cachedDragData = data;
+  syncTimelinePointerPassthrough(data);
 }
 
 export function getMediaDragData(): DragData | null {
@@ -55,4 +73,5 @@ export function getMediaDragData(): DragData | null {
 
 export function clearMediaDragData(): void {
   cachedDragData = null;
+  syncTimelinePointerPassthrough(null);
 }

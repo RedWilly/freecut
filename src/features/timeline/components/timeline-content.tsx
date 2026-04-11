@@ -82,6 +82,99 @@ interface TimelineContentProps {
   }) => void;
 }
 
+interface TimelineMarqueeLayerProps {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  itemIds: string[];
+  onSelectionChange: (ids: string[]) => void;
+  onMarqueeActiveChange: (active: boolean) => void;
+}
+
+const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
+  containerRef,
+  itemIds,
+  onSelectionChange,
+  onMarqueeActiveChange,
+}: TimelineMarqueeLayerProps) {
+  const previewItemIdsRef = useRef<string[]>([]);
+
+  const setPreviewItemIds = useCallback((ids: string[]) => {
+    const container = containerRef.current;
+    if (!container) {
+      previewItemIdsRef.current = ids;
+      return;
+    }
+
+    const nextIds = new Set(ids);
+    for (const previousId of previewItemIdsRef.current) {
+      if (nextIds.has(previousId)) {
+        continue;
+      }
+      container
+        .querySelector(`[data-item-id="${previousId}"]`)
+        ?.classList.remove('timeline-marquee-preview');
+    }
+
+    const previousIds = new Set(previewItemIdsRef.current);
+    for (const id of ids) {
+      if (previousIds.has(id)) {
+        continue;
+      }
+      container
+        .querySelector(`[data-item-id="${id}"]`)
+        ?.classList.add('timeline-marquee-preview');
+    }
+
+    previewItemIdsRef.current = ids;
+  }, [containerRef]);
+
+  useEffect(() => {
+    return () => {
+      setPreviewItemIds([]);
+    };
+  }, [setPreviewItemIds]);
+
+  const marqueeItems = useMemo(
+    () =>
+      itemIds.map((id) => ({
+        id,
+        getBoundingRect: () => {
+          // Scope query to timeline container to avoid matching preview player elements
+          // (video-content.tsx also uses data-item-id for the composition runtime)
+          const element = containerRef.current?.querySelector(`[data-item-id="${id}"]`);
+          if (!element) {
+            return null;
+          }
+          const rect = element.getBoundingClientRect();
+          return {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height,
+          };
+        },
+      })),
+    [containerRef, itemIds]
+  );
+
+  const { marqueeState } = useMarqueeSelection({
+    containerRef: containerRef as React.RefObject<HTMLElement>,
+    items: marqueeItems,
+    onSelectionChange,
+    onPreviewSelectionChange: setPreviewItemIds,
+    enabled: itemIds.length > 0,
+    threshold: 5,
+    commitSelectionOnMouseUp: true,
+  });
+
+  useEffect(() => {
+    onMarqueeActiveChange(marqueeState.active);
+  }, [marqueeState.active, onMarqueeActiveChange]);
+
+  return <MarqueeOverlay marqueeState={marqueeState} />;
+});
+
 /**
  * Timeline Content Component
  *
@@ -168,6 +261,7 @@ export const TimelineContent = memo(function TimelineContent({
   const tracksContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const marqueeWasActiveRef = useRef(false);
+  const marqueeResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragWasActiveRef = useRef(false);
   const scrubWasActiveRef = useRef(false);
   const scrubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -407,57 +501,44 @@ export const TimelineContent = memo(function TimelineContent({
   // useShallow prevents infinite loops from array reference changes
   const itemIds = useItemsStore(useShallow((s) => s.items.map((item) => item.id)));
 
-  const marqueeItems = useMemo(
-    () =>
-      itemIds.map((id) => ({
-        id,
-        getBoundingRect: () => {
-          // Scope query to timeline container to avoid matching preview player elements
-          // (video-content.tsx also uses data-item-id for the composition runtime)
-          const element = containerRef.current?.querySelector(`[data-item-id="${id}"]`);
-          if (!element) {
-            return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
-          }
-          const rect = element.getBoundingClientRect();
-          return {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            width: rect.width,
-            height: rect.height,
-          };
-        },
-      })),
-    [itemIds]
-  );
-
-  // Marquee selection hook
-  const { marqueeState } = useMarqueeSelection({
-    containerRef: containerRef as React.RefObject<HTMLElement>,
-    items: marqueeItems,
-    onSelectionChange: (ids) => {
-      const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
-      selectItems(linkedSelectionEnabled
+  const handleMarqueeSelectionChange = useCallback((ids: string[]) => {
+    const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled;
+    selectItems(
+      linkedSelectionEnabled
         ? expandSelectionWithLinkedItems(useTimelineStore.getState().items, ids)
-        : ids);
-    },
-    enabled: true,
-    threshold: 5,
-  });
+        : ids
+    );
+  }, [selectItems]);
 
-  // Track marquee state to prevent deselection after marquee release
-  useEffect(() => {
-    if (marqueeState.active) {
-      marqueeWasActiveRef.current = true;
-    } else if (marqueeWasActiveRef.current) {
-      // Reset after a short delay when marquee ends
-      const timeout = setTimeout(() => {
-        marqueeWasActiveRef.current = false;
-      }, 100);
-      return () => clearTimeout(timeout);
+  const handleMarqueeActiveChange = useCallback((active: boolean) => {
+    if (marqueeResetTimeoutRef.current !== null) {
+      clearTimeout(marqueeResetTimeoutRef.current);
+      marqueeResetTimeoutRef.current = null;
     }
-  }, [marqueeState.active]);
+
+    if (active) {
+      clearItemSelection();
+      marqueeWasActiveRef.current = true;
+      return;
+    }
+
+    if (!marqueeWasActiveRef.current) {
+      return;
+    }
+
+    marqueeResetTimeoutRef.current = setTimeout(() => {
+      marqueeWasActiveRef.current = false;
+      marqueeResetTimeoutRef.current = null;
+    }, 100);
+  }, [clearItemSelection]);
+
+  useEffect(() => {
+    return () => {
+      if (marqueeResetTimeoutRef.current !== null) {
+        clearTimeout(marqueeResetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Track drag state to prevent deselection after drop
   useEffect(() => {
@@ -1094,7 +1175,12 @@ export const TimelineContent = memo(function TimelineContent({
       onMouseMove={handleTimelineMouseMove}
       onMouseLeave={handleTimelineMouseLeave}
     >
-      <MarqueeOverlay marqueeState={marqueeState} />
+      <TimelineMarqueeLayer
+        containerRef={containerRef}
+        itemIds={itemIds}
+        onSelectionChange={handleMarqueeSelectionChange}
+        onMarqueeActiveChange={handleMarqueeActiveChange}
+      />
 
       <div className="relative z-30 shrink-0 timeline-ruler bg-background" style={{ width: `${timelineWidth}px` }}>
         <TimelineMarkers duration={actualDuration} width={timelineWidth} />

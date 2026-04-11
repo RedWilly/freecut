@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, memo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { Loader2, Upload, AlertTriangle } from 'lucide-react';
 import { createLogger } from '@/shared/logging/logger';
 
@@ -41,16 +41,20 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
 
   const allFilteredItems = useFilteredMediaItems();
   const filteredItems = items ?? allFilteredItems;
+  const filteredItemsRef = useRef(filteredItems);
   const isLoading = useMediaLibraryStore((s) => s.isLoading);
   const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
-  const selectedCompositionIds = useMediaLibraryStore((s) => s.selectedCompositionIds);
   const brokenMediaIds = useMediaLibraryStore((s) => s.brokenMediaIds);
-  const toggleMediaSelection = useMediaLibraryStore((s) => s.toggleMediaSelection);
-  const setSelection = useMediaLibraryStore((s) => s.setSelection);
   const deleteMedia = useMediaLibraryStore((s) => s.deleteMedia);
   const relinkMedia = useMediaLibraryStore((s) => s.relinkMedia);
   const importMedia = useMediaLibraryStore((s) => s.importMedia);
   const setSourcePreviewMediaId = useEditorStore((s) => s.setSourcePreviewMediaId);
+  const selectedMediaIdSet = useMemo(() => new Set(selectedMediaIds), [selectedMediaIds]);
+  const brokenMediaIdSet = useMemo(() => new Set(brokenMediaIds), [brokenMediaIds]);
+
+  useEffect(() => {
+    filteredItemsRef.current = filteredItems;
+  }, [filteredItems]);
 
   const affectedMediaImpact = useMemo(() => (
     mediaIdToDelete
@@ -58,43 +62,46 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
       : { itemIds: [], rootReferenceCount: 0, nestedReferenceCount: 0, totalReferenceCount: 0 }
   ), [mediaIdToDelete]);
 
-  const handleCardSelect = (mediaId: string, event?: React.MouseEvent) => {
+  const handleCardSelect = useCallback((mediaId: string, event?: React.MouseEvent) => {
+    const currentFilteredItems = filteredItemsRef.current;
+    const mediaStore = useMediaLibraryStore.getState();
+
     // Shift click: select range from last selected item to this item
     if (event?.shiftKey && lastSelectedIdRef.current) {
-      const lastIndex = filteredItems.findIndex((item) => item.id === lastSelectedIdRef.current);
-      const currentIndex = filteredItems.findIndex((item) => item.id === mediaId);
+      const lastIndex = currentFilteredItems.findIndex((item) => item.id === lastSelectedIdRef.current);
+      const currentIndex = currentFilteredItems.findIndex((item) => item.id === mediaId);
 
       if (lastIndex !== -1 && currentIndex !== -1) {
         const startIndex = Math.min(lastIndex, currentIndex);
         const endIndex = Math.max(lastIndex, currentIndex);
-        const rangeIds = filteredItems.slice(startIndex, endIndex + 1).map((item) => item.id);
+        const rangeIds = currentFilteredItems.slice(startIndex, endIndex + 1).map((item) => item.id);
 
         // If Ctrl/Cmd is also held, add range to existing selection
         if (event.ctrlKey || event.metaKey) {
-          const newSelection = [...new Set([...selectedMediaIds, ...rangeIds])];
-          setSelection({ mediaIds: newSelection, compositionIds: selectedCompositionIds });
+          const newSelection = [...new Set([...mediaStore.selectedMediaIds, ...rangeIds])];
+          mediaStore.setSelection({ mediaIds: newSelection, compositionIds: mediaStore.selectedCompositionIds });
         } else {
           // Replace selection with range
-          setSelection({ mediaIds: rangeIds, compositionIds: [] });
+          mediaStore.setSelection({ mediaIds: rangeIds, compositionIds: [] });
         }
       }
     } else if (event?.ctrlKey || event?.metaKey) {
       // Ctrl/Cmd click: toggle selection (add/remove from current selection)
-      toggleMediaSelection(mediaId);
+      mediaStore.toggleMediaSelection(mediaId);
       lastSelectedIdRef.current = mediaId;
     } else {
       // Normal click: select only this item (clear others)
-      setSelection({ mediaIds: [mediaId], compositionIds: [] });
+      mediaStore.setSelection({ mediaIds: [mediaId], compositionIds: [] });
       lastSelectedIdRef.current = mediaId;
     }
     onMediaSelect?.(mediaId);
-  };
+  }, [onMediaSelect]);
 
   // Show delete confirmation dialog (called from MediaCard)
-  const handleCardDelete = (mediaId: string) => {
+  const handleCardDelete = useCallback((mediaId: string) => {
     setMediaIdToDelete(mediaId);
     setShowDeleteDialog(true);
-  };
+  }, []);
 
   // Actually delete after confirmation
   const handleConfirmDelete = async () => {
@@ -117,13 +124,13 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
     }
   };
 
-  const handleCancelDelete = () => {
+  const handleCancelDelete = useCallback(() => {
     setShowDeleteDialog(false);
     setMediaIdToDelete(null);
-  };
+  }, []);
 
   // Handle relinking a broken media file
-  const handleRelink = async (mediaId: string) => {
+  const handleRelink = useCallback(async (mediaId: string) => {
     try {
       const handles = await showMediaFilePicker({ multiple: false });
 
@@ -137,16 +144,27 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
         logger.error('Failed to relink media:', error);
       }
     }
-  };
+  }, [relinkMedia]);
 
   // Handle click on empty state to open file picker
-  const handleEmptyStateClick = async () => {
+  const handleEmptyStateClick = useCallback(async () => {
     try {
       await importMedia();
     } catch (error) {
       logger.error('Import failed:', error);
     }
-  };
+  }, [importMedia]);
+
+  const cardHandlersById = useMemo(() => new Map(
+    filteredItems.map((media) => [media.id, {
+      onSelect: (event: React.MouseEvent) => handleCardSelect(media.id, event),
+      onDoubleClick: () => setSourcePreviewMediaId(media.id),
+      onDelete: () => handleCardDelete(media.id),
+      onRelink: () => {
+        void handleRelink(media.id);
+      },
+    }])
+  ), [filteredItems, handleCardDelete, handleCardSelect, handleRelink, setSourcePreviewMediaId]);
 
   // Main container with dropzone functionality
   return (
@@ -194,23 +212,24 @@ export const MediaGrid = memo(function MediaGrid({ onMediaSelect, viewMode = 'gr
           className={viewMode === 'grid' ? `grid ${GRID_GAP_BY_SIZE[itemSize] ?? GRID_GAP_BY_SIZE[3]}` : 'space-y-1'}
           style={viewMode === 'grid' ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[itemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))` } : undefined}
         >
-          {filteredItems.map((media) => (
-            <div
-              key={media.id}
-              data-media-id={media.id}
-            >
-              <MediaCard
-                media={media}
-                selected={selectedMediaIds.includes(media.id)}
-                isBroken={brokenMediaIds.includes(media.id)}
-                onSelect={(event) => handleCardSelect(media.id, event)}
-                onDoubleClick={() => setSourcePreviewMediaId(media.id)}
-                onDelete={() => handleCardDelete(media.id)}
-                onRelink={() => handleRelink(media.id)}
-                viewMode={viewMode}
-              />
-            </div>
-          ))}
+          {filteredItems.map((media) => {
+            const handlers = cardHandlersById.get(media.id);
+
+            return (
+              <div key={media.id} data-media-id={media.id}>
+                <MediaCard
+                  media={media}
+                  selected={selectedMediaIdSet.has(media.id)}
+                  isBroken={brokenMediaIdSet.has(media.id)}
+                  onSelect={handlers?.onSelect}
+                  onDoubleClick={handlers?.onDoubleClick}
+                  onDelete={handlers?.onDelete}
+                  onRelink={handlers?.onRelink}
+                  viewMode={viewMode}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 

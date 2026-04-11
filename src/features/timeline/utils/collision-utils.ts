@@ -15,6 +15,12 @@ export interface CollisionRect {
   durationInFrames: number;
 }
 
+const EMPTY_TRACK_ITEMS: CollisionRect[] = [];
+
+function compareCollisionRectsByFrom(a: CollisionRect, b: CollisionRect): number {
+  return a.from - b.from;
+}
+
 /**
  * Check if two time ranges overlap
  *
@@ -133,28 +139,32 @@ function findSpaceForward(
   return null;
 }
 
-/**
- * Find the nearest available space for an item on a track
- * Snaps to the closest edge (backward or forward) based on distance,
- * checking if space is available in that direction first.
- *
- * @param proposedFrom - Desired start position
- * @param durationInFrames - Duration of item to place
- * @param trackId - Target track ID
- * @param allItems - All timeline items
- * @returns Available position (snapped to closest edge) or null if no space in either direction
- */
-export function findNearestAvailableSpace(
+export function buildCollisionTrackItemsMap(
+  allItems: ReadonlyArray<CollisionRect | TimelineItem>
+): Map<string, CollisionRect[]> {
+  const trackItemsById = new Map<string, CollisionRect[]>();
+
+  allItems.forEach((item) => {
+    const existingTrackItems = trackItemsById.get(item.trackId);
+    if (existingTrackItems) {
+      existingTrackItems.push(item);
+    } else {
+      trackItemsById.set(item.trackId, [item]);
+    }
+  });
+
+  trackItemsById.forEach((trackItems) => {
+    trackItems.sort(compareCollisionRectsByFrom);
+  });
+
+  return trackItemsById;
+}
+
+export function findNearestAvailableSpaceInTrackItems(
   proposedFrom: number,
   durationInFrames: number,
-  trackId: string,
-  allItems: ReadonlyArray<CollisionRect | TimelineItem>
+  trackItems: ReadonlyArray<CollisionRect>
 ): number | null {
-  // Get all items on this track, sorted by start frame
-  const trackItems = allItems
-    .filter(item => item.trackId === trackId)
-    .sort((a, b) => a.from - b.from);
-
   // If no collision, return proposed position
   if (hasAvailableSpace(proposedFrom, durationInFrames, trackItems)) {
     return proposedFrom;
@@ -186,15 +196,36 @@ export function findNearestAvailableSpace(
     }
     // Backward not available, try forward
     return findSpaceForward(proposedFrom, durationInFrames, trackItems);
-  } else {
-    // Try forward first
-    const forwardPosition = findSpaceForward(proposedFrom, durationInFrames, trackItems);
-    if (forwardPosition !== null) {
-      return forwardPosition;
-    }
-    // Forward not available, try backward
-    return findSpaceBackward(proposedFrom, durationInFrames, trackItems);
   }
+
+  // Try forward first
+  const forwardPosition = findSpaceForward(proposedFrom, durationInFrames, trackItems);
+  if (forwardPosition !== null) {
+    return forwardPosition;
+  }
+  // Forward not available, try backward
+  return findSpaceBackward(proposedFrom, durationInFrames, trackItems);
+}
+
+/**
+ * Find the nearest available space for an item on a track
+ * Snaps to the closest edge (backward or forward) based on distance,
+ * checking if space is available in that direction first.
+ *
+ * @param proposedFrom - Desired start position
+ * @param durationInFrames - Duration of item to place
+ * @param trackId - Target track ID
+ * @param allItems - All timeline items
+ * @returns Available position (snapped to closest edge) or null if no space in either direction
+ */
+export function findNearestAvailableSpace(
+  proposedFrom: number,
+  durationInFrames: number,
+  trackId: string,
+  allItems: ReadonlyArray<CollisionRect | TimelineItem>
+): number | null {
+  const trackItems = buildCollisionTrackItemsMap(allItems).get(trackId) ?? EMPTY_TRACK_ITEMS;
+  return findNearestAvailableSpaceInTrackItems(proposedFrom, durationInFrames, trackItems);
 }
 
 export interface OverlapInfo {
