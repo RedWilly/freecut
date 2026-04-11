@@ -223,6 +223,57 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
 
   const selectedAssetCount = selectedMediaIds.length + selectedCompositionIds.length;
   const deleteAssetCount = pendingDeletion.mediaIds.length + pendingDeletion.compositionIds.length;
+  const previewAssetIdsRef = useRef<string[]>([]);
+
+  const setPreviewAssetIds = useCallback((ids: string[]) => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      previewAssetIdsRef.current = ids;
+      return;
+    }
+
+    const nextIds = new Set(ids);
+    for (const previousId of previewAssetIdsRef.current) {
+      if (nextIds.has(previousId)) {
+        continue;
+      }
+
+      if (previousId.startsWith('media:')) {
+        container
+          .querySelector(`[data-media-id="${previousId.slice('media:'.length)}"]`)
+          ?.classList.remove('media-marquee-preview');
+      } else if (previousId.startsWith('composition:')) {
+        container
+          .querySelector(`[data-composition-id="${previousId.slice('composition:'.length)}"]`)
+          ?.classList.remove('composition-marquee-preview');
+      }
+    }
+
+    const previousIds = new Set(previewAssetIdsRef.current);
+    for (const id of ids) {
+      if (previousIds.has(id)) {
+        continue;
+      }
+
+      if (id.startsWith('media:')) {
+        container
+          .querySelector(`[data-media-id="${id.slice('media:'.length)}"]`)
+          ?.classList.add('media-marquee-preview');
+      } else if (id.startsWith('composition:')) {
+        container
+          .querySelector(`[data-composition-id="${id.slice('composition:'.length)}"]`)
+          ?.classList.add('composition-marquee-preview');
+      }
+    }
+
+    previewAssetIdsRef.current = ids;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      setPreviewAssetIds([]);
+    };
+  }, [setPreviewAssetIds]);
 
   const marqueeItems: MarqueeItem[] = useMemo(
     () => [
@@ -266,6 +317,9 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     containerRef: scrollContainerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
     enabled: marqueeItems.length > 0,
+    onPreviewSelectionChange: setPreviewAssetIds,
+    commitSelectionOnMouseUp: true,
+    liveCommitThrottleMs: 66,
     onSelectionChange: (ids) => {
       const nextMediaIds: string[] = [];
       const nextCompositionIds: string[] = [];
@@ -457,21 +511,33 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
       .map((id) => mediaById[id])
       .filter((m): m is MediaMetadata =>
         m !== undefined
-        && proxyService.needsProxy(m.width, m.height, m.mimeType, m.audioCodec)
+        && proxyService.canGenerateProxy(m.mimeType)
         && proxyStatus.get(m.id) !== 'ready'
         && proxyStatus.get(m.id) !== 'generating'
       );
-    const urls = await Promise.all(
-      selectedItems.map((item) => mediaLibraryService.getMediaBlobUrl(item.id))
-    );
-    selectedItems.forEach((item, i) => {
-      const blobUrl = urls[i];
-      if (blobUrl) {
-        const proxyKey = getSharedProxyKey(item);
-        proxyService.setProxyKey(item.id, proxyKey);
-        proxyService.generateProxy(item.id, blobUrl, item.width, item.height, proxyKey);
-      }
+
+    selectedItems.forEach((item) => {
+      const proxyKey = getSharedProxyKey(item);
+      proxyService.setProxyKey(item.id, proxyKey);
+      proxyService.generateProxy(
+        item.id,
+        () => mediaLibraryService.getMediaFile(item.id),
+        item.width,
+        item.height,
+        proxyKey
+      );
     });
+  };
+
+  const handleCancelAllProxies = () => {
+    for (const [mediaId, status] of proxyStatus.entries()) {
+      if (status !== 'generating') {
+        continue;
+      }
+
+      const media = mediaById[mediaId];
+      proxyService.cancelProxy(mediaId, media ? getSharedProxyKey(media) : undefined);
+    }
   };
 
   // Count selected items that are eligible for proxy generation
@@ -479,7 +545,7 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     return selectedMediaIds.filter((id) => {
       const m = mediaById[id];
       return m
-        && proxyService.needsProxy(m.width, m.height, m.mimeType, m.audioCodec)
+        && proxyService.canGenerateProxy(m.mimeType)
         && proxyStatus.get(id) !== 'ready'
         && proxyStatus.get(id) !== 'generating';
     }).length;
@@ -955,11 +1021,20 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-muted-foreground">
-                  Generating {generatingCount} {generatingCount === 1 ? 'proxy' : 'proxies'}
+                  Generating {generatingCount} {generatingCount === 1 ? 'proxy' : 'proxies'} in background
                 </span>
-                <span className="text-muted-foreground tabular-nums">
-                  {Math.round(generatingAvgProgress * 100)}%
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground tabular-nums">
+                    {Math.round(generatingAvgProgress * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCancelAllProxies}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel all
+                  </button>
+                </div>
               </div>
               <div className="h-1 bg-secondary rounded-full overflow-hidden">
                 <div

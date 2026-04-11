@@ -259,50 +259,54 @@ export const TransitionItem = memo(function TransitionItem({
   // Ref for applying drag offset when both clips are being dragged
   const containerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
-  const isDraggingRef = useRef(false);
+  const bothClipsDragged = useSelectionStore(
+    useCallback((state: SelectionState) => {
+      if (!state.dragState?.isDragging) {
+        return false;
+      }
 
-  // Subscribe to drag state and apply offset when both clips are dragged together
+      const draggedItemIdSet = state.dragState.draggedItemIdSet ?? new Set(state.dragState.draggedItemIds);
+      return draggedItemIdSet.has(transition.leftClipId) && draggedItemIdSet.has(transition.rightClipId);
+    }, [transition.leftClipId, transition.rightClipId])
+  );
+  /*
+   * This effect subscribes to a boolean derived from selection state instead
+   * of the full drag payload. Per-frame movement still comes directly from
+   * dragOffsetRef in RAF so the bridge follows both clips without waking
+   * every transition instance on each selection-store drag UI churn.
+   */
+
   useEffect(() => {
     const updateDragOffset = () => {
-      if (!containerRef.current || !isDraggingRef.current) return;
+      if (!containerRef.current) return;
       const offset = dragOffsetRef.current;
       containerRef.current.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
       rafIdRef.current = requestAnimationFrame(updateDragOffset);
     };
 
-    const unsubscribe = useSelectionStore.subscribe((state) => {
-      const dragState = state.dragState;
-      const bothClipsDragged = dragState?.isDragging &&
-        dragState.draggedItemIds.includes(transition.leftClipId) &&
-        dragState.draggedItemIds.includes(transition.rightClipId);
-
-      const wasDragging = isDraggingRef.current;
-      isDraggingRef.current = !!bothClipsDragged;
-
-      // Start RAF loop when both clips start dragging
-      if (!wasDragging && bothClipsDragged) {
-        rafIdRef.current = requestAnimationFrame(updateDragOffset);
-      }
-
-      // Cleanup when drag ends
-      if (wasDragging && !bothClipsDragged) {
-        if (rafIdRef.current) {
-          cancelAnimationFrame(rafIdRef.current);
-          rafIdRef.current = null;
-        }
-        if (containerRef.current) {
-          containerRef.current.style.transform = '';
-        }
-      }
-    });
-
-    return () => {
-      unsubscribe();
+    if (!bothClipsDragged) {
       if (rafIdRef.current) {
         cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (containerRef.current) {
+        containerRef.current.style.transform = '';
+      }
+      return;
+    }
+
+    rafIdRef.current = requestAnimationFrame(updateDragOffset);
+
+    return () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      if (containerRef.current) {
+        containerRef.current.style.transform = '';
       }
     };
-  }, [transition.leftClipId, transition.rightClipId]);
+  }, [bothClipsDragged]);
   // Calculate position and size for the transition indicator.
   // The bridge covers the actual overlap region: from (leftEnd - duration) to leftEnd.
   // The right edge is anchored at leftEnd (the left clip's end); the left edge moves
@@ -492,6 +496,7 @@ export const TransitionItem = memo(function TransitionItem({
       <ContextMenuTrigger asChild>
         <div
           ref={containerRef}
+          data-transition-id={transition.id}
           className={cn(
             'absolute inset-y-0 overflow-visible rounded-sm pointer-events-none',
             isSelected &&

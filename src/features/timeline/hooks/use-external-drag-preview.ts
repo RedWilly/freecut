@@ -5,20 +5,13 @@ import {
   type ExternalDragPreviewEntry,
 } from '../utils/drag-drop-preview';
 
-interface UseExternalDragPreviewOptions<TGhostPreview> {
-  buildGhostPreviews: (
-    entries: ExternalDragPreviewEntry[],
-    dropFrame: number
-  ) => TGhostPreview[];
-  setGhostPreviews: (ghostPreviews: TGhostPreview[]) => void;
+interface UseExternalDragPreviewOptions {
   onError?: (error: unknown) => void;
 }
 
-export function useExternalDragPreview<TGhostPreview>({
-  buildGhostPreviews,
-  setGhostPreviews,
+export function useExternalDragPreview({
   onError,
-}: UseExternalDragPreviewOptions<TGhostPreview>) {
+}: UseExternalDragPreviewOptions) {
   const externalPreviewItemsRef = useRef<ExternalDragPreviewEntry[] | null>(null);
   const externalPreviewSignatureRef = useRef<string | null>(null);
   const externalPreviewPromiseRef = useRef<Promise<void> | null>(null);
@@ -55,10 +48,6 @@ export function useExternalDragPreview<TGhostPreview>({
 
       externalPreviewItemsRef.current = previewEntries;
       externalPreviewPromiseRef.current = null;
-
-      if (previewEntries.length > 0) {
-        setGhostPreviews(buildGhostPreviews(previewEntries, lastDragFrameRef.current));
-      }
     })().catch((error) => {
       if (token === externalPreviewTokenRef.current) {
         externalPreviewPromiseRef.current = null;
@@ -67,7 +56,7 @@ export function useExternalDragPreview<TGhostPreview>({
     });
 
     externalPreviewPromiseRef.current = previewPromise;
-  }, [buildGhostPreviews, clearExternalPreviewSession, onError, setGhostPreviews]);
+  }, [clearExternalPreviewSession, onError]);
 
   return {
     clearExternalPreviewSession,

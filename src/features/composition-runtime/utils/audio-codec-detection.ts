@@ -2,11 +2,13 @@
  * Detects whether a media item's audio codec requires custom decoding
  * for preview playback (browser can't natively decode it).
  *
- * We route AC-3/E-AC-3 and PCM endian variants through the mediabunny
- * decode path so preview audio remains reliable across containers.
+ * We route AC-3/E-AC-3, Vorbis, and PCM endian variants through the
+ * mediabunny decode path so preview audio remains reliable across
+ * containers and seeking-heavy playback.
  */
 
 const AC3_CODEC_PATTERN = /(^|[^a-z0-9])(ac-?3|ec-?3|e-?ac-?3|eac3)([^a-z0-9]|$)/i;
+const VORBIS_CODEC_PATTERN = /(^|[^a-z0-9])vorbis([^a-z0-9]|$)/i;
 
 // Mediabunny-style PCM codec IDs, e.g. pcm-s16be, pcm-s24le, pcm-f32be.
 const PCM_ENDIAN_CODEC_PATTERN =
@@ -21,6 +23,7 @@ export function needsCustomAudioDecoder(audioCodec: string | undefined): boolean
   const normalized = audioCodec.toLowerCase().trim();
 
   if (AC3_CODEC_PATTERN.test(normalized)) return true;
+  if (VORBIS_CODEC_PATTERN.test(normalized)) return true;
   if (PCM_ENDIAN_CODEC_PATTERN.test(normalized)) return true;
   if (PCM_ALIAS_CODEC_PATTERN.test(normalized)) return true;
 

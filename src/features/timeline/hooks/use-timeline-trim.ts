@@ -69,6 +69,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
   const trimItemStart = useTimelineStore((s) => s.trimItemStart);
   const trimItemEnd = useTimelineStore((s) => s.trimItemEnd);
   const setDragState = useSelectionStore((s) => s.setDragState);
+  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget);
 
   // Get fresh item from store to ensure we have latest values after previous trims
   const getItemFromStore = useCallback(() => {
@@ -556,15 +557,10 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
 
       if (snapChanged) {
         prevSnapTargetRef.current = snapTarget ? { frame: snapTarget.frame, type: snapTarget.type } : null;
-        setDragState({
-          isDragging: true,
-          draggedItemIds: [item.id],
-          offset: { x: deltaX, y: 0 },
-          activeSnapTarget: snapTarget,
-        });
+        setActiveSnapTarget(snapTarget);
       }
     },
-    [pixelsToTime, fps, trackLocked, findSnapForFrame, setDragState, item.id, getItemFromStore]
+    [pixelsToTime, fps, trackLocked, findSnapForFrame, setActiveSnapTarget, item.id, getItemFromStore]
   );
 
   // Mouse up handler - commits changes to store (single update)
@@ -619,6 +615,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
       useLinkedEditPreviewStore.getState().clear();
 
       // Clear drag state (including snap indicator)
+      setActiveSnapTarget(null);
       setDragState(null);
       prevSnapTargetRef.current = null;
 
@@ -642,7 +639,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         destroyTransitionAtHandle: false,
       });
     }
-  }, [item.id, trimItemStart, trimItemEnd, setDragState]);
+  }, [item.id, trimItemStart, trimItemEnd, setActiveSnapTarget, setDragState]);
 
   // Setup and cleanup mouse event listeners
   useEffect(() => {
@@ -723,8 +720,8 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         isDragging: true,
         draggedItemIds: [item.id],
         offset: { x: 0, y: 0 },
-        activeSnapTarget: null,
       });
+      setActiveSnapTarget(null);
 
       setTrimState({
         isTrimming: true,
@@ -761,7 +758,7 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
         useTransitionBreakPreviewStore.getState().clearPreview();
       }
     },
-    [item.from, item.durationInFrames, trackLocked, getItemFromStore]
+    [item.from, item.durationInFrames, trackLocked, getItemFromStore, item.id, setActiveSnapTarget, setDragState]
   );
 
   return {

@@ -1,5 +1,5 @@
 // React and external libraries
-import { useCallback, useRef, useState, useEffect, memo } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react';
 
 // Stores and selectors
 import { useTimelineStore } from '../stores/timeline-store';
@@ -16,6 +16,7 @@ import { useTimelineZoomContext } from '../contexts/timeline-zoom-context';
 import { formatTimecode, secondsToFrames } from '@/utils/time-utils';
 import { createScrubThrottleState, shouldCommitScrubFrame } from '../utils/scrub-throttle';
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/shared/ui/editor-layout';
+import { sanitizeInOutPoints } from '../utils/in-out-points';
 
 // Edge-scrolling configuration
 const EDGE_SCROLL_MAX_SPEED = 20; // Max pixels per frame at max distance
@@ -350,6 +351,13 @@ export const TimelineMarkers = memo(function TimelineMarkers({ duration, width }
   const rangeDragStartOutRef = useRef(0);
   const rangeDragLastInRef = useRef(0);
   const rangeDragLastOutRef = useRef(0);
+  const maxFrame = Math.max(1, Math.floor(duration * fps));
+  const sanitizedInOutPoints = useMemo(
+    () => sanitizeInOutPoints({ inPoint, outPoint, maxFrame }),
+    [inPoint, outPoint, maxFrame]
+  );
+  const safeInPoint = sanitizedInOutPoints.inPoint;
+  const safeOutPoint = sanitizedInOutPoints.outPoint;
 
   useEffect(() => {
     pixelsToFrameRef.current = pixelsToFrame;
@@ -360,9 +368,20 @@ export const TimelineMarkers = memo(function TimelineMarkers({ duration, width }
     fpsRef.current = fps;
     pixelsPerSecondRef.current = pixelsPerSecond;
     durationRef.current = duration;
-    inPointRef.current = inPoint;
-    outPointRef.current = outPoint;
-  }, [pixelsToFrame, setCurrentFrame, setScrubFrame, markDirty, pause, fps, pixelsPerSecond, duration, inPoint, outPoint]);
+    inPointRef.current = safeInPoint;
+    outPointRef.current = safeOutPoint;
+  }, [pixelsToFrame, setCurrentFrame, setScrubFrame, markDirty, pause, fps, pixelsPerSecond, duration, safeInPoint, safeOutPoint]);
+
+  useEffect(() => {
+    if (safeInPoint === inPoint && safeOutPoint === outPoint) {
+      return;
+    }
+
+    useTimelineStore.setState({
+      inPoint: safeInPoint,
+      outPoint: safeOutPoint,
+    });
+  }, [inPoint, outPoint, safeInPoint, safeOutPoint]);
 
   // Track viewport and scroll
   const scrollLeftRef = useRef(0);
@@ -901,12 +920,12 @@ export const TimelineMarkers = memo(function TimelineMarkers({ duration, width }
       />
 
       {/* Full ruler highlight between in/out points */}
-      {inPoint !== null && outPoint !== null && (
+      {safeInPoint !== null && safeOutPoint !== null && (
         <div
           className="absolute top-0 bottom-0 pointer-events-none"
           style={{
-            left: `${timeToPixels(inPoint / fps)}px`,
-            width: `${Math.max(2, timeToPixels((outPoint - inPoint) / fps))}px`,
+            left: `${timeToPixels(safeInPoint / fps)}px`,
+            width: `${Math.max(2, timeToPixels((safeOutPoint - safeInPoint) / fps))}px`,
             backgroundColor: 'oklch(0.50 0.10 220 / 0.16)',
             borderLeft: '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
             borderRight: '1px solid color-mix(in oklch, var(--color-timeline-io-range-border) 45%, transparent)',
@@ -916,15 +935,15 @@ export const TimelineMarkers = memo(function TimelineMarkers({ duration, width }
       )}
 
       {/* Draggable in/out strip */}
-      {inPoint !== null && outPoint !== null && (
+      {safeInPoint !== null && safeOutPoint !== null && (
         <div
           className="absolute cursor-move"
           onMouseDown={handleRangeMouseDown}
           style={{
-            left: `${timeToPixels(inPoint / fps)}px`,
+            left: `${timeToPixels(safeInPoint / fps)}px`,
             bottom: '0px',
             height: '14px',
-            width: `${Math.max(2, timeToPixels((outPoint - inPoint) / fps))}px`,
+            width: `${Math.max(2, timeToPixels((safeOutPoint - safeInPoint) / fps))}px`,
             background:
               'linear-gradient(to bottom, var(--color-timeline-io-range-fill), color-mix(in oklch, var(--color-timeline-io-range-fill) 82%, black))',
             border: '1px solid var(--color-timeline-io-range-border)',

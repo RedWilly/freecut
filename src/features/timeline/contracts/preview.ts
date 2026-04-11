@@ -26,6 +26,7 @@ export {
   performOverwriteEdit,
 } from '../stores/actions/source-edit-actions';
 export { resolveSourceEditTrackTargets } from '../utils/source-edit-targeting';
+export { getTrackKind } from '../utils/classic-tracks';
 export {
   useCompositionsStore,
 } from '../stores/compositions-store';

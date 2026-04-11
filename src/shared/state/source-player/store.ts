@@ -15,6 +15,10 @@ export const useSourcePlayerStore = create<SourcePlayerState>((set) => ({
     if (id === state.currentMediaId) return state;
     return { currentMediaId: id, inPoint: null, outPoint: null, currentSourceFrame: 0 };
   }),
+  releaseCurrentMediaId: (id) => set((state) => {
+    if (state.currentMediaId !== id) return state;
+    return { currentMediaId: null, inPoint: null, outPoint: null, currentSourceFrame: 0 };
+  }),
   setCurrentSourceFrame: (frame) => set({ currentSourceFrame: frame }),
   setInPoint: (frame) => set((state) => {
     if (frame !== null && state.outPoint !== null && frame >= state.outPoint) {

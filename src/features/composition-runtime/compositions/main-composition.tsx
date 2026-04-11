@@ -16,6 +16,7 @@ import { useGizmoStore } from '@/features/composition-runtime/deps/stores';
 import { ItemEffectWrapper, type AdjustmentLayerWithTrackOrder } from '../components/item-effect-wrapper';
 import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider } from '../contexts/composition-space-context';
+import { NestedMediaResolutionProvider } from '../contexts/nested-media-resolution-context';
 import {
   buildCompoundAudioTransitionSegments,
   buildStandaloneAudioSegments,
@@ -120,13 +121,18 @@ const MaskedItem: React.FC<{
  * 3. Only items BELOW adjustment layer (higher track order) receive effects
  * 4. Adding/removing adjustment layers doesn't change DOM structure
  */
-export const MainComposition: React.FC<CompositionInputProps> = ({
+type MainCompositionProps = CompositionInputProps & {
+  useProxyMedia?: boolean;
+};
+
+export const MainComposition: React.FC<MainCompositionProps> = ({
   tracks,
   transitions = [],
   backgroundColor = '#000000',
   keyframes,
   width: compositionWidth,
   height: compositionHeight,
+  useProxyMedia = false,
 }) => {
   const { fps, width: renderWidth, height: renderHeight } = useVideoConfig();
   const projectWidth = compositionWidth ?? renderWidth;
@@ -346,14 +352,15 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
   }, [visibleAdjustmentLayers]);
 
   return (
-    <KeyframesProvider keyframes={keyframes}>
-      <CompositionSpaceProvider
-        projectWidth={projectWidth}
-        projectHeight={projectHeight}
-        renderWidth={renderWidth}
-        renderHeight={renderHeight}
-      >
-        <AbsoluteFill>
+    <NestedMediaResolutionProvider value={useProxyMedia ? 'proxy' : 'source'}>
+      <KeyframesProvider keyframes={keyframes}>
+        <CompositionSpaceProvider
+          projectWidth={projectWidth}
+          projectHeight={projectHeight}
+          renderWidth={renderWidth}
+          renderHeight={renderHeight}
+        >
+          <AbsoluteFill>
           {/* SVG MASK DEFINITIONS - kept for backward compat with feather/invert that need SVG mask */}
           {/* Shape mask animation is now handled per-item via ActiveMasksProvider + MaskedItem */}
 
@@ -362,7 +369,7 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
 
           {/* AUDIO LAYER - rendered outside visual layers to prevent re-renders from mask/visual changes */}
           {/* Video audio is decoupled from visual video elements for transition stability */}
-          {/* Custom-decoded segments (AC-3/E-AC-3, PCM endian variants) use mediabunny instead of native <audio>. */}
+          {/* Custom-decoded segments (AC-3/E-AC-3, Vorbis, PCM endian variants) use mediabunny instead of native <audio>. */}
           {transitionAudioSegments.map((segment) => {
             const useCustomDecoder = shouldUseCustomDecoder(segment);
             const decodeMediaId = segment.mediaId ?? `legacy-src:${segment.src}`;
@@ -587,8 +594,9 @@ export const MainComposition: React.FC<CompositionInputProps> = ({
                 })}
             </AbsoluteFill>
           </FrameActiveMasksProvider>
-        </AbsoluteFill>
-      </CompositionSpaceProvider>
-    </KeyframesProvider>
+          </AbsoluteFill>
+        </CompositionSpaceProvider>
+      </KeyframesProvider>
+    </NestedMediaResolutionProvider>
   );
 };

@@ -2,6 +2,7 @@ import { memo, type MouseEventHandler, type ReactNode, type RefObject } from 're
 import { Player, type PlayerRef } from '@/features/preview/deps/player-core';
 import { MainComposition } from '@/features/preview/deps/composition-runtime';
 import type { CompositionInputProps } from '@/types/export';
+import { usePlaybackStore } from '@/shared/state/playback';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { FAST_SCRUB_RENDERER_ENABLED } from '../utils/preview-constants';
 
@@ -48,6 +49,8 @@ export const PreviewStage = memo(function PreviewStage({
   comparisonOverlay,
   overlayControls,
 }: PreviewStageProps) {
+  const useProxy = usePlaybackStore((s) => s.useProxy);
+
   return (
     <div
       ref={backgroundRef}
@@ -97,7 +100,7 @@ export const PreviewStage = memo(function PreviewStage({
               onFrameChange={onFrameChange}
               onPlayStateChange={onPlayStateChange}
             >
-              <MainComposition {...inputProps} />
+              <MainComposition {...inputProps} useProxyMedia={useProxy} />
             </Player>
 
             {FAST_SCRUB_RENDERER_ENABLED && (

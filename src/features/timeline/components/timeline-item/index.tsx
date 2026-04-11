@@ -181,7 +181,7 @@ interface TimelineItemProps {
 export const TimelineItem = memo(function TimelineItem({ item, timelineDuration = 30, trackLocked = false, trackHidden = false }: TimelineItemProps) {
   // Granular selector: only re-render when THIS item's selection state changes
   const isSelected = useSelectionStore(
-    useCallback((s) => s.selectedItemIds.includes(item.id), [item.id])
+    useCallback((s) => s.selectedItemIdSet.has(item.id), [item.id])
   );
 
   // Granular selector: check if this item's media is broken (missing/permission denied)

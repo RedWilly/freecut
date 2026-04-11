@@ -8,6 +8,11 @@ describe('needsCustomAudioDecoder', () => {
     expect(needsCustomAudioDecoder('Dolby Digital Plus')).toBe(true);
   });
 
+  it('detects vorbis codecs', () => {
+    expect(needsCustomAudioDecoder('vorbis')).toBe(true);
+    expect(needsCustomAudioDecoder('xiph.vorbis')).toBe(true);
+  });
+
   it('detects PCM endian codec ids', () => {
     expect(needsCustomAudioDecoder('pcm-s16be')).toBe(true);
     expect(needsCustomAudioDecoder('pcm-s24le')).toBe(true);

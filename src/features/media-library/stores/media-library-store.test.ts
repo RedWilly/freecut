@@ -3,16 +3,24 @@ import type { MediaMetadata } from '@/types/storage';
 
 const mediaLibraryServiceMocks = vi.hoisted(() => ({
   getMediaForProject: vi.fn(),
-  getMediaBlobUrl: vi.fn(),
+  getMediaFile: vi.fn(),
+}));
+
+const proxyStatusListenerRef = vi.hoisted(() => ({
+  current: null as ((mediaId: string, status: 'generating' | 'ready' | 'error' | 'idle', progress?: number) => void) | null,
 }));
 
 const proxyServiceMocks = vi.hoisted(() => ({
+  canGenerateProxy: vi.fn(),
   clearProxyKey: vi.fn(),
+  hasProxy: vi.fn(),
   needsProxy: vi.fn(),
   setProxyKey: vi.fn(),
   loadExistingProxies: vi.fn(),
   generateProxy: vi.fn(),
-  onStatusChange: vi.fn(),
+  onStatusChange: vi.fn((listener) => {
+    proxyStatusListenerRef.current = listener;
+  }),
 }));
 
 const indexedDbMocks = vi.hoisted(() => ({
@@ -150,8 +158,9 @@ describe('useMediaLibraryStore', () => {
     });
 
     mediaLibraryServiceMocks.getMediaForProject.mockResolvedValue([video, audio]);
-    mediaLibraryServiceMocks.getMediaBlobUrl.mockResolvedValue('blob:video-1');
     indexedDbMocks.getTranscriptMediaIds.mockResolvedValue(new Set(['video-1']));
+    proxyServiceMocks.canGenerateProxy.mockImplementation((mimeType: string) => mimeType.startsWith('video/'));
+    proxyServiceMocks.hasProxy.mockReturnValue(false);
     proxyServiceMocks.needsProxy.mockImplementation((_w, _h, mimeType: string) => mimeType.startsWith('video/'));
     proxyServiceMocks.loadExistingProxies.mockResolvedValue(['video-1']);
 
@@ -168,20 +177,22 @@ describe('useMediaLibraryStore', () => {
     expect(state.transcriptStatus.get('audio-1')).toBe('idle');
     expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('video-1', 'proxy-video-1');
     expect(proxyServiceMocks.loadExistingProxies).toHaveBeenCalledWith(['video-1']);
-    expect(proxyServiceMocks.generateProxy).toHaveBeenCalledWith(
-      'video-1',
-      'blob:video-1',
-      3840,
-      2160,
-      'proxy-video-1'
-    );
+    const generateProxyCall = proxyServiceMocks.generateProxy.mock.calls[0];
+    expect(generateProxyCall?.[0]).toBe('video-1');
+    expect(generateProxyCall?.[2]).toBe(3840);
+    expect(generateProxyCall?.[3]).toBe(2160);
+    expect(generateProxyCall?.[4]).toBe('proxy-video-1');
+    expect(generateProxyCall?.[5]).toEqual({ priority: 'background' });
+    expect(typeof generateProxyCall?.[1]).toBe('function');
   });
 
   it('falls back to idle transcript status when transcript lookup fails', async () => {
     const video = makeMedia({ id: 'video-1' });
     mediaLibraryServiceMocks.getMediaForProject.mockResolvedValue([video]);
     indexedDbMocks.getTranscriptMediaIds.mockRejectedValue(new Error('boom'));
+    proxyServiceMocks.canGenerateProxy.mockReturnValue(true);
     proxyServiceMocks.needsProxy.mockReturnValue(false);
+    proxyServiceMocks.loadExistingProxies.mockResolvedValue([]);
 
     useMediaLibraryStore.setState({ currentProjectId: 'project-1' });
 
@@ -189,6 +200,64 @@ describe('useMediaLibraryStore', () => {
 
     const state = useMediaLibraryStore.getState();
     expect(state.transcriptStatus.get('video-1')).toBe('idle');
-    expect(proxyServiceMocks.loadExistingProxies).not.toHaveBeenCalled();
+    expect(proxyServiceMocks.loadExistingProxies).toHaveBeenCalledWith(['video-1']);
+    expect(proxyServiceMocks.generateProxy).not.toHaveBeenCalled();
+  });
+
+  it('loads existing proxies for all videos and only auto-generates smart candidates', async () => {
+    const manualVideo = makeMedia({
+      id: 'video-manual',
+      fileName: 'manual.mp4',
+      width: 1280,
+      height: 720,
+    });
+    const autoVideo = makeMedia({
+      id: 'video-auto',
+      fileName: 'auto.mp4',
+      width: 3840,
+      height: 2160,
+    });
+    const audio = makeMedia({
+      id: 'audio-1',
+      fileName: 'audio.mp3',
+      mimeType: 'audio/mpeg',
+      width: 0,
+      height: 0,
+    });
+
+    mediaLibraryServiceMocks.getMediaForProject.mockResolvedValue([manualVideo, autoVideo, audio]);
+    indexedDbMocks.getTranscriptMediaIds.mockResolvedValue(new Set());
+    proxyServiceMocks.canGenerateProxy.mockImplementation((mimeType: string) => mimeType.startsWith('video/'));
+    proxyServiceMocks.needsProxy.mockImplementation((width: number) => width >= 3840);
+    proxyServiceMocks.loadExistingProxies.mockResolvedValue([]);
+    proxyServiceMocks.hasProxy.mockReturnValue(false);
+
+    useMediaLibraryStore.setState({ currentProjectId: 'project-1' });
+
+    await useMediaLibraryStore.getState().loadMediaItems();
+
+    expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('video-manual', 'proxy-video-manual');
+    expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('video-auto', 'proxy-video-auto');
+    expect(proxyServiceMocks.loadExistingProxies).toHaveBeenCalledWith(['video-manual', 'video-auto']);
+    expect(proxyServiceMocks.generateProxy).toHaveBeenCalledTimes(1);
+    expect(proxyServiceMocks.generateProxy).toHaveBeenCalledWith(
+      'video-auto',
+      expect.any(Function),
+      3840,
+      2160,
+      'proxy-video-auto',
+      { priority: 'background' }
+    );
+  });
+
+  it('clears proxy status and progress when proxy generation is cancelled', () => {
+    useMediaLibraryStore.getState().setProxyStatus('media-1', 'generating');
+    useMediaLibraryStore.getState().setProxyProgress('media-1', 0.5);
+
+    proxyStatusListenerRef.current?.('media-1', 'idle');
+
+    const state = useMediaLibraryStore.getState();
+    expect(state.proxyStatus.has('media-1')).toBe(false);
+    expect(state.proxyProgress.has('media-1')).toBe(false);
   });
 });

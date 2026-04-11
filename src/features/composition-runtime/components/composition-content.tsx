@@ -14,6 +14,7 @@ import { resolveAnimatedTransform, hasKeyframeAnimation } from '@/features/compo
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context';
 import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider, useCompositionSpace } from '../contexts/composition-space-context';
+import { useNestedMediaResolutionMode } from '../contexts/nested-media-resolution-context';
 import { clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
 import { Item } from './item';
 import type { MaskInfo } from './item';
@@ -29,6 +30,7 @@ import {
   resolveTrackRenderState,
 } from '../utils/scene-assembly';
 import { getLinkedVideoIdsWithAudio, hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
+import { resolveProxyUrl } from '@/features/composition-runtime/deps/media-library';
 
 type CompositionWrapperItem = CompositionItemType | (AudioItem & { compositionId: string });
 
@@ -58,14 +60,29 @@ interface CompositionContentProps {
  * The parent preview has already acquired blob URLs for all mediaIds â€”
  * we just need to look them up and set `src`.
  */
-function resolveSubCompItem(subItem: TimelineItem): TimelineItem {
+function resolveSubCompItem(
+  subItem: TimelineItem,
+  nestedMediaResolutionMode: 'source' | 'proxy',
+): TimelineItem {
   if (
     subItem.mediaId &&
     (subItem.type === 'video' || subItem.type === 'audio' || subItem.type === 'image')
   ) {
-    const src = blobUrlManager.get(subItem.mediaId) ?? '';
-    if (src !== subItem.src) {
-      return { ...subItem, src } as TimelineItem;
+    const sourceSrc = blobUrlManager.get(subItem.mediaId) ?? '';
+
+    if (subItem.type === 'video') {
+      const proxySrc = nestedMediaResolutionMode === 'proxy'
+        ? resolveProxyUrl(subItem.mediaId)
+        : null;
+      const resolvedSrc = proxySrc || sourceSrc;
+      if (resolvedSrc !== subItem.src || subItem.audioSrc !== sourceSrc) {
+        return { ...subItem, src: resolvedSrc, audioSrc: sourceSrc };
+      }
+      return subItem;
+    }
+
+    if (sourceSrc !== subItem.src) {
+      return { ...subItem, src: sourceSrc } as TimelineItem;
     }
   }
   return subItem;
@@ -136,6 +153,7 @@ function mapSubCompItemToWrapperWindow(params: {
 export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, parentVisible = true, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
   const subComp = useCompositionsStore((s) => s.compositions.find((c) => c.id === item.compositionId));
   const { width: renderWidth, height: renderHeight, fps: mainFps } = useVideoConfig();
+  const nestedMediaResolutionMode = useNestedMediaResolutionMode();
   const compositionSpace = useCompositionSpace();
   const projectWidth = compositionSpace?.projectWidth ?? renderWidth;
   const projectHeight = compositionSpace?.projectHeight ?? renderHeight;
@@ -164,7 +182,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
   const resolvedItems = useMemo(() => {
     if (!subComp) return [];
     return subComp.items
-      .map(resolveSubCompItem)
+      .map((subItem) => resolveSubCompItem(subItem, nestedMediaResolutionMode))
       .flatMap((subItem) => {
         const mapped = mapSubCompItemToWrapperWindow({
           subItem,
@@ -174,7 +192,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
         });
         return mapped ? [mapped] : [];
       });
-  }, [blobUrlVersion, mainFps, subComp, wrapperWindow]);
+  }, [blobUrlVersion, mainFps, nestedMediaResolutionMode, subComp, wrapperWindow]);
 
   // === Compute parent container dimensions ===
   // Replicates the same priority chain as useItemVisualState:

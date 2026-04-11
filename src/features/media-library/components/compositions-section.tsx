@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, memo } from 'react';
 import { Layers, Trash2, ChevronRight } from 'lucide-react';
 import {
   Collapsible,
@@ -51,87 +51,113 @@ export function CompositionsSection() {
 
   const viewMode = useMediaLibraryStore((s) => s.viewMode);
   const mediaItemSize = useMediaLibraryStore((s) => s.mediaItemSize);
-  const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
   const selectedCompositionIds = useMediaLibraryStore((s) => s.selectedCompositionIds);
-  const toggleCompositionSelection = useMediaLibraryStore((s) => s.toggleCompositionSelection);
-  const setSelection = useMediaLibraryStore((s) => s.setSelection);
+  const selectedCompositionIdSet = useMemo(() => new Set(selectedCompositionIds), [selectedCompositionIds]);
   const [open, setOpen] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<SubComposition | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const compositionsRef = useRef(compositions);
+  const editValueRef = useRef(editValue);
   const renameCancelledRef = useRef(false);
   const lastSelectedCompositionIdRef = useRef<string | null>(null);
 
-  const handleEnter = (comp: SubComposition) => {
-    enterComposition(comp.id, comp.name);
-  };
+  useEffect(() => {
+    compositionsRef.current = compositions;
+  }, [compositions]);
 
-  const handleDeleteRequest = (comp: SubComposition) => {
+  useEffect(() => {
+    editValueRef.current = editValue;
+  }, [editValue]);
+
+  const handleEnter = useCallback((comp: SubComposition) => {
+    enterComposition(comp.id, comp.name);
+  }, [enterComposition]);
+
+  const handleDeleteRequest = useCallback((comp: SubComposition) => {
     setDeleteTarget(comp);
-  };
+  }, []);
 
   const handleCompositionSelect = useCallback(
     (compositionId: string, event?: React.MouseEvent) => {
+      const currentCompositions = compositionsRef.current;
+      const mediaStore = useMediaLibraryStore.getState();
+
       if (event?.shiftKey && lastSelectedCompositionIdRef.current) {
-        const lastIndex = compositions.findIndex((item) => item.id === lastSelectedCompositionIdRef.current);
-        const currentIndex = compositions.findIndex((item) => item.id === compositionId);
+        const lastIndex = currentCompositions.findIndex((item) => item.id === lastSelectedCompositionIdRef.current);
+        const currentIndex = currentCompositions.findIndex((item) => item.id === compositionId);
 
         if (lastIndex !== -1 && currentIndex !== -1) {
           const startIndex = Math.min(lastIndex, currentIndex);
           const endIndex = Math.max(lastIndex, currentIndex);
-          const rangeIds = compositions.slice(startIndex, endIndex + 1).map((item) => item.id);
+          const rangeIds = currentCompositions.slice(startIndex, endIndex + 1).map((item) => item.id);
 
           if (event.ctrlKey || event.metaKey) {
-            setSelection({
-              mediaIds: selectedMediaIds,
-              compositionIds: [...new Set([...selectedCompositionIds, ...rangeIds])],
+            mediaStore.setSelection({
+              mediaIds: mediaStore.selectedMediaIds,
+              compositionIds: [...new Set([...mediaStore.selectedCompositionIds, ...rangeIds])],
             });
           } else {
-            setSelection({ mediaIds: [], compositionIds: rangeIds });
+            mediaStore.setSelection({ mediaIds: [], compositionIds: rangeIds });
           }
           return;
         }
       }
 
       if (event?.ctrlKey || event?.metaKey) {
-        toggleCompositionSelection(compositionId);
+        mediaStore.toggleCompositionSelection(compositionId);
         lastSelectedCompositionIdRef.current = compositionId;
         return;
       }
 
-      setSelection({ mediaIds: [], compositionIds: [compositionId] });
+      mediaStore.setSelection({ mediaIds: [], compositionIds: [compositionId] });
       lastSelectedCompositionIdRef.current = compositionId;
     },
-    [compositions, selectedCompositionIds, selectedMediaIds, setSelection, toggleCompositionSelection]
+    []
   );
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = useCallback(() => {
     if (!deleteTarget) return;
     deleteCompoundClips([deleteTarget.id]);
-    setSelection({
-      mediaIds: selectedMediaIds,
-      compositionIds: selectedCompositionIds.filter((id) => id !== deleteTarget.id),
+    const mediaStore = useMediaLibraryStore.getState();
+    mediaStore.setSelection({
+      mediaIds: mediaStore.selectedMediaIds,
+      compositionIds: mediaStore.selectedCompositionIds.filter((id) => id !== deleteTarget.id),
     });
     setDeleteTarget(null);
-  };
+  }, [deleteTarget]);
 
-  const handleStartRename = (comp: SubComposition) => {
+  const handleStartRename = useCallback((comp: SubComposition) => {
     setEditingId(comp.id);
     setEditValue(comp.name);
-  };
+  }, []);
 
-  const handleCommitRename = (id: string) => {
+  const handleCommitRename = useCallback((id: string) => {
     if (renameCancelledRef.current) {
       renameCancelledRef.current = false;
       setEditingId(null);
       return;
     }
-    const trimmed = editValue.trim();
+    const trimmed = editValueRef.current.trim();
     if (trimmed && trimmed !== useCompositionsStore.getState().getComposition(id)?.name) {
       renameCompoundClip(id, trimmed);
     }
     setEditingId(null);
-  };
+  }, []);
+
+  const handleCancelRename = useCallback(() => {
+    renameCancelledRef.current = true;
+    setEditingId(null);
+  }, []);
+
+  const cardHandlersById = useMemo(() => new Map(
+    compositions.map((comp) => [comp.id, {
+      onSelect: (event: React.MouseEvent) => handleCompositionSelect(comp.id, event),
+      onEnter: () => handleEnter(comp),
+      onDelete: () => handleDeleteRequest(comp),
+      onStartRename: () => handleStartRename(comp),
+    }])
+  ), [compositions, handleCompositionSelect, handleDeleteRequest, handleEnter, handleStartRename]);
 
   const deleteImpact = deleteTarget
     ? getCompoundClipDeletionImpact([deleteTarget.id])
@@ -164,31 +190,33 @@ export function CompositionsSection() {
           )}
           style={viewMode === 'grid' ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[mediaItemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))` } : undefined}
         >
-          {compositions.map((comp) => (
-            <CompositionCard
-              key={comp.id}
-              composition={comp}
-              viewMode={viewMode}
-              selected={selectedCompositionIds.includes(comp.id)}
-              dragDisabled={wouldCreateCompositionCycle({
-                parentCompositionId: activeCompositionId,
-                insertedCompositionId: comp.id,
-                compositionById,
-              })}
-              isEditing={editingId === comp.id}
-              editValue={editValue}
-              onEditValueChange={setEditValue}
-              onSelect={(event) => handleCompositionSelect(comp.id, event)}
-              onEnter={handleEnter}
-              onDelete={handleDeleteRequest}
-              onStartRename={handleStartRename}
-              onCommitRename={handleCommitRename}
-              onCancelRename={() => {
-                renameCancelledRef.current = true;
-                setEditingId(null);
-              }}
-            />
-          ))}
+          {compositions.map((comp) => {
+            const handlers = cardHandlersById.get(comp.id);
+            if (!handlers) return null;
+
+            return (
+              <CompositionCard
+                key={comp.id}
+                composition={comp}
+                viewMode={viewMode}
+                selected={selectedCompositionIdSet.has(comp.id)}
+                dragDisabled={wouldCreateCompositionCycle({
+                  parentCompositionId: activeCompositionId,
+                  insertedCompositionId: comp.id,
+                  compositionById,
+                })}
+                isEditing={editingId === comp.id}
+                editValue={editValue}
+                onEditValueChange={setEditValue}
+                onSelect={handlers.onSelect}
+                onEnter={handlers.onEnter}
+                onDelete={handlers.onDelete}
+                onStartRename={handlers.onStartRename}
+                onCommitRename={handleCommitRename}
+                onCancelRename={handleCancelRename}
+              />
+            );
+          })}
         </CollapsibleContent>
       </Collapsible>
 
@@ -240,14 +268,14 @@ interface CompositionCardProps {
   editValue: string;
   onEditValueChange: (value: string) => void;
   onSelect: (event: React.MouseEvent) => void;
-  onEnter: (comp: SubComposition) => void;
-  onDelete: (comp: SubComposition) => void;
-  onStartRename: (comp: SubComposition) => void;
+  onEnter: () => void;
+  onDelete: () => void;
+  onStartRename: () => void;
   onCommitRename: (id: string) => void;
   onCancelRename: () => void;
 }
 
-function CompositionCard({
+const CompositionCard = memo(function CompositionCard({
   composition,
   viewMode,
   selected,
@@ -325,8 +353,8 @@ function CompositionCard({
   }, []);
 
   const handleDoubleClick = useCallback(() => {
-    onEnter(composition);
-  }, [composition, onEnter]);
+    onEnter();
+  }, [onEnter]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -474,14 +502,14 @@ function CompositionCard({
         </ContextMenuTrigger>
 
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => onEnter(composition)}>
+          <ContextMenuItem onClick={onEnter}>
             Enter Compound Clip
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => onStartRename(composition)}>
+          <ContextMenuItem onClick={onStartRename}>
             Rename
           </ContextMenuItem>
           <ContextMenuItem
-            onClick={() => onDelete(composition)}
+            onClick={onDelete}
             className="text-destructive focus:text-destructive"
           >
             Delete
@@ -494,8 +522,8 @@ function CompositionCard({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-          <div
-            data-composition-id={composition.id}
+        <div
+          data-composition-id={composition.id}
           draggable={!dragDisabled && !isEditing}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
@@ -566,14 +594,14 @@ function CompositionCard({
       </ContextMenuTrigger>
 
       <ContextMenuContent>
-        <ContextMenuItem onClick={() => onEnter(composition)}>
+        <ContextMenuItem onClick={onEnter}>
           Enter Compound Clip
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onStartRename(composition)}>
+        <ContextMenuItem onClick={onStartRename}>
           Rename
         </ContextMenuItem>
         <ContextMenuItem
-          onClick={() => onDelete(composition)}
+          onClick={onDelete}
           className="text-destructive focus:text-destructive"
         >
           Delete
@@ -581,4 +609,4 @@ function CompositionCard({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});

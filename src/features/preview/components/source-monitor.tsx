@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
-import { X, Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, Repeat, ArrowLeftToLine, ArrowRightToLine, XCircle, ArrowDownToLine, Replace } from 'lucide-react';
+import { X, Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, ChevronDown, Repeat, ArrowLeftToLine, ArrowRightToLine, XCircle, ArrowDownToLine, Replace } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
+  getTrackKind,
   performInsertEdit,
   performOverwriteEdit,
   resolveSourceEditTrackTargets,
@@ -17,14 +26,24 @@ import {
 } from '@/features/preview/deps/player-context';
 import { SourceComposition } from './source-composition';
 import { resolveMediaUrl } from '../utils/media-resolver';
-import { useMediaLibraryStore, getMediaType } from '@/features/preview/deps/media-library';
+import {
+  clampDraggedSourceInPoint,
+  clampDraggedSourceOutPoint,
+  getExclusiveSourceOutPoint,
+  getSourcePointPercent,
+  getSourceStripPointFromRatio,
+  shiftSourceIoRange,
+} from '../utils/source-io';
+import { useMediaLibraryStore, getMediaType, proxyService } from '@/features/preview/deps/media-library';
 import { useItemsStore } from '@/features/preview/deps/timeline-store';
 import { useSettingsStore } from '@/features/preview/deps/settings';
 import { useEditorStore } from '@/shared/state/editor';
 import { useSourcePlayerStore } from '@/shared/state/source-player';
 import { useSelectionStore } from '@/shared/state/selection';
 import { EDITOR_LAYOUT_CSS_VALUES, getEditorLayout } from '@/shared/ui/editor-layout';
+import { cn } from '@/shared/ui/cn';
 import { formatTimecodeCompact } from '@/utils/time-utils';
+import type { TimelineTrack } from '@/types/timeline';
 
 interface SourceMonitorProps {
   mediaId: string;
@@ -35,6 +54,93 @@ interface SourceMonitorProps {
 }
 
 const SOURCE_MONITOR_RESIZE_MIN_UPDATE_MS = 33;
+
+function isPatchDestinationTrack(
+  track: TimelineTrack | null,
+  kind: 'video' | 'audio',
+): track is TimelineTrack {
+  if (!track || track.locked) {
+    return false;
+  }
+
+  const trackKind = getTrackKind(track);
+  return trackKind === kind || trackKind === null;
+}
+
+function getPatchDestinationOptions(
+  tracks: TimelineTrack[],
+  kind: 'video' | 'audio',
+): TimelineTrack[] {
+  return [...tracks]
+    .filter((track) => isPatchDestinationTrack(track, kind))
+    .sort((a, b) => a.order - b.order);
+}
+
+function SourcePatchDestinationPicker({
+  kind,
+  label,
+  selectedTrackId,
+  options,
+  onSelectTrack,
+}: {
+  kind: 'video' | 'audio';
+  label: string;
+  selectedTrackId: string | null;
+  options: TimelineTrack[];
+  onSelectTrack: (trackId: string | null) => void;
+}) {
+  const kindLabel = kind === 'video' ? 'Video' : 'Audio';
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            'h-6 min-w-[3.75rem] justify-between gap-1 px-1.5 font-mono text-[10px]',
+            !selectedTrackId && 'text-muted-foreground',
+          )}
+          aria-label={`Choose ${kindLabel.toLowerCase()} source patch destination`}
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-40">
+        <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-normal">
+          {kindLabel} destination
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          className={cn(
+            'font-mono text-xs',
+            selectedTrackId === null && 'bg-accent text-accent-foreground',
+          )}
+          onSelect={() => onSelectTrack(null)}
+        >
+          Auto
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {options.length > 0 ? options.map((track) => (
+          <DropdownMenuItem
+            key={track.id}
+            className={cn(
+              'font-mono text-xs',
+              selectedTrackId === track.id && 'bg-accent text-accent-foreground',
+            )}
+            onSelect={() => onSelectTrack(track.id)}
+          >
+            {track.name}
+          </DropdownMenuItem>
+        )) : (
+          <DropdownMenuItem disabled className="font-mono text-xs">
+            Create on edit
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export const SourceMonitor = memo(function SourceMonitor({
   mediaId,
@@ -51,9 +157,23 @@ export const SourceMonitor = memo(function SourceMonitor({
     if (!interactive) return;
     useSourcePlayerStore.getState().setCurrentMediaId(mediaId);
     return () => {
-      useSourcePlayerStore.getState().setCurrentMediaId(null);
+      // In React Strict Mode the source monitor may mount, clean up, and remount
+      // while still representing the same open panel. Only release ownership once
+      // the editor has actually switched away from this source monitor.
+      if (useEditorStore.getState().sourcePreviewMediaId === mediaId) {
+        return;
+      }
+      useSourcePlayerStore.getState().releaseCurrentMediaId(mediaId);
     };
   }, [interactive, mediaId]);
+
+  useEffect(() => {
+    if (!interactive || !media || !media.mimeType.startsWith('video/')) {
+      return;
+    }
+
+    proxyService.prioritizeProxy(mediaId);
+  }, [interactive, media, mediaId]);
 
   // Auto-close if media is deleted
   useEffect(() => {
@@ -275,13 +395,13 @@ function SourceMonitorInner({
     } else if (e.key === 'o' || e.key === 'O') {
       e.preventDefault();
       e.stopPropagation();
-      setOutPoint(currentSourceFrame);
+      setOutPoint(getExclusiveSourceOutPoint(currentSourceFrame, durationInFrames));
     } else if (e.altKey && (e.key === 'x' || e.key === 'X')) {
       e.preventDefault();
       e.stopPropagation();
       clearInOutPoints();
     }
-  }, [interactive]);
+  }, [durationInFrames, interactive]);
 
   const handleMouseEnter = useCallback(() => {
     if (!interactive) return;
@@ -402,6 +522,10 @@ function SourcePlaybackControls({
   const activeTrackId = useSelectionStore((s) => s.activeTrackId);
   const sourcePatchVideoEnabled = useEditorStore((s) => s.sourcePatchVideoEnabled);
   const sourcePatchAudioEnabled = useEditorStore((s) => s.sourcePatchAudioEnabled);
+  const sourcePatchVideoTrackId = useEditorStore((s) => s.sourcePatchVideoTrackId);
+  const sourcePatchAudioTrackId = useEditorStore((s) => s.sourcePatchAudioTrackId);
+  const setSourcePatchVideoTrackId = useEditorStore((s) => s.setSourcePatchVideoTrackId);
+  const setSourcePatchAudioTrackId = useEditorStore((s) => s.setSourcePatchAudioTrackId);
   const toggleSourcePatchVideoEnabled = useEditorStore((s) => s.toggleSourcePatchVideoEnabled);
   const toggleSourcePatchAudioEnabled = useEditorStore((s) => s.toggleSourcePatchAudioEnabled);
   const currentFrameRef = useRef(clock.currentFrame);
@@ -551,22 +675,22 @@ function SourcePlaybackControls({
   }, []);
 
   // I/O marker positions as percentages
-  const inPct = interactive && inPoint !== null && lastFrame > 0 ? (inPoint / lastFrame) * 100 : null;
-  const outPct = interactive && outPoint !== null && lastFrame > 0 ? (outPoint / lastFrame) * 100 : null;
+  const inPct = interactive ? getSourcePointPercent(inPoint, durationInFrames) : null;
+  const outPct = interactive ? getSourcePointPercent(outPoint, durationInFrames) : null;
 
   // Draggable I/O handles + range
   const ioStripRef = useRef<HTMLDivElement>(null);
   const ioDragCleanupRef = useRef<(() => void) | null>(null);
 
-  const frameFromStripX = useCallback(
+  const pointFromStripX = useCallback(
     (clientX: number) => {
       const strip = ioStripRef.current;
       if (!strip) return 0;
       const rect = strip.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      return Math.round(pct * lastFrame);
+      if (rect.width <= 0) return 0;
+      return getSourceStripPointFromRatio((clientX - rect.left) / rect.width, durationInFrames);
     },
-    [lastFrame],
+    [durationInFrames],
   );
 
   const handleIODragStart = useCallback(
@@ -578,13 +702,13 @@ function SourcePlaybackControls({
 
       const store = useSourcePlayerStore.getState;
       const onMove = (ev: MouseEvent) => {
-        const frame = frameFromStripX(ev.clientX);
+        const point = pointFromStripX(ev.clientX);
         if (type === 'in') {
           const out = store().outPoint;
-          store().setInPoint(out !== null ? Math.min(frame, out) : frame);
+          store().setInPoint(clampDraggedSourceInPoint(point, out, lastFrame));
         } else {
           const inp = store().inPoint;
-          store().setOutPoint(inp !== null ? Math.max(frame, inp) : frame);
+          store().setOutPoint(clampDraggedSourceOutPoint(point, inp, durationInFrames));
         }
       };
       const onUp = () => {
@@ -597,7 +721,7 @@ function SourcePlaybackControls({
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [frameFromStripX],
+    [durationInFrames, lastFrame, pointFromStripX],
   );
 
   const handleIORangeDragStart = useCallback(
@@ -608,18 +732,16 @@ function SourcePlaybackControls({
       const startIn = store().inPoint;
       const startOut = store().outPoint;
       if (startIn === null || startOut === null) return;
-      const startFrame = frameFromStripX(e.clientX);
+      const startPoint = pointFromStripX(e.clientX);
       const originalCursor = document.body.style.cursor;
       document.body.style.cursor = 'grabbing';
 
       const onMove = (ev: MouseEvent) => {
-        const nowFrame = frameFromStripX(ev.clientX);
-        const delta = nowFrame - startFrame;
-        const nextIn = Math.max(0, Math.min(lastFrame, startIn + delta));
-        const nextOut = Math.max(0, Math.min(lastFrame, startOut + delta));
-        if (nextIn > nextOut) return;
-        store().setInPoint(nextIn);
-        store().setOutPoint(nextOut);
+        const nowPoint = pointFromStripX(ev.clientX);
+        const delta = nowPoint - startPoint;
+        const nextRange = shiftSourceIoRange(startIn, startOut, delta, durationInFrames);
+        store().setInPoint(nextRange.inPoint);
+        store().setOutPoint(nextRange.outPoint);
       };
       const onUp = () => {
         document.body.style.cursor = originalCursor;
@@ -631,7 +753,7 @@ function SourcePlaybackControls({
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [frameFromStripX, lastFrame],
+    [durationInFrames, pointFromStripX],
   );
 
   useEffect(() => {
@@ -648,8 +770,10 @@ function SourcePlaybackControls({
   }, []);
 
   const handleMarkOut = useCallback(() => {
-    useSourcePlayerStore.getState().setOutPoint(currentFrameRef.current);
-  }, []);
+    useSourcePlayerStore.getState().setOutPoint(
+      getExclusiveSourceOutPoint(currentFrameRef.current, durationInFrames),
+    );
+  }, [durationInFrames]);
 
   const handleClearIO = useCallback(() => {
     useSourcePlayerStore.getState().clearInOutPoints();
@@ -676,46 +800,85 @@ function SourcePlaybackControls({
     () => (activeTrackId ? tracks.find((track) => track.id === activeTrackId) ?? null : null),
     [activeTrackId, tracks],
   );
+  const selectedVideoTrack = useMemo(
+    () => (sourcePatchVideoTrackId ? tracks.find((track) => track.id === sourcePatchVideoTrackId) ?? null : null),
+    [sourcePatchVideoTrackId, tracks],
+  );
+  const selectedAudioTrack = useMemo(
+    () => (sourcePatchAudioTrackId ? tracks.find((track) => track.id === sourcePatchAudioTrackId) ?? null : null),
+    [sourcePatchAudioTrackId, tracks],
+  );
+  const videoDestinationOptions = useMemo(
+    () => getPatchDestinationOptions(tracks, 'video'),
+    [tracks],
+  );
+  const audioDestinationOptions = useMemo(
+    () => getPatchDestinationOptions(tracks, 'audio'),
+    [tracks],
+  );
+
+  useEffect(() => {
+    if (!interactive || !activeTrackId || !activeTrack || activeTrack.locked) {
+      return;
+    }
+
+    const currentState = useEditorStore.getState();
+    const hasVideoDestination = isPatchDestinationTrack(
+      tracks.find((track) => track.id === currentState.sourcePatchVideoTrackId) ?? null,
+      'video',
+    );
+    const hasAudioDestination = isPatchDestinationTrack(
+      tracks.find((track) => track.id === currentState.sourcePatchAudioTrackId) ?? null,
+      'audio',
+    );
+    const activeTrackKind = getTrackKind(activeTrack);
+    if (activeTrackKind === 'audio') {
+      if (!hasAudioDestination) {
+        setSourcePatchAudioTrackId(activeTrackId);
+      }
+      return;
+    }
+
+    if (activeTrackKind === 'video') {
+      if (!hasVideoDestination) {
+        setSourcePatchVideoTrackId(activeTrackId);
+      }
+      return;
+    }
+
+    if (mediaType === 'audio' && !hasAudioDestination) {
+      setSourcePatchAudioTrackId(activeTrackId);
+    } else if (mediaType !== 'audio' && !hasVideoDestination) {
+      setSourcePatchVideoTrackId(activeTrackId);
+    }
+  }, [
+    activeTrack,
+    activeTrackId,
+    interactive,
+    mediaType,
+    setSourcePatchAudioTrackId,
+    setSourcePatchVideoTrackId,
+    tracks,
+  ]);
 
   const patchTargetPreview = useMemo(() => {
-    if (!activeTrackId || !activeTrack) {
-      return {
-        videoTargetName: null,
-        audioTargetName: null,
-        status: 'Select target track',
-      };
-    }
-
-    if (activeTrack.locked) {
-      return {
-        videoTargetName: null,
-        audioTargetName: null,
-        status: 'Target track locked',
-      };
-    }
-
     const resolvedTargets = resolveSourceEditTrackTargets({
       tracks,
       activeTrackId,
+      preferredVideoTrackId: sourcePatchVideoTrackId,
+      preferredAudioTrackId: sourcePatchAudioTrackId,
       mediaType,
       hasAudio,
       patchVideo: sourcePatchVideoEnabled,
       patchAudio: sourcePatchAudioEnabled,
-      preferredTrackHeight: activeTrack.height,
+      preferredTrackHeight: activeTrack?.height ?? selectedVideoTrack?.height ?? selectedAudioTrack?.height ?? tracks[0]?.height ?? 64,
     });
 
     if (!resolvedTargets) {
-      let status = 'Enable V and/or A';
-      if (mediaType === 'audio' && !sourcePatchAudioEnabled) {
-        status = 'Enable A';
-      } else if ((mediaType === 'video' || mediaType === 'image') && !sourcePatchVideoEnabled && !hasAudio) {
-        status = 'Enable V';
-      }
-
       return {
         videoTargetName: null,
         audioTargetName: null,
-        status,
+        status: null,
       };
     }
 
@@ -734,10 +897,17 @@ function SourcePlaybackControls({
     activeTrackId,
     hasAudio,
     mediaType,
+    selectedAudioTrack,
+    selectedVideoTrack,
     sourcePatchAudioEnabled,
+    sourcePatchAudioTrackId,
     sourcePatchVideoEnabled,
+    sourcePatchVideoTrackId,
     tracks,
   ]);
+
+  const videoDestinationLabel = selectedVideoTrack?.name ?? patchTargetPreview.videoTargetName ?? 'Auto';
+  const audioDestinationLabel = selectedAudioTrack?.name ?? patchTargetPreview.audioTargetName ?? 'Auto';
 
   const videoPatchTooltip = patchTargetPreview.videoTargetName
     ? `Video Source Patch On -> ${patchTargetPreview.videoTargetName}`
@@ -978,6 +1148,13 @@ function SourcePlaybackControls({
                   </TooltipTrigger>
                   <TooltipContent side="top">{videoPatchTooltip}</TooltipContent>
                 </Tooltip>
+                <SourcePatchDestinationPicker
+                  kind="video"
+                  label={videoDestinationLabel}
+                  selectedTrackId={sourcePatchVideoTrackId}
+                  options={videoDestinationOptions}
+                  onSelectTrack={setSourcePatchVideoTrackId}
+                />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -995,13 +1172,16 @@ function SourcePlaybackControls({
                   </TooltipTrigger>
                   <TooltipContent side="top">{audioPatchTooltip}</TooltipContent>
                 </Tooltip>
+                <SourcePatchDestinationPicker
+                  kind="audio"
+                  label={audioDestinationLabel}
+                  selectedTrackId={sourcePatchAudioTrackId}
+                  options={audioDestinationOptions}
+                  onSelectTrack={setSourcePatchAudioTrackId}
+                />
               </div>
-              {/* V/A target labels — hidden at narrow widths, info still in tooltips */}
-              {patchTargetPreview.status ? (
-                <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap hidden @min-[560px]:inline">
-                  {patchTargetPreview.status}
-                </span>
-              ) : (
+              {/* V/A preview labels: hidden at narrow widths, info still in menus/tooltips */}
+              {patchTargetPreview.videoTargetName || patchTargetPreview.audioTargetName ? (
                 <div className="hidden @min-[560px]:flex items-center gap-1 text-[10px] font-mono text-muted-foreground whitespace-nowrap">
                   {patchTargetPreview.videoTargetName ? (
                     <span className="rounded border border-border/70 bg-secondary/60 px-1.5 py-0.5">
@@ -1014,7 +1194,7 @@ function SourcePlaybackControls({
                     </span>
                   ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
             <div className="w-px h-4 bg-border mx-0.5" />
             <Tooltip>

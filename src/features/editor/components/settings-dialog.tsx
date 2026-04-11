@@ -42,6 +42,7 @@ import {
 import {
   useMediaLibraryStore,
   getSharedProxyKey,
+  getMediaTranscriptionModelOptions,
   importProxyService,
   importMediaLibraryService,
   importThumbnailGenerator,
@@ -60,12 +61,18 @@ import {
   getWhisperLanguageSelectValue,
   getWhisperLanguageSettingValue,
   WHISPER_LANGUAGE_OPTIONS,
-  WHISPER_MODEL_OPTIONS,
   WHISPER_QUANTIZATION_OPTIONS,
 } from '@/shared/utils/whisper-settings';
 import type { MediaTranscriptModel, MediaTranscriptQuantization } from '@/types/storage';
+import {
+  PROXY_GENERATION_MODE_OPTIONS,
+  PROXY_GENERATION_RESOLUTION_OPTIONS,
+  type ProxyGenerationMode,
+  type ProxyGenerationResolution,
+} from '@/config/proxy-generation';
 
 const log = createLogger('SettingsDialog');
+const TRANSCRIPTION_MODEL_OPTIONS = getMediaTranscriptionModelOptions();
 
 const SETTINGS_SECTIONS = [
   { id: 'general', label: 'General', icon: Settings2 },
@@ -212,6 +219,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
   const autoSaveInterval = useSettingsStore((s) => s.autoSaveInterval);
   const maxUndoHistory = useSettingsStore((s) => s.maxUndoHistory);
+  const proxyGenerationMode = useSettingsStore((s) => s.proxyGenerationMode);
+  const proxyGenerationResolution = useSettingsStore((s) => s.proxyGenerationResolution);
   const defaultWhisperModel = useSettingsStore((s) => s.defaultWhisperModel);
   const defaultWhisperQuantization = useSettingsStore((s) => s.defaultWhisperQuantization);
   const defaultWhisperLanguage = useSettingsStore((s) => s.defaultWhisperLanguage);
@@ -219,6 +228,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const resetToDefaults = useSettingsStore((s) => s.resetToDefaults);
 
   const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
+  const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus);
 
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('general');
   const [clearState, setClearState] = useState<'idle' | 'clearing' | 'done'>('idle');
@@ -226,6 +236,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [regenState, setRegenState] = useState<'idle' | 'working' | 'done'>('idle');
   const [regenProgress, setRegenProgress] = useState('');
   const [proxyState, setProxyState] = useState<'idle' | 'clearing' | 'done'>('idle');
+  const [proxyGenerateState, setProxyGenerateState] = useState<'idle' | 'queueing' | 'done'>('idle');
 
   const handleClearCache = useCallback(async () => {
     setClearState('clearing');
@@ -272,8 +283,63 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }, [mediaItems]);
 
+  const handleGenerateMissingProxies = useCallback(async () => {
+    setProxyGenerateState('queueing');
+
+    try {
+      const [{ proxyService }, { mediaLibraryService }] = await Promise.all([
+        importProxyService(),
+        importMediaLibraryService(),
+      ]);
+
+      const queuedItems = mediaItems.filter((media) => {
+        if (!proxyService.canGenerateProxy(media.mimeType)) {
+          return false;
+        }
+
+        const sharedProxyKey = getSharedProxyKey(media);
+        if (proxyService.hasProxy(media.id, sharedProxyKey)) {
+          return false;
+        }
+
+        const status = useMediaLibraryStore.getState().proxyStatus.get(media.id);
+        return status !== 'ready' && status !== 'generating';
+      });
+
+      queuedItems.forEach((media) => {
+        const sharedProxyKey = getSharedProxyKey(media);
+        proxyService.setProxyKey(media.id, sharedProxyKey);
+        proxyService.generateProxy(
+          media.id,
+          () => mediaLibraryService.getMediaFile(media.id),
+          media.width,
+          media.height,
+          sharedProxyKey,
+          { priority: 'background' }
+        );
+      });
+
+      setProxyGenerateState('done');
+      setTimeout(() => setProxyGenerateState('idle'), 2000);
+    } catch (err) {
+      log.error('Failed to queue missing proxies', err);
+      setProxyGenerateState('idle');
+    }
+  }, [mediaItems]);
+
   const defaultWhisperLanguageValue = getWhisperLanguageSelectValue(defaultWhisperLanguage);
   const defaultWhisperQuantizationOption = getWhisperQuantizationOption(defaultWhisperQuantization);
+  const proxyGenerationModeOption = PROXY_GENERATION_MODE_OPTIONS.find(
+    (option) => option.value === proxyGenerationMode
+  ) ?? PROXY_GENERATION_MODE_OPTIONS[0];
+  const proxyGenerationResolutionOption = PROXY_GENERATION_RESOLUTION_OPTIONS.find(
+    (option) => option.value === proxyGenerationResolution
+  ) ?? PROXY_GENERATION_RESOLUTION_OPTIONS[0];
+  const missingProjectProxyCount = mediaItems.filter((media) => (
+    media.mimeType.startsWith('video/')
+    && proxyStatus.get(media.id) !== 'ready'
+    && proxyStatus.get(media.id) !== 'generating'
+  )).length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -407,7 +473,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {WHISPER_MODEL_OPTIONS.map((option) => (
+                        {TRANSCRIPTION_MODEL_OPTIONS.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -466,6 +532,82 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               {activeSection === 'storage' && (
                 <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Automatic Proxy Generation</Label>
+                    <Select
+                      value={proxyGenerationMode}
+                      onValueChange={(value) =>
+                        setSetting('proxyGenerationMode', value as ProxyGenerationMode)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROXY_GENERATION_MODE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {proxyGenerationModeOption.description} Manual proxy generation stays available from any video clip menu.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Smart Proxy Threshold</Label>
+                    <Select
+                      value={proxyGenerationResolution}
+                      onValueChange={(value) =>
+                        setSetting('proxyGenerationResolution', value as ProxyGenerationResolution)
+                      }
+                      disabled={proxyGenerationMode !== 'smart'}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROXY_GENERATION_RESOLUTION_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {proxyGenerationMode === 'smart'
+                        ? `${proxyGenerationResolutionOption.description} Clips with heavier audio codecs are still proxied automatically.`
+                        : 'Only used when Automatic Proxy Generation is set to Smart.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">Generate Missing Proxies</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Queue proxy generation for video in this project that does not have one yet
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-28 gap-1.5"
+                      onClick={handleGenerateMissingProxies}
+                      disabled={proxyGenerateState !== 'idle' || missingProjectProxyCount === 0}
+                    >
+                      {proxyGenerateState === 'queueing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      {proxyGenerateState === 'done' && <Check className="w-3.5 h-3.5" />}
+                      {proxyGenerateState === 'idle' && <Film className="w-3.5 h-3.5" />}
+                      {proxyGenerateState === 'queueing'
+                        ? 'Queueing...'
+                        : proxyGenerateState === 'done'
+                          ? 'Queued'
+                          : missingProjectProxyCount > 0
+                            ? `Generate (${missingProjectProxyCount})`
+                            : 'Up to date'}
+                    </Button>
+                  </div>
+                  <Separator className="bg-white/8" />
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-sm">Clear Project Cache</Label>

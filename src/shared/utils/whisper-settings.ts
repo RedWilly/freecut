@@ -1,26 +1,21 @@
 import type { MediaTranscriptModel, MediaTranscriptQuantization } from '@/types/storage';
+import {
+  BROWSER_WHISPER_MODEL_LABELS,
+  BROWSER_WHISPER_MODEL_OPTIONS,
+  DEFAULT_BROWSER_WHISPER_MODEL,
+} from './browser-whisper-models';
 
-export const DEFAULT_WHISPER_MODEL: MediaTranscriptModel = 'whisper-tiny';
+export const DEFAULT_WHISPER_MODEL: MediaTranscriptModel = DEFAULT_BROWSER_WHISPER_MODEL;
 export const DEFAULT_WHISPER_QUANTIZATION: MediaTranscriptQuantization = 'hybrid';
 export const DEFAULT_WHISPER_LANGUAGE = '';
 export const WHISPER_AUTO_LANGUAGE_VALUE = 'auto';
 
-export const WHISPER_MODEL_LABELS: Record<MediaTranscriptModel, string> = {
-  'whisper-tiny': 'Tiny',
-  'whisper-base': 'Base',
-  'whisper-small': 'Small',
-  'whisper-large': 'Large v3 Turbo',
-};
+export const WHISPER_MODEL_LABELS: Record<MediaTranscriptModel, string> = BROWSER_WHISPER_MODEL_LABELS;
 
 export const WHISPER_MODEL_OPTIONS: ReadonlyArray<{
   value: MediaTranscriptModel;
   label: string;
-}> = [
-  { value: 'whisper-tiny', label: WHISPER_MODEL_LABELS['whisper-tiny'] },
-  { value: 'whisper-base', label: WHISPER_MODEL_LABELS['whisper-base'] },
-  { value: 'whisper-small', label: WHISPER_MODEL_LABELS['whisper-small'] },
-  { value: 'whisper-large', label: WHISPER_MODEL_LABELS['whisper-large'] },
-];
+}> = BROWSER_WHISPER_MODEL_OPTIONS;
 
 export const WHISPER_QUANTIZATION_OPTIONS: ReadonlyArray<{
   value: MediaTranscriptQuantization;

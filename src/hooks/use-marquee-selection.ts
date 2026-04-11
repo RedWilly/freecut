@@ -31,6 +31,11 @@ export interface MarqueeItem {
   getBoundingRect: () => Rect | null;
 }
 
+interface ResolvedMarqueeItem {
+  id: string;
+  rect: Rect | null;
+}
+
 /**
  * Options for marquee selection
  */
@@ -47,6 +52,9 @@ interface UseMarqueeSelectionOptions {
   /** Callback when selection changes */
   onSelectionChange?: (selectedIds: string[]) => void;
 
+  /** Optional callback for lightweight live preview updates during drag */
+  onPreviewSelectionChange?: (selectedIds: string[]) => void;
+
   /** Whether marquee selection is enabled */
   enabled?: boolean;
 
@@ -55,6 +63,12 @@ interface UseMarqueeSelectionOptions {
 
   /** Minimum drag distance before marquee activates (pixels) */
   threshold?: number;
+
+  /** Defer onSelectionChange until mouseup; useful when live commits are too expensive */
+  commitSelectionOnMouseUp?: boolean;
+
+  /** When deferring selection, still publish throttled live commits at this cadence */
+  liveCommitThrottleMs?: number;
 }
 
 /**
@@ -96,6 +110,20 @@ export function getMarqueeRect(
   };
 }
 
+function areStringListsEqual(previous: readonly string[], next: readonly string[]): boolean {
+  if (previous.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /**
  * Reusable marquee selection hook
  *
@@ -130,9 +158,12 @@ export function useMarqueeSelection({
   hitAreaRef,
   items,
   onSelectionChange,
+  onPreviewSelectionChange,
   enabled = true,
   appendMode = false,
   threshold = 5,
+  commitSelectionOnMouseUp = false,
+  liveCommitThrottleMs = commitSelectionOnMouseUp ? 33 : 0,
 }: UseMarqueeSelectionOptions) {
   // Use hitAreaRef for bounds checking if provided, otherwise fall back to containerRef
   const boundsRef = hitAreaRef ?? containerRef;
@@ -149,19 +180,27 @@ export function useMarqueeSelection({
     currentY: 0,
   });
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const isDraggingRef = useRef(false);
   const hasMovedRef = useRef(false);
   const onSelectionChangeRef = useRef(onSelectionChange);
+  const onPreviewSelectionChangeRef = useRef(onPreviewSelectionChange);
   const prevSelectedIdsRef = useRef<string[]>([]);
   const rafIdRef = useRef<number | null>(null);
   const itemsRef = useRef(items);
   const enabledRef = useRef(enabled);
+  const resolvedItemsRef = useRef<ResolvedMarqueeItem[] | null>(null);
+  const liveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingLiveCommitIdsRef = useRef<string[] | null>(null);
+  const lastLiveCommitTimeRef = useRef(0);
 
   // Keep refs up to date
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
   }, [onSelectionChange]);
+
+  useEffect(() => {
+    onPreviewSelectionChangeRef.current = onPreviewSelectionChange;
+  }, [onPreviewSelectionChange]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -170,6 +209,51 @@ export function useMarqueeSelection({
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
+
+  const captureResolvedItems = useCallback(() => {
+    resolvedItemsRef.current = itemsRef.current.map((item) => ({
+      id: item.id,
+      rect: item.getBoundingRect(),
+    }));
+  }, []);
+
+  const flushLiveCommit = useCallback((ids: string[]) => {
+    if (liveCommitTimeoutRef.current !== null) {
+      clearTimeout(liveCommitTimeoutRef.current);
+      liveCommitTimeoutRef.current = null;
+    }
+    pendingLiveCommitIdsRef.current = null;
+    lastLiveCommitTimeRef.current = performance.now();
+    onSelectionChangeRef.current?.(ids);
+  }, []);
+
+  const scheduleLiveCommit = useCallback((ids: string[]) => {
+    if (!commitSelectionOnMouseUp || liveCommitThrottleMs <= 0) {
+      return false;
+    }
+
+    const now = performance.now();
+    const elapsed = now - lastLiveCommitTimeRef.current;
+
+    if (elapsed >= liveCommitThrottleMs) {
+      flushLiveCommit(ids);
+      return true;
+    }
+
+    pendingLiveCommitIdsRef.current = ids;
+    if (liveCommitTimeoutRef.current === null) {
+      liveCommitTimeoutRef.current = setTimeout(() => {
+        const pendingIds = pendingLiveCommitIdsRef.current;
+        if (!pendingIds) {
+          liveCommitTimeoutRef.current = null;
+          return;
+        }
+        flushLiveCommit(pendingIds);
+      }, Math.max(0, liveCommitThrottleMs - elapsed));
+    }
+
+    return true;
+  }, [commitSelectionOnMouseUp, flushLiveCommit, liveCommitThrottleMs]);
 
   // Update selection based on current marquee intersection (uses refs for performance)
   const updateSelectionFromRefs = useCallback(() => {
@@ -188,28 +272,29 @@ export function useMarqueeSelection({
     );
 
     // Find all items that currently intersect with marquee
-    const currentItems = itemsRef.current;
+    const currentItems = resolvedItemsRef.current ?? itemsRef.current.map((item) => ({
+      id: item.id,
+      rect: item.getBoundingRect(),
+    }));
     const intersectingIds = currentItems
       .filter((item) => {
-        const itemRect = item.getBoundingRect();
-        if (!itemRect) return false;
-        return rectIntersects(marqueeRect, itemRect);
+        if (!item.rect) return false;
+        return rectIntersects(marqueeRect, item.rect);
       })
       .map((item) => item.id);
 
     // Only update if selection changed
     const prevIds = prevSelectedIdsRef.current;
-    const hasChanged =
-      intersectingIds.length !== prevIds.length ||
-      intersectingIds.some((id) => !prevIds.includes(id)) ||
-      prevIds.some((id) => !intersectingIds.includes(id));
-
-    if (hasChanged) {
-      setSelectedIds(intersectingIds);
+    if (!areStringListsEqual(prevIds, intersectingIds)) {
       prevSelectedIdsRef.current = intersectingIds;
-      onSelectionChangeRef.current?.(intersectingIds);
+      if (commitSelectionOnMouseUp) {
+        onPreviewSelectionChangeRef.current?.(intersectingIds);
+        scheduleLiveCommit(intersectingIds);
+      } else {
+        onSelectionChangeRef.current?.(intersectingIds);
+      }
     }
-  }, [containerRef]);
+  }, [commitSelectionOnMouseUp, containerRef, scheduleLiveCommit]);
 
   // Handle mouse down - start marquee
   // Using useEffectEvent so changes to enabled, appendMode don't re-register listeners
@@ -266,6 +351,13 @@ export function useMarqueeSelection({
     isDraggingRef.current = true;
     hasMovedRef.current = false;
     prevSelectedIdsRef.current = []; // Reset accumulated selection for new marquee
+    resolvedItemsRef.current = null;
+    pendingLiveCommitIdsRef.current = null;
+    if (liveCommitTimeoutRef.current !== null) {
+      clearTimeout(liveCommitTimeoutRef.current);
+      liveCommitTimeoutRef.current = null;
+    }
+    lastLiveCommitTimeRef.current = 0;
 
     // Calculate position relative to the container (for marquee display)
     const container = containerRef.current;
@@ -278,8 +370,10 @@ export function useMarqueeSelection({
 
     // Clear selection if not in append mode
     if (!appendMode) {
-      setSelectedIds([]);
       prevSelectedIdsRef.current = [];
+      if (commitSelectionOnMouseUp) {
+        onPreviewSelectionChangeRef.current?.([]);
+      }
     }
   });
 
@@ -306,6 +400,7 @@ export function useMarqueeSelection({
 
       if (deltaX > threshold || deltaY > threshold) {
         hasMovedRef.current = true;
+        captureResolvedItems();
         // Activate marquee (triggers one re-render)
         setMarqueeState({
           active: true,
@@ -360,6 +455,7 @@ export function useMarqueeSelection({
     isDraggingRef.current = false;
     hasMovedRef.current = false;
     marqueeRef.current = { startX: 0, startY: 0, currentX: 0, currentY: 0 };
+    resolvedItemsRef.current = null;
 
     setMarqueeState({
       active: false,
@@ -371,6 +467,14 @@ export function useMarqueeSelection({
 
     // Only prevent background click if an actual marquee drag happened
     if (wasActualDrag) {
+      if (commitSelectionOnMouseUp) {
+        onPreviewSelectionChangeRef.current?.([]);
+        if (liveCommitThrottleMs > 0) {
+          flushLiveCommit(prevSelectedIdsRef.current);
+        } else {
+          onSelectionChangeRef.current?.(prevSelectedIdsRef.current);
+        }
+      }
       e.stopPropagation();
       e.preventDefault();
 
@@ -378,6 +482,15 @@ export function useMarqueeSelection({
       requestAnimationFrame(() => {
         marqueeJustFinished = false;
       });
+    } else if (commitSelectionOnMouseUp) {
+      if (liveCommitThrottleMs > 0) {
+        if (liveCommitTimeoutRef.current !== null) {
+          clearTimeout(liveCommitTimeoutRef.current);
+          liveCommitTimeoutRef.current = null;
+        }
+        pendingLiveCommitIdsRef.current = null;
+      }
+      onPreviewSelectionChangeRef.current?.([]);
     }
   });
 
@@ -386,6 +499,9 @@ export function useMarqueeSelection({
     return () => {
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
+      }
+      if (liveCommitTimeoutRef.current !== null) {
+        clearTimeout(liveCommitTimeoutRef.current);
       }
     };
   }, []);
@@ -409,6 +525,6 @@ export function useMarqueeSelection({
 
   return {
     marqueeState,
-    selectedIds,
+    selectedIds: prevSelectedIdsRef.current,
   };
 }

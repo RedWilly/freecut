@@ -144,6 +144,14 @@ body.timeline-item-drag-cursor-not-allowed * {
   cursor: not-allowed !important;
 }
 
+/* Route external media/composition drags through track drop zones instead of clip-level drag handlers. */
+body.timeline-external-media-drag [data-item-id],
+body.timeline-external-media-drag [data-item-id] *,
+body.timeline-external-media-drag [data-transition-id],
+body.timeline-external-media-drag [data-transition-id] * {
+  pointer-events: none !important;
+}
+
 /* Subtle diagonal stripes for expanded group tracks */
 .bg-group-stripes {
   background-image: repeating-linear-gradient(

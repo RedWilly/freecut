@@ -1,4 +1,4 @@
-import { memo, ReactNode, useMemo } from 'react';
+import { memo, ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,14 +10,23 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import type { LazyContextMenuEventInit } from '../../utils/lazy-context-menu';
+import {
+  captureContextMenuEventInit,
+  replayContextMenuEvent,
+} from '../../utils/lazy-context-menu';
 import { useSelectionStore } from '@/shared/state/selection';
 import { PROPERTY_LABELS, type AnimatableProperty } from '@/types/keyframe';
 import type { PropertyKeyframes } from '@/types/keyframe';
 import type { MediaTranscriptModel } from '@/types/storage';
 import {
-  WHISPER_MODEL_LABELS,
-  WHISPER_MODEL_OPTIONS,
-} from '@/shared/utils/whisper-settings';
+  getMediaTranscriptionModelLabel,
+  getMediaTranscriptionModelOptions,
+} from '@/features/timeline/deps/media-transcription-service';
+import {
+  getSceneVerificationModelOptions,
+  type VerificationModel,
+} from '@/features/timeline/deps/analysis';
 import { formatHotkeyBinding } from '@/config/hotkeys';
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings';
 
@@ -68,12 +77,17 @@ interface ItemContextMenuProps {
   /** Whether scene detection is available for this item */
   canDetectScenes?: boolean;
   isDetectingScenes?: boolean;
-  onDetectScenes?: (method: 'histogram' | 'optical-flow') => void;
+  onDetectScenes?: (method: 'histogram' | 'optical-flow', verificationModel?: VerificationModel) => void;
 }
 
 /**
  * Context menu for timeline items
  * Provides delete, ripple delete, join, and keyframe clearing operations
+ *
+ * Uses lazy mounting: the heavy Radix ContextMenu tree (10+ provider components)
+ * is only mounted after the user first right-clicks. Before that, children render
+ * directly without the ContextMenu wrapper, eliminating thousands of unnecessary
+ * re-renders during drag operations (119 items × ~10 Radix components each).
  */
 export const ItemContextMenu = memo(function ItemContextMenu({
   children,
@@ -116,6 +130,155 @@ export const ItemContextMenu = memo(function ItemContextMenu({
   isDetectingScenes,
   onDetectScenes,
 }: ItemContextMenuProps) {
+  // Lazy mount: defer the full Radix ContextMenu tree until first right-click.
+  // This eliminates ~10 Radix provider components per item from the render tree
+  // during normal operation (drag, playback, scrub), where context menus are never
+  // needed. With 100+ items, this avoids millions of unnecessary re-renders.
+  const [hasActivated, setHasActivated] = useState(false);
+  const [pendingActivation, setPendingActivation] = useState<LazyContextMenuEventInit | null>(null);
+
+  if (!hasActivated) {
+    return (
+      <ItemContextMenuTriggerOnly
+        trackLocked={trackLocked}
+        onActivate={(eventInit) => {
+          setPendingActivation(eventInit);
+          setHasActivated(true);
+        }}
+      >
+        {children}
+      </ItemContextMenuTriggerOnly>
+    );
+  }
+
+  return (
+    <ItemContextMenuFull
+      trackLocked={trackLocked}
+      isSelected={isSelected}
+      canJoinSelected={canJoinSelected}
+      hasJoinableLeft={hasJoinableLeft}
+      hasJoinableRight={hasJoinableRight}
+      closerEdge={closerEdge}
+      keyframedProperties={keyframedProperties}
+      canLinkSelected={canLinkSelected}
+      canUnlinkSelected={canUnlinkSelected}
+      onJoinSelected={onJoinSelected}
+      onJoinLeft={onJoinLeft}
+      onJoinRight={onJoinRight}
+      onLinkSelected={onLinkSelected}
+      onUnlinkSelected={onUnlinkSelected}
+      onRippleDelete={onRippleDelete}
+      onDelete={onDelete}
+      onClearAllKeyframes={onClearAllKeyframes}
+      onClearPropertyKeyframes={onClearPropertyKeyframes}
+      onBentoLayout={onBentoLayout}
+      isVideoItem={isVideoItem}
+      playheadInBounds={playheadInBounds}
+      onFreezeFrame={onFreezeFrame}
+      canGenerateCaptions={canGenerateCaptions}
+      canRegenerateCaptions={canRegenerateCaptions}
+      isGeneratingCaptions={isGeneratingCaptions}
+      defaultCaptionModel={defaultCaptionModel}
+      onGenerateCaptions={onGenerateCaptions}
+      onRegenerateCaptions={onRegenerateCaptions}
+      isCompositionItem={isCompositionItem}
+      onEnterComposition={onEnterComposition}
+      onDissolveComposition={onDissolveComposition}
+      canCreatePreComp={canCreatePreComp}
+      onCreatePreComp={onCreatePreComp}
+      isTextItem={isTextItem}
+      onGenerateAudioFromText={onGenerateAudioFromText}
+      canDetectScenes={canDetectScenes}
+      isDetectingScenes={isDetectingScenes}
+      onDetectScenes={onDetectScenes}
+      pendingActivation={pendingActivation}
+      onPendingActivationHandled={() => setPendingActivation(null)}
+    >
+      {children}
+    </ItemContextMenuFull>
+  );
+});
+
+/**
+ * Lightweight placeholder: just renders children with a contextmenu listener.
+ * No Radix providers, no Popper, no Menu — zero overhead.
+ */
+const ItemContextMenuTriggerOnly = memo(function ItemContextMenuTriggerOnly({
+  children,
+  trackLocked,
+  onActivate,
+}: {
+  children: ReactNode;
+  trackLocked: boolean;
+  onActivate: (eventInit: LazyContextMenuEventInit) => void;
+}) {
+  return (
+    <span
+      data-item-context-anchor
+      style={{ display: 'contents' }}
+      onContextMenu={(e) => {
+        if (trackLocked) return;
+        // Prevent the browser default so Radix can handle it after activation
+        e.preventDefault();
+        onActivate(captureContextMenuEventInit(e.nativeEvent));
+      }}
+    >
+      {children}
+    </span>
+  );
+});
+
+/**
+ * Full Radix ContextMenu tree — only mounted after first right-click activation.
+ */
+const ItemContextMenuFull = memo(function ItemContextMenuFull({
+  children,
+  trackLocked,
+  isSelected,
+  canJoinSelected,
+  hasJoinableLeft,
+  hasJoinableRight,
+  closerEdge,
+  keyframedProperties,
+  canLinkSelected,
+  canUnlinkSelected,
+  onJoinSelected,
+  onJoinLeft,
+  onJoinRight,
+  onLinkSelected,
+  onUnlinkSelected,
+  onRippleDelete,
+  onDelete,
+  onClearAllKeyframes,
+  onClearPropertyKeyframes,
+  onBentoLayout,
+  isVideoItem,
+  playheadInBounds,
+  onFreezeFrame,
+  canGenerateCaptions,
+  canRegenerateCaptions,
+  isGeneratingCaptions,
+  defaultCaptionModel,
+  onGenerateCaptions,
+  onRegenerateCaptions,
+  isCompositionItem,
+  onEnterComposition,
+  onDissolveComposition,
+  canCreatePreComp,
+  onCreatePreComp,
+  isTextItem,
+  onGenerateAudioFromText,
+  canDetectScenes,
+  isDetectingScenes,
+  onDetectScenes,
+  pendingActivation,
+  onPendingActivationHandled,
+}: Omit<ItemContextMenuProps, 'children'> & {
+  children: ReactNode;
+  pendingActivation?: LazyContextMenuEventInit | null;
+  onPendingActivationHandled?: () => void;
+}) {
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
   const hotkeys = useResolvedHotkeys();
   const selectedCount = useSelectionStore((s) => s.selectedItemIds.length);
   // Filter to only properties that actually have keyframes
@@ -123,17 +286,36 @@ export const ItemContextMenu = memo(function ItemContextMenu({
     if (!keyframedProperties) return [];
     return keyframedProperties.filter(p => p.keyframes.length > 0);
   }, [keyframedProperties]);
+  const transcriptionModelOptions = useMemo(
+    () => getMediaTranscriptionModelOptions(),
+    [],
+  );
   const explicitCaptionModelOptions = useMemo(
-    () => WHISPER_MODEL_OPTIONS.filter((option) => option.value !== defaultCaptionModel),
-    [defaultCaptionModel]
+    () => transcriptionModelOptions.filter((option) => option.value !== defaultCaptionModel),
+    [defaultCaptionModel, transcriptionModelOptions],
+  );
+  const sceneVerificationModelOptions = useMemo(
+    () => getSceneVerificationModelOptions(),
+    [],
   );
 
   const hasKeyframes = propertiesWithKeyframes.length > 0;
 
+  useLayoutEffect(() => {
+    if (!pendingActivation || !triggerRef.current) {
+      return;
+    }
+
+    replayContextMenuEvent(triggerRef.current, pendingActivation);
+    onPendingActivationHandled?.();
+  }, [onPendingActivationHandled, pendingActivation]);
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={trackLocked}>
-        {children}
+        <span ref={triggerRef} data-item-context-anchor style={{ display: 'contents' }}>
+          {children}
+        </span>
       </ContextMenuTrigger>
       <ContextMenuContent>
         {/* Join options - show based on which edge is closer */}
@@ -247,9 +429,14 @@ export const ItemContextMenu = memo(function ItemContextMenu({
                   <ContextMenuItem onClick={() => onDetectScenes('histogram')}>
                     Fast (Histogram)
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onDetectScenes('optical-flow')}>
-                    AI (Gemma)
-                  </ContextMenuItem>
+                  {sceneVerificationModelOptions.map((option) => (
+                    <ContextMenuItem
+                      key={option.value}
+                      onClick={() => onDetectScenes('optical-flow', option.value)}
+                    >
+                      {`AI (${option.label})`}
+                    </ContextMenuItem>
+                  ))}
                 </ContextMenuSubContent>
               </ContextMenuSub>
             )}
@@ -281,7 +468,7 @@ export const ItemContextMenu = memo(function ItemContextMenu({
                     {defaultCaptionModel && (
                       <>
                         <ContextMenuItem onClick={() => onGenerateCaptions(defaultCaptionModel)}>
-                          {`Default (${WHISPER_MODEL_LABELS[defaultCaptionModel]})`}
+                          {`Default (${getMediaTranscriptionModelLabel(defaultCaptionModel)})`}
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                       </>
@@ -304,7 +491,7 @@ export const ItemContextMenu = memo(function ItemContextMenu({
                       {defaultCaptionModel && (
                         <>
                           <ContextMenuItem onClick={() => onRegenerateCaptions(defaultCaptionModel)}>
-                            {`Default (${WHISPER_MODEL_LABELS[defaultCaptionModel]})`}
+                            {`Default (${getMediaTranscriptionModelLabel(defaultCaptionModel)})`}
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                         </>

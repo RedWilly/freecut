@@ -1,15 +1,18 @@
 import { create } from 'zustand';
 
-interface TimelineViewportState {
+interface TimelineViewportMeasurements {
   scrollLeft: number;
   scrollTop: number;
   viewportWidth: number;
   viewportHeight: number;
+}
+
+interface TimelineViewportState extends TimelineViewportMeasurements {
   pendingScrollToFrame: number | null;
 }
 
 interface TimelineViewportActions {
-  setViewport: (next: TimelineViewportState) => void;
+  setViewport: (next: TimelineViewportMeasurements) => void;
   /** Request the timeline container to scroll so `frame` is visible. */
   requestScrollToFrame: (frame: number) => void;
   clearScrollToFrame: () => void;
@@ -39,12 +42,12 @@ export function _resetViewportThrottle() {
   }
 }
 
-function isOnlyScrollChange(prev: TimelineViewportState, next: TimelineViewportState): boolean {
+function isOnlyScrollChange(prev: TimelineViewportMeasurements, next: TimelineViewportMeasurements): boolean {
   return Math.abs(prev.viewportWidth - next.viewportWidth) <= EPSILON
     && Math.abs(prev.viewportHeight - next.viewportHeight) <= EPSILON;
 }
 
-function hasMeaningfulChange(prev: TimelineViewportState, next: TimelineViewportState): boolean {
+function hasMeaningfulChange(prev: TimelineViewportMeasurements, next: TimelineViewportMeasurements): boolean {
   return Math.abs(prev.scrollLeft - next.scrollLeft) > EPSILON
     || Math.abs(prev.scrollTop - next.scrollTop) > EPSILON
     || Math.abs(prev.viewportWidth - next.viewportWidth) > EPSILON
@@ -80,7 +83,7 @@ export const useTimelineViewportStore = create<TimelineViewportState & TimelineV
 
       // Scroll-only: throttle to SCROLL_THROTTLE_MS to reduce subscriber churn
       const now = performance.now();
-      pendingViewport = next;
+      pendingViewport = { ...next, pendingScrollToFrame: current.pendingScrollToFrame };
 
       if (now - lastScrollUpdate >= SCROLL_THROTTLE_MS) {
         lastScrollUpdate = now;

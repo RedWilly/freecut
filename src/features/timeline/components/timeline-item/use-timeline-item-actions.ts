@@ -7,11 +7,13 @@ import { useSelectionStore } from '@/shared/state/selection';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog';
 import { useTtsGenerateDialogStore } from '@/shared/state/tts-generate-dialog';
-import { WHISPER_MODEL_LABELS } from '@/shared/utils/whisper-settings';
 import { isLocalInferenceCancellationError } from '@/shared/state/local-inference';
 import { getTranscriptionOverallPercent } from '@/shared/utils/transcription-progress';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
-import { mediaTranscriptionService } from '@/features/timeline/deps/media-transcription-service';
+import {
+  getMediaTranscriptionModelLabel,
+  mediaTranscriptionService,
+} from '@/features/timeline/deps/media-transcription-service';
 import { useTimelineStore } from '../../stores/timeline-store';
 import { useItemsStore } from '../../stores/items-store';
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store';
@@ -31,7 +33,11 @@ import {
 } from '../../stores/timeline-item-overlay-store';
 import { canJoinMultipleItems } from '../../utils/clip-utils';
 import { canLinkSelection, hasLinkedItems } from '../../utils/linked-items';
-import { detectScenes } from '../../deps/analysis';
+import {
+  detectScenes,
+  getSceneVerificationModelLabel,
+  type VerificationModel,
+} from '../../deps/analysis';
 import { resolveMediaUrl } from '../../deps/media-library-resolver';
 import { useBentoLayoutDialogStore } from '../bento-layout-dialog-store';
 
@@ -245,10 +251,10 @@ export function useTimelineItemActions({
         const successMessage = replaceExisting
           ? result.insertedItemCount > 0
             ? result.removedItemCount > 0
-              ? `Replaced ${result.removedItemCount} caption clip${result.removedItemCount === 1 ? '' : 's'} with ${result.insertedItemCount} updated clip${result.insertedItemCount === 1 ? '' : 's'} for this segment using ${WHISPER_MODEL_LABELS[model]}`
-              : `Regenerated ${result.insertedItemCount} caption clip${result.insertedItemCount === 1 ? '' : 's'} for this segment using ${WHISPER_MODEL_LABELS[model]}`
-            : `Removed ${result.removedItemCount} generated caption clip${result.removedItemCount === 1 ? '' : 's'} for this segment using ${WHISPER_MODEL_LABELS[model]}`
-          : `Inserted ${result.insertedItemCount} caption clip${result.insertedItemCount === 1 ? '' : 's'} for this segment with ${WHISPER_MODEL_LABELS[model]}`;
+              ? `Replaced ${result.removedItemCount} caption clip${result.removedItemCount === 1 ? '' : 's'} with ${result.insertedItemCount} updated clip${result.insertedItemCount === 1 ? '' : 's'} for this segment using ${getMediaTranscriptionModelLabel(model)}`
+              : `Regenerated ${result.insertedItemCount} caption clip${result.insertedItemCount === 1 ? '' : 's'} for this segment using ${getMediaTranscriptionModelLabel(model)}`
+            : `Removed ${result.removedItemCount} generated caption clip${result.removedItemCount === 1 ? '' : 's'} for this segment using ${getMediaTranscriptionModelLabel(model)}`
+          : `Inserted ${result.insertedItemCount} caption clip${result.insertedItemCount === 1 ? '' : 's'} for this segment with ${getMediaTranscriptionModelLabel(model)}`;
 
         store.showNotification({
           type: 'success',
@@ -330,7 +336,10 @@ export function useTimelineItemActions({
     };
   }, []);
 
-  const handleDetectScenes = useCallback((method: 'histogram' | 'optical-flow') => {
+  const handleDetectScenes = useCallback((
+    method: 'histogram' | 'optical-flow',
+    verificationModel?: VerificationModel,
+  ) => {
     if (item.type !== 'video' || !item.mediaId || isBroken) {
       return;
     }
@@ -383,12 +392,16 @@ export function useTimelineItemActions({
         const mediaFps = media?.fps ?? currentFps;
         const cuts = await detectScenes(video, currentFps, {
           method,
+          verificationModel,
           mediaId,
           signal: abortController.signal,
           onProgress: (progress) => {
+            const modelLabel = progress.verificationModel
+              ? getSceneVerificationModelLabel(progress.verificationModel)
+              : 'AI';
             const stageLabels = {
               'optical-flow': `Analyzing ${method === 'histogram' ? 'frames' : 'motion'} (${progress.sceneCuts} candidates)`,
-              'loading-model': `Loading Gemma model (${progress.percent.toFixed(0)}%)`,
+              'loading-model': `Loading ${modelLabel} model (${progress.percent.toFixed(0)}%)`,
               'verifying': `Verifying cuts (${progress.sceneCuts}/${progress.totalSamples} confirmed)`,
             };
             const label = stageLabels[progress.stage ?? 'optical-flow'];

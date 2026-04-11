@@ -1,4 +1,4 @@
-import { WHISPER_MODEL_LABELS } from '@/shared/utils/whisper-settings';
+import { BROWSER_WHISPER_MODEL_LABELS } from '@/shared/utils/browser-whisper-models';
 import type { MediaTranscriptModel, MediaTranscriptQuantization } from '@/types/storage';
 
 const MIB = 1024 * 1024;
@@ -31,7 +31,7 @@ export function estimateWhisperRuntimeBytes(
   quantization: MediaTranscriptQuantization,
 ): number {
   return Math.round(
-    WHISPER_MODEL_BASE_ESTIMATES_MIB[model] * QUANTIZATION_MULTIPLIER[quantization] * MIB
+    WHISPER_MODEL_BASE_ESTIMATES_MIB[model] * QUANTIZATION_MULTIPLIER[quantization] * MIB,
   );
 }
 
@@ -39,5 +39,5 @@ export function formatWhisperRuntimeModelLabel(
   model: MediaTranscriptModel,
   quantization: MediaTranscriptQuantization,
 ): string {
-  return `${WHISPER_MODEL_LABELS[model]} · ${QUANTIZATION_LABELS[quantization]}`;
+  return `${BROWSER_WHISPER_MODEL_LABELS[model]} · ${QUANTIZATION_LABELS[quantization]}`;
 }

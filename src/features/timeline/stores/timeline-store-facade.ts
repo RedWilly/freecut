@@ -21,6 +21,10 @@ import { useKeyframesStore } from './keyframes-store';
 import { useMarkersStore } from './markers-store';
 import { useTimelineSettingsStore } from './timeline-settings-store';
 import { useTimelineCommandStore } from './timeline-command-store';
+import {
+  getEffectiveTimelineMaxFrame,
+  sanitizeInOutPoints,
+} from '../utils/in-out-points';
 
 // Actions
 import * as timelineActions from './timeline-actions';
@@ -258,6 +262,25 @@ function createTimelineStoreFacade(): TimelineStoreFacade {
   useTimelineStore.getState = getSnapshot;
 
   useTimelineStore.setState = (partial: Partial<TimelineState>) => {
+    const nextItems = 'items' in partial && partial.items !== undefined
+      ? partial.items
+      : useItemsStore.getState().items;
+    const nextFps = 'fps' in partial && partial.fps !== undefined
+      ? partial.fps
+      : useTimelineSettingsStore.getState().fps;
+    const markersState = useMarkersStore.getState();
+    const nextInPoint = 'inPoint' in partial
+      ? partial.inPoint ?? null
+      : markersState.inPoint;
+    const nextOutPoint = 'outPoint' in partial
+      ? partial.outPoint ?? null
+      : markersState.outPoint;
+    const shouldSanitizeInOutPoints =
+      ('inPoint' in partial)
+      || ('outPoint' in partial)
+      || ('items' in partial && partial.items !== undefined)
+      || ('fps' in partial && partial.fps !== undefined);
+
     // Map partial state to appropriate domain stores
     if ('items' in partial && partial.items !== undefined) {
       useItemsStore.getState().setItems(partial.items);
@@ -274,12 +297,6 @@ function createTimelineStoreFacade(): TimelineStoreFacade {
     if ('markers' in partial && partial.markers !== undefined) {
       useMarkersStore.getState().setMarkers(partial.markers);
     }
-    if ('inPoint' in partial) {
-      useMarkersStore.getState().setInPoint(partial.inPoint ?? null);
-    }
-    if ('outPoint' in partial) {
-      useMarkersStore.getState().setOutPoint(partial.outPoint ?? null);
-    }
     if ('fps' in partial && partial.fps !== undefined) {
       useTimelineSettingsStore.getState().setFps(partial.fps);
     }
@@ -291,6 +308,15 @@ function createTimelineStoreFacade(): TimelineStoreFacade {
     }
     if ('isDirty' in partial && partial.isDirty !== undefined) {
       useTimelineSettingsStore.getState().setIsDirty(partial.isDirty);
+    }
+    if (shouldSanitizeInOutPoints) {
+      const sanitizedInOutPoints = sanitizeInOutPoints({
+        inPoint: nextInPoint,
+        outPoint: nextOutPoint,
+        maxFrame: getEffectiveTimelineMaxFrame(nextItems, nextFps),
+      });
+      useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint);
+      useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint);
     }
   };
 

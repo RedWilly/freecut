@@ -1,11 +1,25 @@
+import {
+  SCENE_VERIFICATION_MODEL_CACHE_DESCRIPTIONS,
+  SCENE_VERIFICATION_MODEL_CACHE_MATCH_FRAGMENTS,
+  SCENE_VERIFICATION_MODEL_IDS,
+  SCENE_VERIFICATION_MODEL_LABELS,
+  type SceneVerificationModelId,
+} from './scene-verification-models';
+import {
+  MUSICGEN_MODEL_IDS,
+  getMusicgenModelDefinition,
+  type MusicgenModelId,
+} from './musicgen-models';
+
 export const TRANSFORMERS_CACHE_NAME = 'transformers-cache';
 export const KITTEN_TTS_MODEL_CACHE_NAME = 'kitten-tts-models';
 export const LOCAL_MODEL_CACHE_STORAGE_LABEL = 'Browser cache storage';
 const WHISPER_CACHE_MATCH_FRAGMENTS = ['/onnx-community/whisper-'];
-const GEMMA_CACHE_MATCH_FRAGMENTS = ['/onnx-community/gemma-4-e4b-it-onnx/'];
+
+export type LocalModelCacheId = 'whisper' | SceneVerificationModelId | MusicgenModelId | 'kitten-tts';
 
 export interface LocalModelCacheDefinition {
-  id: 'whisper' | 'gemma' | 'kitten-tts';
+  id: LocalModelCacheId;
   label: string;
   description: string;
   cacheName: string;
@@ -22,6 +36,26 @@ export interface LocalModelCacheSummary extends LocalModelCacheDefinition {
   inspectionState: 'ready' | 'timed-out' | 'error';
 }
 
+const SCENE_VERIFICATION_MODEL_CACHE_DEFINITIONS: LocalModelCacheDefinition[] = SCENE_VERIFICATION_MODEL_IDS.map((id) => ({
+  id,
+  label: SCENE_VERIFICATION_MODEL_LABELS[id],
+  description: SCENE_VERIFICATION_MODEL_CACHE_DESCRIPTIONS[id],
+  cacheName: TRANSFORMERS_CACHE_NAME,
+  matchPathFragments: [...SCENE_VERIFICATION_MODEL_CACHE_MATCH_FRAGMENTS[id]],
+}));
+
+const MUSICGEN_MODEL_CACHE_DEFINITIONS: LocalModelCacheDefinition[] = MUSICGEN_MODEL_IDS.map((id) => {
+  const definition = getMusicgenModelDefinition(id);
+
+  return {
+    id,
+    label: definition.label,
+    description: `${definition.label} model files and tokenizers.`,
+    cacheName: TRANSFORMERS_CACHE_NAME,
+    matchPathFragments: [...definition.cacheMatchFragments],
+  };
+});
+
 export const LOCAL_MODEL_CACHE_DEFINITIONS: LocalModelCacheDefinition[] = [
   {
     id: 'whisper',
@@ -30,13 +64,8 @@ export const LOCAL_MODEL_CACHE_DEFINITIONS: LocalModelCacheDefinition[] = [
     cacheName: TRANSFORMERS_CACHE_NAME,
     matchPathFragments: WHISPER_CACHE_MATCH_FRAGMENTS,
   },
-  {
-    id: 'gemma',
-    label: 'Gemma',
-    description: 'Gemma scene-detection ONNX model files and processor assets.',
-    cacheName: TRANSFORMERS_CACHE_NAME,
-    matchPathFragments: GEMMA_CACHE_MATCH_FRAGMENTS,
-  },
+  ...SCENE_VERIFICATION_MODEL_CACHE_DEFINITIONS,
+  ...MUSICGEN_MODEL_CACHE_DEFINITIONS,
   {
     id: 'kitten-tts',
     label: 'Kitten TTS',

@@ -1,2 +1,6 @@
-export { detectScenes } from '@/infrastructure/analysis';
-export type { SceneCut, SceneDetectionProgress } from '@/infrastructure/analysis';
+export {
+  detectScenes,
+  getSceneVerificationModelLabel,
+  getSceneVerificationModelOptions,
+} from '@/infrastructure/analysis';
+export type { SceneCut, SceneDetectionProgress, VerificationModel } from '@/infrastructure/analysis';

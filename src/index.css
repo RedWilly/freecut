@@ -260,6 +260,20 @@
   }
 }
 
+.timeline-marquee-preview {
+  box-shadow: inset 0 0 0 1px oklch(var(--primary));
+}
+
+[data-media-id].media-marquee-preview > * {
+  border-color: oklch(var(--primary));
+  box-shadow: 0 0 0 1px oklch(var(--primary) / 0.2);
+}
+
+[data-composition-id].composition-marquee-preview {
+  border-color: oklch(0.65 0.2 300);
+  box-shadow: 0 0 0 1px oklch(0.65 0.2 300 / 0.2);
+}
+
 @keyframes slideInLeft {
   from {
     transform: translateX(-10px);
@@ -322,4 +336,3 @@
 .animate-shimmer {
   animation: shimmer 2s ease-in-out infinite;
 }
-

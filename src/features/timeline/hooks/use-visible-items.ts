@@ -69,13 +69,14 @@ function computeVisibleItemsSnapshot(trackId: string): VisibleItemsSnapshot {
   const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState();
   const pixelsPerSecond = getCullingPixelsPerSecond(useZoomStore.getState());
   const { fps } = useTimelineSettingsStore.getState();
-  const items = useItemsStore.getState().itemsByTrackId[trackId];
+  const itemsState = useItemsStore.getState();
+  const items = itemsState.itemsByTrackId[trackId];
   const transitions = getTrackVisibleTransitions(trackId);
   const visibleFrameRange = getVisibleFrameRange(scrollLeft, viewportWidth, pixelsPerSecond, fps);
   const visibleItems = getVisibleItemsForRange(items, visibleFrameRange);
   const visibleTransitions = getVisibleTransitionsForRange(
     transitions,
-    items,
+    itemsState.itemById,
     visibleItems,
     visibleFrameRange
   );
@@ -106,7 +107,8 @@ export function useVisibleItems(trackId: string) {
     const apply = () => {
       const cullingPixelsPerSecond = getCullingPixelsPerSecond(useZoomStore.getState());
       const { fps } = useTimelineSettingsStore.getState();
-      const items = useItemsStore.getState().itemsByTrackId[trackId];
+      const itemsState = useItemsStore.getState();
+      const items = itemsState.itemsByTrackId[trackId];
       const transitions = getTrackVisibleTransitions(trackId);
       const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState();
       const newRange = getVisibleFrameRange(scrollLeft, viewportWidth, cullingPixelsPerSecond, fps);
@@ -139,7 +141,7 @@ export function useVisibleItems(trackId: string) {
       const visibleItems = getVisibleItemsForRange(items, newRange);
       const visibleTransitions = getVisibleTransitionsForRange(
         transitions,
-        items,
+        itemsState.itemById,
         visibleItems,
         newRange
       );
@@ -161,14 +163,34 @@ export function useVisibleItems(trackId: string) {
       apply();
     };
 
+    const handleItemsChange = (
+      state: ReturnType<typeof useItemsStore.getState>,
+      previousState: ReturnType<typeof useItemsStore.getState>,
+    ) => {
+      if (state.itemsByTrackId[trackId] === previousState.itemsByTrackId[trackId]) {
+        return;
+      }
+      apply();
+    };
+
+    const handleTransitionsChange = (
+      state: ReturnType<typeof useTransitionsStore.getState>,
+      previousState: ReturnType<typeof useTransitionsStore.getState>,
+    ) => {
+      if (state.transitionsByTrackId[trackId] === previousState.transitionsByTrackId[trackId]) {
+        return;
+      }
+      apply();
+    };
+
     apply();
 
     const unsubscribers = [
       useTimelineViewportStore.subscribe(apply),
       useZoomStore.subscribe(applyZoom),
       useTimelineSettingsStore.subscribe(apply),
-      useItemsStore.subscribe(apply),
-      useTransitionsStore.subscribe(apply),
+      useItemsStore.subscribe(handleItemsChange),
+      useTransitionsStore.subscribe(handleTransitionsChange),
     ];
 
     return () => {
@@ -218,15 +240,11 @@ function getVisibleItemsForRange(
 
 function getVisibleTransitionsForRange(
   transitions: Transition[] | undefined,
-  items: TimelineItem[] | undefined,
+  itemById: Record<string, TimelineItem>,
   visibleItems: TimelineItem[],
   visibleFrameRange: VisibleFrameRange
 ): Transition[] {
   if (!transitions || transitions.length === 0) {
-    return EMPTY_TRANSITIONS;
-  }
-
-  if (!items || items.length === 0) {
     return EMPTY_TRANSITIONS;
   }
 
@@ -238,8 +256,8 @@ function getVisibleTransitionsForRange(
       return true;
     }
 
-    const leftClip = items.find((item) => item.id === transition.leftClipId);
-    const rightClip = items.find((item) => item.id === transition.rightClipId);
+    const leftClip = itemById[transition.leftClipId];
+    const rightClip = itemById[transition.rightClipId];
     if (!leftClip || !rightClip) {
       return false;
     }

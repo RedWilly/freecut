@@ -37,6 +37,7 @@ const mediaLibraryMocks = vi.hoisted(() => ({
   mediaById: {},
   setOrphanedClips: vi.fn(),
   openOrphanedClipsDialog: vi.fn(),
+  closeOrphanedClipsDialog: vi.fn(),
 }));
 
 vi.mock('@/infrastructure/storage/indexeddb', async (importOriginal) => {
@@ -249,6 +250,64 @@ describe('TimelineStoreFacade', () => {
     it('maps snapEnabled to settings store', () => {
       useTimelineStore.setState({ snapEnabled: false });
       expect(useTimelineSettingsStore.getState().snapEnabled).toBe(false);
+    });
+
+    it('clamps stale in/out points when setState receives an out-point beyond the timeline end', () => {
+      useItemsStore.getState().setItems([
+        {
+          id: 'item-1',
+          type: 'video',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 600,
+          label: 'clip.mp4',
+          src: 'blob:test',
+          mediaId: 'media-1',
+        },
+      ]);
+
+      useTimelineStore.setState({
+        inPoint: 120,
+        outPoint: 5000,
+      });
+
+      expect(useMarkersStore.getState().inPoint).toBe(120);
+      expect(useMarkersStore.getState().outPoint).toBe(600);
+    });
+
+    it('re-clamps existing in/out points when content shrinks through setState', () => {
+      useItemsStore.getState().setItems([
+        {
+          id: 'item-1',
+          type: 'video',
+          trackId: 'track-1',
+          from: 0,
+          durationInFrames: 600,
+          label: 'clip.mp4',
+          src: 'blob:test',
+          mediaId: 'media-1',
+        },
+      ]);
+      useMarkersStore.getState().setInPoint(120);
+      useMarkersStore.getState().setOutPoint(600);
+
+      useTimelineStore.setState({
+        items: [
+          {
+            id: 'item-1',
+            type: 'video',
+            trackId: 'track-1',
+            from: 0,
+            durationInFrames: 240,
+            label: 'shorter.mp4',
+            src: 'blob:test',
+            mediaId: 'media-1',
+          },
+        ],
+      });
+
+      expect(useMarkersStore.getState().inPoint).toBe(120);
+      expect(useMarkersStore.getState().outPoint).toBe(300);
     });
   });
 

@@ -315,7 +315,7 @@ const CustomDecoderPitchPreservedAudio: React.FC<CustomDecoderAudioProps> = ({
 
 /**
  * Custom decoder adapter for codecs that native media elements cannot decode
- * reliably (for example AC-3/E-AC-3 and PCM endian variants).
+ * or seek reliably (for example AC-3/E-AC-3, Vorbis, and PCM endian variants).
  *
  * - playbackRate === 1: use buffered WebAudio playback directly from decoded bins
  *   for fastest startup after refresh.

@@ -20,8 +20,8 @@ export interface DroppedMediaEntry {
 }
 
 interface DropLogger {
-  error: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
+  error: (message: string, ...args: unknown[]) => void;
+  warn: (message: string, ...args: unknown[]) => void;
 }
 
 interface DropNotifications {

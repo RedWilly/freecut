@@ -10,7 +10,10 @@ import { createLogger } from '@/shared/logging/logger';
 import type { MediaTranscript, MediaTranscriptModel } from '@/types/storage';
 import type { AudioItem, TextItem, TimelineItem, TimelineTrack, VideoItem } from '@/types/timeline';
 import type { TranscribeOptions } from '../transcription/types';
-import { BrowserTranscriber } from '../transcription/browser-transcriber';
+import {
+  getDefaultMediaTranscriptionAdapter,
+  getMediaTranscriptionModelLabel,
+} from '../transcription/registry';
 import { mediaLibraryService } from './media-library-service';
 import {
   buildCaptionTextItems,
@@ -45,7 +48,8 @@ interface InsertTranscriptAsCaptionsResult {
 }
 
 class MediaTranscriptionService {
-  private readonly transcriber = new BrowserTranscriber({
+  private readonly adapter = getDefaultMediaTranscriptionAdapter();
+  private readonly transcriber = this.adapter.createTranscriber({
     model: DEFAULT_MODEL,
     quantization: DEFAULT_QUANTIZATION,
   });
@@ -112,7 +116,7 @@ class MediaTranscriptionService {
     logger.info('Saved transcript', {
       mediaId,
       segments: transcript.segments.length,
-      model: transcript.model,
+      model: getMediaTranscriptionModelLabel(transcript.model),
     });
     return transcript;
   }

@@ -17,10 +17,10 @@ import { toast } from 'sonner';
 import { computeInitialTransform } from '../../utils/transform-init';
 import { execute, applyTransitionRepairs, getLogger } from './shared';
 import { resolveSourceEditTrackTargets } from '../../utils/source-edit-targeting';
+import { DEFAULT_TRACK_HEIGHT } from '../../constants';
 
 interface SourceEditContext {
   sourceMediaId: string;
-  activeTrackId: string;
   videoTrackId?: string;
   audioTrackId?: string;
   effectiveIn: number;
@@ -43,6 +43,8 @@ async function resolveSourceEditContext(): Promise<SourceEditContext | null> {
     sourcePreviewMediaId: sourceMediaId,
     sourcePatchVideoEnabled,
     sourcePatchAudioEnabled,
+    sourcePatchVideoTrackId,
+    sourcePatchAudioTrackId,
   } = useEditorStore.getState();
   if (!sourceMediaId) {
     toast.warning('Open a source in the source monitor first');
@@ -51,21 +53,17 @@ async function resolveSourceEditContext(): Promise<SourceEditContext | null> {
 
   const { inPoint, outPoint } = useSourcePlayerStore.getState();
   const { activeTrackId } = useSelectionStore.getState();
-  if (!activeTrackId) {
-    toast.warning('Select a target track in the timeline first');
-    return null;
-  }
-
   const tracks = useItemsStore.getState().tracks;
-  const track = tracks.find((t) => t.id === activeTrackId);
-  if (!track) {
-    getLogger().warn('Source edit: Active track not found');
-    return null;
-  }
-  if (track.locked) {
-    toast.warning('Target track is locked');
-    return null;
-  }
+  const activeTrack = activeTrackId
+    ? tracks.find((track) => track.id === activeTrackId) ?? null
+    : null;
+  const preferredVideoTrack = sourcePatchVideoTrackId
+    ? tracks.find((track) => track.id === sourcePatchVideoTrackId) ?? null
+    : null;
+  const preferredAudioTrack = sourcePatchAudioTrackId
+    ? tracks.find((track) => track.id === sourcePatchAudioTrackId) ?? null
+    : null;
+  const referenceTrack = activeTrack ?? preferredVideoTrack ?? preferredAudioTrack ?? null;
 
   const mediaItems = useMediaLibraryStore.getState().mediaItems;
   const media = mediaItems.find((m) => m.id === sourceMediaId);
@@ -104,11 +102,13 @@ async function resolveSourceEditContext(): Promise<SourceEditContext | null> {
   const resolvedTargets = resolveSourceEditTrackTargets({
     tracks,
     activeTrackId,
+    preferredVideoTrackId: sourcePatchVideoTrackId,
+    preferredAudioTrackId: sourcePatchAudioTrackId,
     mediaType,
     hasAudio,
     patchVideo: sourcePatchVideoEnabled,
     patchAudio: sourcePatchAudioEnabled,
-    preferredTrackHeight: track.height,
+    preferredTrackHeight: referenceTrack?.height ?? DEFAULT_TRACK_HEIGHT,
   });
   if (!resolvedTargets) {
     if (!sourcePatchVideoEnabled && !sourcePatchAudioEnabled) {
@@ -144,7 +144,6 @@ async function resolveSourceEditContext(): Promise<SourceEditContext | null> {
 
   return {
     sourceMediaId,
-    activeTrackId,
     videoTrackId: resolvedTargets.videoTrackId,
     audioTrackId: resolvedTargets.audioTrackId,
     effectiveIn,

@@ -14,6 +14,7 @@ interface TimelineItemDragParticipationParams {
   dragState: {
     isDragging: boolean;
     draggedItemIds: string[];
+    draggedItemIdSet?: Set<string>;
     isAltDrag?: boolean;
   } | null;
   gestureMode: TimelineItemGestureMode;
@@ -56,7 +57,7 @@ export function getTimelineItemDragParticipation({
   if (
     gestureMode !== 'none'
     || !dragState?.isDragging
-    || !dragState.draggedItemIds.includes(itemId)
+    || !(dragState.draggedItemIdSet ?? new Set(dragState.draggedItemIds)).has(itemId)
   ) {
     return 0;
   }

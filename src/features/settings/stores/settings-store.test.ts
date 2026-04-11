@@ -8,6 +8,9 @@ const DEFAULT_SETTINGS = {
   editorDensity: 'compact' as const,
   maxUndoHistory: 50,
   autoSaveInterval: 0,
+  proxyGenerationMode: 'smart' as const,
+  proxyGenerationResolution: '1080p' as const,
+  proxyRecommendedMediaIds: [] as string[],
   defaultWhisperModel: 'whisper-tiny' as const,
   defaultWhisperQuantization: 'hybrid' as const,
   defaultWhisperLanguage: '',
@@ -26,6 +29,9 @@ describe('settings-store', () => {
     expect(state.editorDensity).toBe('compact');
     expect(state.maxUndoHistory).toBe(50);
     expect(state.autoSaveInterval).toBe(0);
+    expect(state.proxyGenerationMode).toBe('smart');
+    expect(state.proxyGenerationResolution).toBe('1080p');
+    expect(state.proxyRecommendedMediaIds).toEqual([]);
     expect(state.defaultWhisperModel).toBe('whisper-tiny');
     expect(state.defaultWhisperQuantization).toBe('hybrid');
     expect(state.defaultWhisperLanguage).toBe('');
@@ -58,6 +64,25 @@ describe('settings-store', () => {
       expect(useSettingsStore.getState().autoSaveInterval).toBe(5);
     });
 
+    it('updates proxy generation defaults', () => {
+      useSettingsStore.getState().setSetting('proxyGenerationMode', 'all');
+      useSettingsStore.getState().setSetting('proxyGenerationResolution', '2160p');
+
+      expect(useSettingsStore.getState().proxyGenerationMode).toBe('all');
+      expect(useSettingsStore.getState().proxyGenerationResolution).toBe('2160p');
+    });
+
+    it('tracks runtime proxy recommendations without duplicates', () => {
+      useSettingsStore.getState().markProxyRecommended('media-1');
+      useSettingsStore.getState().markProxyRecommended('media-1');
+      useSettingsStore.getState().markProxyRecommended('media-2');
+
+      expect(useSettingsStore.getState().proxyRecommendedMediaIds).toEqual(['media-1', 'media-2']);
+
+      useSettingsStore.getState().clearProxyRecommended('media-1');
+      expect(useSettingsStore.getState().proxyRecommendedMediaIds).toEqual(['media-2']);
+    });
+
     it('does not affect other settings when changing one', () => {
       useSettingsStore.getState().setSetting('snapEnabled', false);
       expect(useSettingsStore.getState().showWaveforms).toBe(true);
@@ -80,6 +105,9 @@ describe('settings-store', () => {
       expect(state.snapEnabled).toBe(DEFAULT_SETTINGS.snapEnabled);
       expect(state.editorDensity).toBe(DEFAULT_SETTINGS.editorDensity);
       expect(state.autoSaveInterval).toBe(DEFAULT_SETTINGS.autoSaveInterval);
+      expect(state.proxyGenerationMode).toBe(DEFAULT_SETTINGS.proxyGenerationMode);
+      expect(state.proxyGenerationResolution).toBe(DEFAULT_SETTINGS.proxyGenerationResolution);
+      expect(state.proxyRecommendedMediaIds).toEqual(DEFAULT_SETTINGS.proxyRecommendedMediaIds);
       expect(state.defaultWhisperModel).toBe(DEFAULT_SETTINGS.defaultWhisperModel);
       expect(state.defaultWhisperLanguage).toBe(DEFAULT_SETTINGS.defaultWhisperLanguage);
     });

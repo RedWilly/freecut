@@ -4,6 +4,7 @@
  */
 
 export {
+  getTrackKind,
   performInsertEdit,
   performOverwriteEdit,
   resolveSourceEditTrackTargets,

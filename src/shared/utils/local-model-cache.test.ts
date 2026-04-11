@@ -6,6 +6,11 @@ import {
   KITTEN_TTS_MODEL_CACHE_NAME,
   TRANSFORMERS_CACHE_NAME,
 } from './local-model-cache';
+import {
+  SCENE_VERIFICATION_MODEL_IDS,
+  SCENE_VERIFICATION_MODEL_LABELS,
+} from './scene-verification-models';
+import { MUSICGEN_MODEL_IDS, MUSICGEN_MODEL_OPTIONS } from './musicgen-models';
 
 type CacheEntries = Record<string, Response>;
 type CacheMap = Record<string, CacheEntries>;
@@ -104,38 +109,67 @@ describe('local-model-cache', () => {
   it('inspects configured local model caches without creating missing caches', async () => {
     const summaries = await inspectAllLocalModelCaches();
 
-    expect(summaries).toEqual([
-      expect.objectContaining({
-        id: 'whisper',
-        cacheName: TRANSFORMERS_CACHE_NAME,
-        exists: true,
-        downloaded: true,
-        entryCount: 2,
-        totalBytes: 12,
-        sizeStatus: 'partial',
-        inspectionState: 'ready',
-      }),
-      expect.objectContaining({
-        id: 'gemma',
-        cacheName: TRANSFORMERS_CACHE_NAME,
-        exists: true,
-        downloaded: true,
-        entryCount: 1,
-        totalBytes: 9,
-        sizeStatus: 'exact',
-        inspectionState: 'ready',
-      }),
-      expect.objectContaining({
-        id: 'kitten-tts',
-        cacheName: KITTEN_TTS_MODEL_CACHE_NAME,
-        exists: true,
-        downloaded: true,
-        entryCount: 1,
-        totalBytes: 21,
-        sizeStatus: 'exact',
-        inspectionState: 'ready',
-      }),
+    expect(summaries).toHaveLength(5);
+    expect(summaries.map((summary) => summary.id)).toEqual([
+      'whisper',
+      ...SCENE_VERIFICATION_MODEL_IDS,
+      ...MUSICGEN_MODEL_IDS,
+      'kitten-tts',
     ]);
+
+    expect(summaries).toContainEqual(expect.objectContaining({
+      id: 'whisper',
+      cacheName: TRANSFORMERS_CACHE_NAME,
+      exists: true,
+      downloaded: true,
+      entryCount: 2,
+      totalBytes: 12,
+      sizeStatus: 'partial',
+      inspectionState: 'ready',
+    }));
+    expect(summaries).toContainEqual(expect.objectContaining({
+      id: 'gemma',
+      label: SCENE_VERIFICATION_MODEL_LABELS.gemma,
+      cacheName: TRANSFORMERS_CACHE_NAME,
+      exists: true,
+      downloaded: true,
+      entryCount: 1,
+      totalBytes: 9,
+      sizeStatus: 'exact',
+      inspectionState: 'ready',
+    }));
+    expect(summaries).toContainEqual(expect.objectContaining({
+      id: 'lfm',
+      label: SCENE_VERIFICATION_MODEL_LABELS.lfm,
+      cacheName: TRANSFORMERS_CACHE_NAME,
+      exists: false,
+      downloaded: false,
+      entryCount: 0,
+      totalBytes: 0,
+      sizeStatus: 'unavailable',
+      inspectionState: 'ready',
+    }));
+    expect(summaries).toContainEqual(expect.objectContaining({
+      id: 'musicgen-small',
+      label: MUSICGEN_MODEL_OPTIONS[0].label,
+      cacheName: TRANSFORMERS_CACHE_NAME,
+      exists: false,
+      downloaded: false,
+      entryCount: 0,
+      totalBytes: 0,
+      sizeStatus: 'unavailable',
+      inspectionState: 'ready',
+    }));
+    expect(summaries).toContainEqual(expect.objectContaining({
+      id: 'kitten-tts',
+      cacheName: KITTEN_TTS_MODEL_CACHE_NAME,
+      exists: true,
+      downloaded: true,
+      entryCount: 1,
+      totalBytes: 21,
+      sizeStatus: 'exact',
+      inspectionState: 'ready',
+    }));
   });
 
   it('clears only the matching model entries inside a shared cache bucket', async () => {
@@ -145,7 +179,12 @@ describe('local-model-cache', () => {
     await expect(clearLocalModelCache(whisperDefinition!)).resolves.toBe(true);
 
     const summaries = await inspectAllLocalModelCaches();
-    expect(summaries[0]).toEqual(expect.objectContaining({
+    const whisperSummary = summaries.find((summary) => summary.id === 'whisper');
+    const gemmaSummary = summaries.find((summary) => summary.id === 'gemma');
+    const lfmSummary = summaries.find((summary) => summary.id === 'lfm');
+    const musicgenSummary = summaries.find((summary) => summary.id === 'musicgen-small');
+
+    expect(whisperSummary).toEqual(expect.objectContaining({
       id: 'whisper',
       cacheName: TRANSFORMERS_CACHE_NAME,
       exists: false,
@@ -155,11 +194,23 @@ describe('local-model-cache', () => {
       sizeStatus: 'unavailable',
       inspectionState: 'ready',
     }));
-    expect(summaries[1]).toEqual(expect.objectContaining({
+    expect(gemmaSummary).toEqual(expect.objectContaining({
       id: 'gemma',
       downloaded: true,
       entryCount: 1,
       totalBytes: 9,
+    }));
+    expect(lfmSummary).toEqual(expect.objectContaining({
+      id: 'lfm',
+      downloaded: false,
+      entryCount: 0,
+      totalBytes: 0,
+    }));
+    expect(musicgenSummary).toEqual(expect.objectContaining({
+      id: 'musicgen-small',
+      downloaded: false,
+      entryCount: 0,
+      totalBytes: 0,
     }));
   });
 });

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Video, FileAudio, Image as ImageIcon, MoreVertical, Trash2, Loader2, Link2Off, RefreshCw, Zap, FileText, Play, Square } from 'lucide-react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
+import { Video, FileAudio, Image as ImageIcon, MoreVertical, Trash2, Loader2, Link2Off, RefreshCw, Zap, FileText, Play, Square, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,8 @@ import { proxyService } from '../services/proxy-service';
 import { mediaTranscriptionService } from '../services/media-transcription-service';
 import { isLocalInferenceCancellationError } from '@/shared/state/local-inference';
 import { useEditorStore } from '@/shared/state/editor';
+import { useSourcePlayerStore } from '@/shared/state/source-player';
+import { captionVideo, captionImage } from '../deps/analysis';
 import {
   getTranscriptionOverallPercent,
   getTranscriptionStageLabel,
@@ -46,11 +48,18 @@ interface MediaCardActionMenuProps {
   isTranscribing: boolean;
   hasTranscript: boolean;
   transcriptProgressLabel: string;
-  onGenerateProxy: (event: React.MouseEvent) => Promise<void>;
+  isTaggable: boolean;
+  isTagging: boolean;
+  hasTags: boolean;
+  onGenerateProxy: (event: React.MouseEvent) => void | Promise<void>;
+  onCancelProxy: (event: React.MouseEvent) => void | Promise<void>;
   onDeleteProxy: (event: React.MouseEvent) => Promise<void>;
   onGenerateTranscript: (event: React.MouseEvent) => Promise<void>;
+  onAnalyzeWithAI: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
 }
+
+const DEFAULT_CAPTION_SELECTION_DURATION_SEC = 3;
 
 function MediaCardActionMenuItems({
   isBroken,
@@ -63,9 +72,14 @@ function MediaCardActionMenuItems({
   isTranscribing,
   hasTranscript,
   transcriptProgressLabel,
+  isTaggable,
+  isTagging,
+  hasTags,
   onGenerateProxy,
+  onCancelProxy,
   onDeleteProxy,
   onGenerateTranscript,
+  onAnalyzeWithAI,
   onDelete,
 }: MediaCardActionMenuProps) {
   return (
@@ -95,15 +109,33 @@ function MediaCardActionMenuItems({
         </DropdownMenuItem>
       )}
       {proxyStatus === 'generating' && (
-        <DropdownMenuItem disabled>
-          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-          Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
-        </DropdownMenuItem>
+        <>
+          <DropdownMenuItem disabled>
+            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+            Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onCancelProxy}>
+            <Square className="w-3 h-3 mr-2" />
+            Cancel Proxy Generation
+          </DropdownMenuItem>
+        </>
       )}
       {hasProxy && (
         <DropdownMenuItem onClick={onDeleteProxy} className="text-destructive focus:text-destructive">
           <Trash2 className="w-3 h-3 mr-2" />
           Delete Proxy
+        </DropdownMenuItem>
+      )}
+      {isTaggable && !isBroken && !isTagging && (
+        <DropdownMenuItem onClick={onAnalyzeWithAI}>
+          <Sparkles className="w-3 h-3 mr-2" />
+          {hasTags ? 'Re-analyze with AI' : 'Analyze with AI'}
+        </DropdownMenuItem>
+      )}
+      {isTaggable && !isBroken && isTagging && (
+        <DropdownMenuItem disabled>
+          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+          Analyzing...
         </DropdownMenuItem>
       )}
       <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
@@ -114,12 +146,21 @@ function MediaCardActionMenuItems({
   );
 }
 
-export function MediaCard({ media, selected = false, isBroken = false, onSelect, onDoubleClick, onDelete, onRelink, viewMode = 'grid' }: MediaCardProps) {
+export const MediaCard = memo(function MediaCard({
+  media,
+  selected = false,
+  isBroken = false,
+  onSelect,
+  onDoubleClick,
+  onDelete,
+  onRelink,
+  viewMode = 'grid',
+}: MediaCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [skimProgress, setSkimProgress] = useState<number | null>(null);
-  const selectedMediaIds = useMediaLibraryStore((s) => s.selectedMediaIds);
-  const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
-  const importingIds = useMediaLibraryStore((s) => s.importingIds);
+  const isImporting = useMediaLibraryStore(
+    useCallback((s) => s.importingIds.includes(media.id), [media.id])
+  );
 
   const proxyStatus = useMediaLibraryStore((s) => s.proxyStatus.get(media.id));
   const proxyProgress = useMediaLibraryStore((s) => s.proxyProgress.get(media.id));
@@ -127,17 +168,18 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   const transcriptProgress = useMediaLibraryStore((s) => s.transcriptProgress.get(media.id));
 
   const mediaType = getMediaType(media.mimeType);
-  const isImporting = importingIds.includes(media.id);
   const isTranscribable = mediaType === 'video' || mediaType === 'audio';
-  const canGenerateProxy = proxyService.needsProxy(
-    media.width,
-    media.height,
-    media.mimeType,
-    media.audioCodec
-  );
+  const canGenerateProxy =
+    mediaType === 'video'
+    && !isBroken
+    && !isImporting
+    && proxyService.canGenerateProxy(media.mimeType);
   const hasProxy = proxyStatus === 'ready';
   const hasTranscript = transcriptStatus === 'ready';
   const isTranscribing = transcriptStatus === 'transcribing';
+  const isTagging = useMediaLibraryStore((s) => s.taggingMediaIds.has(media.id));
+  const isTaggable = mediaType === 'video' || mediaType === 'image';
+  const hasCaptions = (media.aiCaptions?.length ?? 0) > 0;
   const [audioPlaying, setAudioPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const thumbnailRef = useRef<HTMLImageElement>(null);
@@ -172,16 +214,19 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     onDelete?.();
   };
 
-  const handleGenerateProxy = async (e: React.MouseEvent) => {
+  const handleGenerateProxy = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const blobUrl = await mediaLibraryService.getMediaBlobUrl(media.id);
-      if (blobUrl) {
-        const proxyKey = getSharedProxyKey(media);
-        proxyService.setProxyKey(media.id, proxyKey);
-        proxyService.generateProxy(media.id, blobUrl, media.width, media.height, proxyKey);
-      }
+      const proxyKey = getSharedProxyKey(media);
+      proxyService.setProxyKey(media.id, proxyKey);
+      proxyService.generateProxy(
+        media.id,
+        () => mediaLibraryService.getMediaFile(media.id),
+        media.width,
+        media.height,
+        proxyKey
+      );
     } catch {
       useMediaLibraryStore.getState().setProxyStatus(media.id, 'error');
     }
@@ -204,6 +249,12 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     } catch {
       useMediaLibraryStore.getState().setProxyStatus(media.id, 'error');
     }
+  };
+
+  const handleCancelProxy = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    proxyService.cancelProxy(media.id, getSharedProxyKey(media));
   };
 
   const handleGenerateTranscript = async (e: React.MouseEvent) => {
@@ -244,9 +295,75 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     }
   };
 
+  const handleAnalyzeWithAI = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const store = useMediaLibraryStore.getState();
+    store.setTaggingMedia(media.id, true);
+
+    try {
+      let captions: Array<{ timeSec: number; text: string }>;
+
+      if (mediaType === 'video') {
+        const blobUrl = await mediaLibraryService.getMediaBlobUrl(media.id);
+        if (!blobUrl) throw new Error('Could not load media file');
+
+        const video = document.createElement('video');
+        video.muted = true;
+        video.preload = 'auto';
+        video.src = blobUrl;
+
+        await new Promise<void>((resolve, reject) => {
+          video.onloadedmetadata = () => resolve();
+          video.onerror = () => reject(new Error('Failed to load video'));
+        });
+
+        try {
+          captions = await captionVideo(video);
+        } finally {
+          video.src = '';
+          URL.revokeObjectURL(blobUrl);
+        }
+      } else {
+        const blobUrl = await mediaLibraryService.getMediaBlobUrl(media.id);
+        if (!blobUrl) throw new Error('Could not load media file');
+
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        URL.revokeObjectURL(blobUrl);
+        captions = await captionImage(blob);
+      }
+
+      if (captions.length > 0) {
+        await mediaLibraryService.updateMediaCaptions(media.id, captions);
+        store.updateMediaCaptions(media.id, captions);
+        store.showNotification({
+          type: 'success',
+          message: `Generated ${captions.length} caption${captions.length === 1 ? '' : 's'} for "${media.fileName}"`,
+        });
+      } else {
+        store.showNotification({
+          type: 'info',
+          message: `No captions generated for "${media.fileName}"`,
+        });
+      }
+    } catch (error) {
+      store.showNotification({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to analyze media',
+      });
+    } finally {
+      store.setTaggingMedia(media.id, false);
+    }
+  }, [media.id, media.fileName, mediaType]);
+
   const handleDragStart = useCallback((e: React.DragEvent) => {
     // Set drag data for timeline drop
     e.dataTransfer.effectAllowed = 'copy';
+    const mediaStore = useMediaLibraryStore.getState();
+    const selectedMediaIds = mediaStore.selectedMediaIds;
+    const mediaItems = mediaStore.mediaItems;
 
     // If this item is selected and there are multiple selected items, drag all of them
     const isPartOfSelection = selectedMediaIds.includes(media.id);
@@ -308,7 +425,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
 
       e.dataTransfer.setDragImage(ghost, w / 2, h / 2);
     }
-  }, [selectedMediaIds, media.id, media.fileName, media.duration, mediaItems, mediaType]);
+  }, [media.id, media.fileName, media.duration, mediaType]);
 
   const handleDragEnd = useCallback(() => {
     clearMediaDragData();
@@ -431,6 +548,24 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     }
   }, [audioPlaying, media.id]);
 
+  const handleSeekToCaption = useCallback((timeSec: number) => {
+    const fps = media.fps || 30;
+    const sourceDurationFrames = Math.max(1, Math.round(media.duration * fps));
+    const frame = Math.max(0, Math.min(sourceDurationFrames - 1, Math.round(timeSec * fps)));
+    const outFrame = Math.min(
+      sourceDurationFrames,
+      frame + Math.max(1, Math.round(DEFAULT_CAPTION_SELECTION_DURATION_SEC * fps)),
+    );
+    const sourceStore = useSourcePlayerStore.getState();
+
+    sourceStore.setCurrentMediaId(media.id);
+    sourceStore.clearInOutPoints();
+    sourceStore.setInPoint(frame);
+    sourceStore.setOutPoint(outFrame);
+    sourceStore.setPendingSeekFrame(frame);
+    useEditorStore.getState().setSourcePreviewMediaId(media.id);
+  }, [media.duration, media.fps, media.id]);
+
   const transcriptProgressLabel = transcriptProgress
     ? `${getTranscriptionStageLabel(transcriptProgress.stage)} (${Math.round(getTranscriptionOverallPercent(transcriptProgress))}%)`
     : 'Transcribing...';
@@ -447,9 +582,14 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
       isTranscribing={isTranscribing}
       hasTranscript={hasTranscript}
       transcriptProgressLabel={transcriptProgressLabel}
+      isTaggable={isTaggable}
+      isTagging={isTagging}
+      hasTags={hasCaptions}
       onGenerateProxy={handleGenerateProxy}
+      onCancelProxy={handleCancelProxy}
       onDeleteProxy={handleDeleteProxy}
       onGenerateTranscript={handleGenerateTranscript}
+      onAnalyzeWithAI={handleAnalyzeWithAI}
       onDelete={handleDelete}
     />
   );
@@ -586,6 +726,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
             <MediaInfoPopover
               media={media}
               triggerClassName="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors"
+              onSeekToCaption={handleSeekToCaption}
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -683,8 +824,13 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
                 <Zap className="w-2.5 h-2.5" />
               </div>
             )}
+            {!isBroken && hasCaptions && (
+              <div className="p-0.5 rounded bg-purple-500/90 text-white pointer-events-none" title={`${media.aiCaptions!.length} AI caption${media.aiCaptions!.length === 1 ? '' : 's'}`}>
+                <Sparkles className="w-2.5 h-2.5" />
+              </div>
+            )}
             <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-              <MediaInfoPopover media={media} />
+              <MediaInfoPopover media={media} onSeekToCaption={handleSeekToCaption} />
             </div>
           </div>
         )}
@@ -771,4 +917,4 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
       <div className="absolute right-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-border via-muted to-border opacity-50" />
     </div>
   );
-}
+});

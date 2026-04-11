@@ -1,14 +1,18 @@
-import { useState, useRef, memo, useCallback, useMemo } from 'react';
+import { useState, useRef, memo, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('TimelineTrack');
 import type { TimelineTrack as TimelineTrackType, TimelineItem as TimelineItemType } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
-import { TimelineDropGhostPreviews } from './timeline-drop-ghost-previews';
 import { TimelineItem } from './timeline-item';
 import { TransitionItem } from './transition-item';
 import { useTimelineStore } from '../stores/timeline-store';
-import { useTrackDropPreviewStore, type TrackDropGhostPreview } from '../stores/track-drop-preview-store';
+import {
+  registerTrackDropGhostOverlay,
+  useTrackDropPreviewStore,
+  type TrackDropGhostPreview,
+} from '../stores/track-drop-preview-store';
+import { useNewTrackZonePreviewStore } from '../stores/new-track-zone-preview-store';
 import { useVisibleItems } from '../hooks/use-visible-items';
 import { useItemsStore } from '../stores/items-store';
 import { useCompositionsStore } from '../stores/compositions-store';
@@ -21,7 +25,11 @@ import {
   getMediaDragData,
   type CompositionDragData,
 } from '@/features/timeline/deps/media-library-resolver';
-import { findNearestAvailableSpace } from '../utils/collision-utils';
+import {
+  buildCollisionTrackItemsMap,
+  findNearestAvailableSpaceInTrackItems,
+  type CollisionRect,
+} from '../utils/collision-utils';
 import { resolveEffectiveTrackStates } from '../utils/group-utils';
 import { mapWithConcurrency } from '@/shared/async/async-utils';
 import { useExternalDragPreview } from '../hooks/use-external-drag-preview';
@@ -60,16 +68,214 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
+  type ExternalDragPreviewEntry,
+  getGhostHighlightClasses,
+  getGhostPreviewItemClasses,
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
+import {
+  claimTimelineDropPreviewOwner,
+  isTimelineDropPreviewOwner,
+  registerTimelineDropPreviewOwner,
+  releaseTimelineDropPreviewOwner,
+} from '../utils/drop-preview-owner';
+import { isDragPointInsideElement } from '../utils/effect-drop';
 import { frameToPixelsNow, pixelsToFrameNow } from '@/features/timeline/utils/zoom-conversions';
+import type { LazyContextMenuEventInit } from '../utils/lazy-context-menu';
+import {
+  captureContextMenuEventInit,
+  replayContextMenuEvent,
+} from '../utils/lazy-context-menu';
+
+/**
+ * Lightweight on-demand context menu for track gaps.
+ * Only mounts the Radix ContextMenu tree when the user actually right-clicks a gap,
+ * avoiding the per-frame Popper/Menu provider cascade during drag operations.
+ */
+interface TrackGapContextMenuRequest {
+  frame: number;
+  pointer: LazyContextMenuEventInit;
+  token: number;
+}
+
+function TrackGapContextMenu({
+  request,
+  onCloseGap,
+  onDismiss,
+}: {
+  request: TrackGapContextMenuRequest;
+  onCloseGap: () => void;
+  onDismiss: () => void;
+}) {
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!triggerRef.current) {
+      return;
+    }
+
+    replayContextMenuEvent(triggerRef.current, request.pointer);
+  }, [request]);
+
+  return (
+    <ContextMenu modal={false} onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <ContextMenuTrigger asChild>
+        <span
+          ref={triggerRef}
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: request.pointer.clientX,
+            top: request.pointer.clientY,
+            width: 0,
+            height: 0,
+            pointerEvents: 'none',
+          }}
+        />
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onCloseGap}>
+          Ripple Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+const TrackDropGhostOverlay = memo(function TrackDropGhostOverlay({
+  trackId,
+  showEmptyOverlay,
+}: {
+  trackId: string;
+  showEmptyOverlay: boolean;
+}) {
+  const emptyOverlayRef = useRef<HTMLDivElement>(null);
+  const highlightOverlayRef = useRef<HTMLDivElement>(null);
+  const previewLayerRef = useRef<HTMLDivElement>(null);
+  const previewNodesRef = useRef<Array<{ root: HTMLDivElement; label: HTMLSpanElement }>>([]);
+  const previewCountRef = useRef(0);
+  const showEmptyOverlayRef = useRef(showEmptyOverlay);
+
+  const syncEmptyOverlayVisibility = useCallback(() => {
+    if (!emptyOverlayRef.current) {
+      return;
+    }
+
+    emptyOverlayRef.current.style.display = showEmptyOverlayRef.current && previewCountRef.current === 0 ? '' : 'none';
+  }, []);
+
+  const clearGhostPreviews = useCallback(() => {
+    previewCountRef.current = 0;
+    showEmptyOverlayRef.current = false;
+
+    if (highlightOverlayRef.current) {
+      highlightOverlayRef.current.style.display = 'none';
+    }
+
+    if (previewLayerRef.current) {
+      previewLayerRef.current.replaceChildren();
+    }
+
+    previewNodesRef.current = [];
+    syncEmptyOverlayVisibility();
+  }, [syncEmptyOverlayVisibility]);
+
+  const syncGhostPreviews = useCallback((ghostPreviews: TrackDropGhostPreview[]) => {
+    previewCountRef.current = ghostPreviews.length;
+
+    if (highlightOverlayRef.current) {
+      if (ghostPreviews.length === 0) {
+        highlightOverlayRef.current.style.display = 'none';
+      } else {
+        highlightOverlayRef.current.className = `absolute inset-0 pointer-events-none z-10 rounded border border-dashed ${getGhostHighlightClasses(ghostPreviews)}`;
+        highlightOverlayRef.current.style.display = '';
+      }
+    }
+
+    const previewLayer = previewLayerRef.current;
+    if (!previewLayer) {
+      syncEmptyOverlayVisibility();
+      return;
+    }
+
+    const previewNodes = previewNodesRef.current;
+    while (previewNodes.length > ghostPreviews.length) {
+      const removedNode = previewNodes.pop();
+      removedNode?.root.remove();
+    }
+
+    for (let index = 0; index < ghostPreviews.length; index += 1) {
+      const ghostPreview = ghostPreviews[index]!;
+      let previewNode = previewNodes[index];
+
+      if (!previewNode) {
+        const root = document.createElement('div');
+        root.className = 'absolute rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 inset-y-0';
+        const label = document.createElement('span');
+        label.className = 'text-xs text-foreground/70 truncate';
+        root.appendChild(label);
+        previewLayer.appendChild(root);
+        previewNode = { root, label };
+        previewNodes[index] = previewNode;
+      }
+
+      previewNode.root.className = `absolute rounded border-2 border-dashed pointer-events-none z-20 flex items-center px-2 inset-y-0 ${getGhostPreviewItemClasses(ghostPreview.type)}`;
+      previewNode.root.style.left = `${ghostPreview.left}px`;
+      previewNode.root.style.width = `${ghostPreview.width}px`;
+      previewNode.label.textContent = ghostPreview.label;
+    }
+
+    syncEmptyOverlayVisibility();
+  }, [syncEmptyOverlayVisibility]);
+
+  useLayoutEffect(() => {
+    showEmptyOverlayRef.current = showEmptyOverlay;
+    syncEmptyOverlayVisibility();
+  }, [showEmptyOverlay, syncEmptyOverlayVisibility]);
+
+  useEffect(() => {
+    const unregister = registerTrackDropGhostOverlay(trackId, {
+      sync: syncGhostPreviews,
+      clear: clearGhostPreviews,
+    });
+
+    return () => {
+      unregister();
+      clearGhostPreviews();
+    };
+  }, [clearGhostPreviews, syncGhostPreviews, trackId]);
+
+  return (
+    <>
+      <div
+        ref={emptyOverlayRef}
+        className="absolute inset-0 pointer-events-none z-10 rounded border border-dashed border-primary/50 bg-primary/10"
+        style={{ display: 'none' }}
+      />
+      <div
+        ref={highlightOverlayRef}
+        style={{ display: 'none' }}
+      />
+      <div ref={previewLayerRef} />
+    </>
+  );
+});
 
 interface TimelineTrackProps {
   track: TimelineTrackType;
 }
 
 type GhostPreviewItem = TrackDropGhostPreview;
+type PreviewGhostEntry = Pick<ExternalDragPreviewEntry, 'label' | 'mediaType' | 'duration' | 'hasLinkedAudio'>;
+type PendingDragPreview = {
+  dropFrame: number;
+  dragData: ReturnType<typeof getMediaDragData>;
+  hasExternalFiles: boolean;
+  externalPreviewItems: ExternalDragPreviewEntry[] | null;
+  fileItemCount: number;
+  dataTransfer: DataTransfer | null;
+};
 
 const MULTI_DROP_METADATA_CONCURRENCY = 3;
 
@@ -85,6 +291,31 @@ function areTrackPropsEqual(
 }
 
 /**
+ * Memoized item list — prevents the items `.map()` from running when the parent
+ * TimelineTrack re-renders for drag-preview or state changes that don't affect items.
+ * Without this, every track re-render recreates JSX for all items, and even though
+ * individual TimelineItem components are memo'd, the parent reconciliation cost
+ * (prop diffing × items) adds up across frequent drag-over events.
+ */
+const TimelineTrackItems = memo(function TimelineTrackItems({
+  trackItems,
+  trackLocked,
+  trackHidden,
+}: {
+  trackItems: ReadonlyArray<TimelineItemType>;
+  trackLocked: boolean;
+  trackHidden: boolean;
+}) {
+  return (
+    <>
+      {trackItems.map((item) => (
+        <TimelineItem key={item.id} item={item} timelineDuration={30} trackLocked={trackLocked} trackHidden={trackHidden} />
+      ))}
+    </>
+  );
+});
+
+/**
  * Timeline Track Component
  *
  * Renders a single timeline track with:
@@ -95,11 +326,42 @@ function areTrackPropsEqual(
  */
 
 export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrackProps) {
+  const previewOwnerId = `track:${track.id}`;
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
-  const [contextMenuFrame, setContextMenuFrame] = useState<number | null>(null);
-  const [menuKey, setMenuKey] = useState(0);
+  const [gapContextMenuRequest, setGapContextMenuRequest] = useState<TrackGapContextMenuRequest | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const gapContextMenuTokenRef = useRef(0);
+  const dragPreviewCacheRef = useRef<{
+    dropFrame: number | null;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }>({
+    dropFrame: null,
+    dragData: null,
+    hasExternalFiles: false,
+    externalPreviewItems: null,
+    fileItemCount: 0,
+  });
+  const previewEntryCacheRef = useRef<{
+    dragData: ReturnType<typeof getMediaDragData>;
+    entries: PreviewGhostEntry[] | null;
+  }>({
+    dragData: null,
+    entries: null,
+  });
+  const collisionMapCacheRef = useRef<{
+    itemsRef: TimelineItemType[] | null;
+    map: Map<string, CollisionRect[]>;
+  }>({
+    itemsRef: null,
+    map: new Map<string, CollisionRect[]>(),
+  });
+  const dragPreviewRafRef = useRef<number | null>(null);
+  const pendingDragPreviewRef = useRef<PendingDragPreview | null>(null);
+  const dragOverFlagsRef = useRef({ isDragOver: false, isExternalDragOver: false });
 
   // Resolve whether this track is effectively disabled for drops.
   // Uses the shared resolveEffectiveTrackStates helper so group-inherited
@@ -122,16 +384,10 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const addItems = useTimelineStore((s) => s.addItems);
   const fps = useTimelineStore((s) => s.fps);
   const closeGapAtPosition = useTimelineStore((s) => s.closeGapAtPosition);
-  const allGhostPreviews = useTrackDropPreviewStore((s) => s.ghostPreviews);
   const setTrackGhostPreviews = useTrackDropPreviewStore((s) => s.setGhostPreviews);
   const clearTrackGhostPreviews = useTrackDropPreviewStore((s) => s.clearGhostPreviews);
   const getMedia = useMediaLibraryStore((s) => s.mediaItems);
   const importHandlesForPlacement = useMediaLibraryStore((s) => s.importHandlesForPlacement);
-
-  const ghostPreviews = useMemo(
-    () => allGhostPreviews.filter((ghost) => ghost.targetTrackId === track.id),
-    [allGhostPreviews, track.id]
-  );
 
   const getDropFrame = useCallback((event: React.DragEvent): number | null => {
     if (!trackRef.current) {
@@ -157,6 +413,40 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     };
   }, []);
 
+  const getCollisionTrackItemsMap = useCallback(() => {
+    const items = useTimelineStore.getState().items;
+    const cache = collisionMapCacheRef.current;
+    if (cache.itemsRef !== items) {
+      cache.itemsRef = items;
+      cache.map = buildCollisionTrackItemsMap(items);
+    }
+    return cache.map;
+  }, []);
+
+  const findNearestAvailablePreviewSpace = useCallback((
+    proposedFrom: number,
+    durationInFrames: number,
+    targetTrackId: string,
+  ): number | null => {
+    const trackItems = getCollisionTrackItemsMap().get(targetTrackId) ?? [];
+    return findNearestAvailableSpaceInTrackItems(
+      Math.max(0, proposedFrom),
+      durationInFrames,
+      trackItems,
+    );
+  }, [getCollisionTrackItemsMap]);
+
+  const updateDragOverFlags = useCallback((nextIsDragOver: boolean, nextIsExternalDragOver: boolean) => {
+    if (dragOverFlagsRef.current.isDragOver !== nextIsDragOver) {
+      dragOverFlagsRef.current.isDragOver = nextIsDragOver;
+      setIsDragOver(nextIsDragOver);
+    }
+    if (dragOverFlagsRef.current.isExternalDragOver !== nextIsExternalDragOver) {
+      dragOverFlagsRef.current.isExternalDragOver = nextIsExternalDragOver;
+      setIsExternalDragOver(nextIsExternalDragOver);
+    }
+  }, []);
+
   const resolveTimelineItemsForEntries = useCallback(async (
     entries: DroppedMediaEntry[],
     dropFrame: number
@@ -172,6 +462,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       dropFrame,
       tracks: useTimelineStore.getState().tracks,
       existingItems: useTimelineStore.getState().items,
+      existingTrackItemsById: getCollisionTrackItemsMap(),
       dropTargetTrackId: track.id,
     });
 
@@ -235,7 +526,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       items: resolvedTimelineItems.flatMap((timelineItems) => timelineItems ?? []),
       tracks: workingTracks,
     };
-  }, [fps, getCurrentCanvasSize, track.id]);
+  }, [fps, getCollisionTrackItemsMap, getCurrentCanvasSize, track.id]);
 
   const buildGhostPreviewsForEntries = useCallback((
     entries: Array<{ label: string; mediaType: DroppableMediaType; duration?: number; hasLinkedAudio?: boolean }>,
@@ -256,6 +547,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       dropFrame,
       tracks: useTimelineStore.getState().tracks,
       existingItems: useTimelineStore.getState().items,
+      existingTrackItemsById: getCollisionTrackItemsMap(),
       dropTargetTrackId: track.id,
     });
 
@@ -263,19 +555,14 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       plannedItems,
       frameToPixels: frameToPixelsNow,
     });
-  }, [fps, track.id]);
+  }, [fps, getCollisionTrackItemsMap, track.id]);
 
   const buildGenericExternalGhostPreviews = useCallback((
     dropFrame: number,
     itemCount: number
   ): GhostPreviewItem[] => {
     const placeholderDuration = fps * 3;
-    const finalPosition = findNearestAvailableSpace(
-      Math.max(0, dropFrame),
-      placeholderDuration,
-      track.id,
-      useTimelineStore.getState().items
-    );
+    const finalPosition = findNearestAvailablePreviewSpace(dropFrame, placeholderDuration, track.id);
 
     if (finalPosition === null) {
       return [];
@@ -288,7 +575,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       type: 'external-file',
       targetTrackId: track.id,
     }];
-  }, [fps, track.id]);
+  }, [findNearestAvailablePreviewSpace, fps, track.id]);
 
   const buildGhostPreviewForTemplate = useCallback((
     template: unknown,
@@ -311,12 +598,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       return [];
     }
 
-    const finalPosition = findNearestAvailableSpace(
-      Math.max(0, dropFrame),
-      durationInFrames,
-      targetTrack.id,
-      store.items,
-    );
+    const finalPosition = findNearestAvailablePreviewSpace(dropFrame, durationInFrames, targetTrack.id);
     if (finalPosition === null) {
       return [];
     }
@@ -328,20 +610,95 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       type: template.itemType,
       targetTrackId: targetTrack.id,
     }];
-  }, [fps, track.id]);
+  }, [findNearestAvailablePreviewSpace, fps, track.id]);
 
   const {
     clearExternalPreviewSession,
     externalPreviewItemsRef,
     lastDragFrameRef,
     primeExternalPreviewEntries,
-  } = useExternalDragPreview<GhostPreviewItem>({
-    buildGhostPreviews: buildGhostPreviewsForEntries,
-    setGhostPreviews: setTrackGhostPreviews,
+  } = useExternalDragPreview({
     onError: (error) => {
       logger.warn('Failed to build external drag preview:', error);
     },
   });
+
+  const resetDragPreviewCache = useCallback(() => {
+    dragPreviewCacheRef.current = {
+      dropFrame: null,
+      dragData: null,
+      hasExternalFiles: false,
+      externalPreviewItems: null,
+      fileItemCount: 0,
+    };
+  }, []);
+
+  const getPreviewEntriesForDragData = useCallback((dragData: ReturnType<typeof getMediaDragData>): PreviewGhostEntry[] | null => {
+    if (!dragData) {
+      return null;
+    }
+
+    const cache = previewEntryCacheRef.current;
+    if (cache.dragData === dragData) {
+      return cache.entries;
+    }
+
+    let nextEntries: PreviewGhostEntry[] | null = null;
+
+    if (dragData.type === 'media-items' && Array.isArray(dragData.items)) {
+      const mediaById = useMediaLibraryStore.getState().mediaById;
+      const validItems = dragData.items.filter(isValidDragMediaItem);
+      nextEntries = validItems.map((item) => ({
+        label: item.fileName,
+        mediaType: item.mediaType,
+        duration: item.duration,
+        hasLinkedAudio: item.mediaType === 'video' && !!mediaById[item.mediaId]?.audioCodec,
+      }));
+    } else if (dragData.type === 'media-item' && dragData.mediaId && dragData.mediaType && dragData.fileName) {
+      const media = useMediaLibraryStore.getState().mediaById[dragData.mediaId];
+      nextEntries = media && isDroppableMediaType(dragData.mediaType)
+        ? [{
+          label: dragData.fileName,
+          mediaType: dragData.mediaType,
+          duration: dragData.duration,
+          hasLinkedAudio: dragData.mediaType === 'video' && !!media.audioCodec,
+        }]
+        : null;
+    }
+
+    cache.dragData = dragData;
+    cache.entries = nextEntries;
+    return nextEntries;
+  }, []);
+
+  const clearPendingDragPreview = useCallback(() => {
+    pendingDragPreviewRef.current = null;
+    if (dragPreviewRafRef.current !== null) {
+      cancelAnimationFrame(dragPreviewRafRef.current);
+      dragPreviewRafRef.current = null;
+    }
+  }, []);
+
+  const shouldSkipDragPreviewUpdate = useCallback((params: {
+    dropFrame: number;
+    dragData: unknown;
+    hasExternalFiles: boolean;
+    externalPreviewItems: unknown;
+    fileItemCount: number;
+  }) => {
+    const previous = dragPreviewCacheRef.current;
+    const shouldSkip = previous.dropFrame === params.dropFrame
+      && previous.dragData === params.dragData
+      && previous.hasExternalFiles === params.hasExternalFiles
+      && previous.externalPreviewItems === params.externalPreviewItems
+      && previous.fileItemCount === params.fileItemCount;
+
+    if (!shouldSkip) {
+      dragPreviewCacheRef.current = params;
+    }
+
+    return shouldSkip;
+  }, []);
 
   const buildTimelineTemplateItem = useCallback((template: unknown, dropFrame: number): TimelineItemType | null => {
     if (!isTimelineTemplateDragData(template)) {
@@ -361,12 +718,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
       return null;
     }
 
-    const finalPosition = findNearestAvailableSpace(
-      Math.max(0, dropFrame),
-      durationInFrames,
-      targetTrack.id,
-      store.items,
-    );
+    const finalPosition = findNearestAvailablePreviewSpace(dropFrame, durationInFrames, targetTrack.id);
     if (finalPosition === null) {
       return null;
     }
@@ -383,18 +735,181 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         canvasHeight: canvasSize.height,
       },
     });
-  }, [fps, getCurrentCanvasSize, track.id]);
+  }, [findNearestAvailablePreviewSpace, fps, getCurrentCanvasSize, track.id]);
 
-  // Get item IDs from the full store (not virtualized subset) so drag detection
-  // works even if the source item scrolls out of the visible buffer mid-drag.
-  const allTrackItems = useItemsStore((s) => s.itemsByTrackId[track.id]);
-  const trackItemIds = useMemo(() => allTrackItems?.map(item => item.id) ?? [], [allTrackItems]);
+  const processPendingDragPreview = useCallback(() => {
+    dragPreviewRafRef.current = null;
+    const pending = pendingDragPreviewRef.current;
+    pendingDragPreviewRef.current = null;
 
-  // Check if any item on this track is being dragged (granular selector)
+    if (!pending) {
+      return;
+    }
+
+    if (!isTimelineDropPreviewOwner(previewOwnerId)) {
+      return;
+    }
+
+    const setDropEffectNone = () => {
+      if (pending.dataTransfer) {
+        pending.dataTransfer.dropEffect = 'none';
+      }
+    };
+
+    if (shouldSkipDragPreviewUpdate({
+      dropFrame: pending.dropFrame,
+      dragData: pending.dragData,
+      hasExternalFiles: pending.hasExternalFiles,
+      externalPreviewItems: pending.externalPreviewItems,
+      fileItemCount: pending.fileItemCount,
+    })) {
+      return;
+    }
+
+    if (pending.hasExternalFiles) {
+      if (pending.externalPreviewItems && pending.externalPreviewItems.length > 0) {
+        const previews = buildGhostPreviewsForEntries(pending.externalPreviewItems, pending.dropFrame);
+        if (previews.length === 0) {
+          setDropEffectNone();
+          updateDragOverFlags(false, false);
+          resetDragPreviewCache();
+          return;
+        }
+        setTrackGhostPreviews(previews);
+      } else {
+        setTrackGhostPreviews(buildGenericExternalGhostPreviews(pending.dropFrame, Math.max(1, pending.fileItemCount)));
+        if (pending.dataTransfer) {
+          primeExternalPreviewEntries(pending.dataTransfer);
+        }
+      }
+      return;
+    }
+
+    const data = pending.dragData;
+    if (!data) {
+      clearTrackGhostPreviews();
+      resetDragPreviewCache();
+      return;
+    }
+
+    const previews: GhostPreviewItem[] = [];
+
+    if (data.type === 'composition') {
+      const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId;
+      if (wouldCreateCompositionCycle({
+        parentCompositionId: activeCompositionId,
+        insertedCompositionId: data.compositionId,
+        compositionById: useCompositionsStore.getState().compositionById,
+      })) {
+        setDropEffectNone();
+        clearTrackGhostPreviews();
+        resetDragPreviewCache();
+        return;
+      }
+
+      const store = useTimelineStore.getState();
+      const compositionById = useCompositionsStore.getState().compositionById;
+      const composition = compositionById[data.compositionId];
+      if (!composition) {
+        setDropEffectNone();
+        clearTrackGhostPreviews();
+        resetDragPreviewCache();
+        return;
+      }
+
+      const hasOwnedAudio = compositionHasOwnedAudio({ composition, compositionById });
+      const { plannedItems } = planTrackMediaDropPlacements({
+        entries: [{
+          payload: data,
+          label: data.name,
+          mediaType: 'video',
+          durationInFrames: data.durationInFrames,
+          hasLinkedAudio: hasOwnedAudio,
+        }],
+        dropFrame: pending.dropFrame,
+        tracks: store.tracks,
+        existingItems: store.items,
+        existingTrackItemsById: getCollisionTrackItemsMap(),
+        dropTargetTrackId: track.id,
+      });
+      const plannedItem = plannedItems[0];
+      if (!plannedItem) {
+        setDropEffectNone();
+        updateDragOverFlags(false, false);
+        clearTrackGhostPreviews();
+        resetDragPreviewCache();
+        return;
+      }
+
+      previews.push(
+        ...buildGhostPreviewsFromTrackMediaDropPlan({
+          plannedItems: [plannedItem],
+          frameToPixels: frameToPixelsNow,
+        }).map((preview) => ({
+          ...preview,
+          label: data.name,
+          type: preview.type === 'video' ? 'composition' as const : preview.type,
+        }))
+      );
+      setTrackGhostPreviews(previews);
+      return;
+    }
+
+    if (data.type === 'timeline-template') {
+      const templatePreviews = buildGhostPreviewForTemplate(data, pending.dropFrame);
+      if (templatePreviews.length === 0) {
+        setDropEffectNone();
+        updateDragOverFlags(false, false);
+        resetDragPreviewCache();
+      }
+      setTrackGhostPreviews(templatePreviews);
+      return;
+    }
+
+    const previewEntries = getPreviewEntriesForDragData(data);
+    if (!previewEntries || previewEntries.length === 0) {
+      clearTrackGhostPreviews();
+      resetDragPreviewCache();
+      return;
+    }
+
+    const nextPreviews = buildGhostPreviewsForEntries(previewEntries, pending.dropFrame);
+    if (nextPreviews.length === 0) {
+      setDropEffectNone();
+      updateDragOverFlags(false, false);
+      resetDragPreviewCache();
+    }
+    previews.push(...nextPreviews);
+    setTrackGhostPreviews(previews);
+  }, [
+    buildGenericExternalGhostPreviews,
+    buildGhostPreviewForTemplate,
+    buildGhostPreviewsForEntries,
+    clearTrackGhostPreviews,
+    getCollisionTrackItemsMap,
+    getPreviewEntriesForDragData,
+    previewOwnerId,
+    primeExternalPreviewEntries,
+    resetDragPreviewCache,
+    setTrackGhostPreviews,
+    shouldSkipDragPreviewUpdate,
+    track.id,
+    updateDragOverFlags,
+  ]);
+
+  // Check if any item on this track is being dragged.
+  // Reads items from getState() inside the selector to avoid a separate useItemsStore
+  // subscription that would cause ALL tracks to re-render on every items-store change.
   const hasItemBeingDragged = useSelectionStore(
     useCallback(
-      (s) => s.dragState?.isDragging && s.dragState.draggedItemIds.some(id => trackItemIds.includes(id)),
-      [trackItemIds]
+      (s) => {
+        if (!s.dragState?.isDragging) return false;
+        const trackItems = useItemsStore.getState().itemsByTrackId[track.id];
+        if (!trackItems) return false;
+        const draggedItemIdSet = s.dragState.draggedItemIdSet ?? new Set(s.dragState.draggedItemIds);
+        return trackItems.some((item) => draggedItemIdSet.has(item.id));
+      },
+      [track.id]
     )
   );
 
@@ -423,7 +938,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     // Check if clicking on a clip (has data-item-id ancestor)
     const target = e.target as HTMLElement;
-    if (target.closest('[data-item-id]')) {
+    if (target.closest('[data-item-id], [data-item-context-anchor]')) {
       // Let the clip's context menu handle it
       return;
     }
@@ -440,212 +955,132 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     // Check if this frame is in a gap - just track the frame, let Radix handle menu
     if (isFrameInGap(clickedFrame)) {
-      setContextMenuFrame(clickedFrame);
+      e.preventDefault();
+      gapContextMenuTokenRef.current += 1;
+      setGapContextMenuRequest({
+        frame: clickedFrame,
+        pointer: captureContextMenuEventInit(e.nativeEvent),
+        token: gapContextMenuTokenRef.current,
+      });
     } else {
       // Clicked on a clip area, prevent track menu so clip menu can show
       e.preventDefault();
-      setContextMenuFrame(null);
+      setGapContextMenuRequest(null);
     }
   }, [isFrameInGap]);
 
   // Handle closing the gap
   const handleCloseGap = useCallback(() => {
-    if (contextMenuFrame !== null) {
-      closeGapAtPosition(track.id, contextMenuFrame);
-      setContextMenuFrame(null);
+    if (gapContextMenuRequest) {
+      closeGapAtPosition(track.id, gapContextMenuRequest.frame);
+      setGapContextMenuRequest(null);
     }
-  }, [contextMenuFrame, closeGapAtPosition, track.id]);
+  }, [closeGapAtPosition, gapContextMenuRequest, track.id]);
 
-  // Force menu remount on right-click to fix positioning
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 2) { // Right click
-      setMenuKey((k) => k + 1);
+  const claimPreviewOwnership = useCallback((dataTransfer: DataTransfer | null) => {
+    const data = getMediaDragData();
+    const hasExternalFiles = !!dataTransfer && !data && dataTransfer.types.includes('Files');
+    if (!data && !hasExternalFiles) {
+      return;
     }
-  }, []);
+
+    if (claimTimelineDropPreviewOwner(previewOwnerId)) {
+      clearTrackGhostPreviews();
+      useNewTrackZonePreviewStore.getState().clearGhostPreviews();
+    }
+    updateDragOverFlags(true, hasExternalFiles);
+  }, [clearTrackGhostPreviews, previewOwnerId, updateDragOverFlags]);
+
+  const clearOwnedPreview = useCallback(() => {
+    clearPendingDragPreview();
+    updateDragOverFlags(false, false);
+    clearTrackGhostPreviews();
+    resetDragPreviewCache();
+  }, [clearPendingDragPreview, clearTrackGhostPreviews, resetDragPreviewCache, updateDragOverFlags]);
+
+  const handleDragEnterCapture = useCallback((e: React.DragEvent) => {
+    claimPreviewOwnership(e.dataTransfer);
+  }, [claimPreviewOwnership]);
+
+  useEffect(() => {
+    return registerTimelineDropPreviewOwner(previewOwnerId, clearOwnedPreview);
+  }, [clearOwnedPreview, previewOwnerId]);
 
   const handleDragOver = (e: React.DragEvent) => {
     if (isDropDisabled) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'none';
+      clearPendingDragPreview();
+      resetDragPreviewCache();
       return;
     }
 
     const data = getMediaDragData();
     const hasExternalFiles = !data && e.dataTransfer.types.includes('Files');
     if (!data && !hasExternalFiles) {
-      setIsExternalDragOver(false);
+      clearPendingDragPreview();
+      updateDragOverFlags(false, false);
       clearTrackGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
 
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    setIsDragOver(true);
-    setIsExternalDragOver(hasExternalFiles);
+    claimPreviewOwnership(e.dataTransfer);
+    updateDragOverFlags(true, hasExternalFiles);
 
     const dropFrame = getDropFrame(e);
     if (dropFrame === null) {
+      clearPendingDragPreview();
       clearTrackGhostPreviews();
+      resetDragPreviewCache();
       return;
     }
     lastDragFrameRef.current = dropFrame;
 
-    if (hasExternalFiles) {
-      if (externalPreviewItemsRef.current && externalPreviewItemsRef.current.length > 0) {
-        const previews = buildGhostPreviewsForEntries(externalPreviewItemsRef.current, dropFrame);
-        if (previews.length === 0) {
-          e.dataTransfer.dropEffect = 'none';
-          setIsDragOver(false);
-          setIsExternalDragOver(false);
-        }
-        setTrackGhostPreviews(previews);
-      } else {
-        const fileItemCount = Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length;
-        setTrackGhostPreviews(buildGenericExternalGhostPreviews(dropFrame, Math.max(1, fileItemCount)));
-        primeExternalPreviewEntries(e.dataTransfer);
-      }
-      return;
+    const externalPreviewItems = externalPreviewItemsRef.current;
+    const fileItemCount = hasExternalFiles && !externalPreviewItems
+      ? Array.from(e.dataTransfer.items).filter((item) => item.kind === 'file').length
+      : 0;
+    pendingDragPreviewRef.current = {
+      dropFrame,
+      dragData: data,
+      hasExternalFiles,
+      externalPreviewItems,
+      fileItemCount,
+      dataTransfer: e.dataTransfer,
+    };
+    if (dragPreviewRafRef.current === null) {
+      dragPreviewRafRef.current = requestAnimationFrame(processPendingDragPreview);
     }
-
-    if (!data) {
-      clearTrackGhostPreviews();
-      return;
-    }
-
-    const previews: GhostPreviewItem[] = [];
-
-    if (data.type === 'composition') {
-      const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId;
-      if (wouldCreateCompositionCycle({
-        parentCompositionId: activeCompositionId,
-        insertedCompositionId: data.compositionId,
-        compositionById: useCompositionsStore.getState().compositionById,
-      })) {
-        e.dataTransfer.dropEffect = 'none';
-        clearTrackGhostPreviews();
-        return;
-      }
-
-      const store = useTimelineStore.getState();
-      const compositionById = useCompositionsStore.getState().compositionById;
-      const composition = compositionById[data.compositionId];
-      if (!composition) {
-        e.dataTransfer.dropEffect = 'none';
-        clearTrackGhostPreviews();
-        return;
-      }
-      const hasOwnedAudio = compositionHasOwnedAudio({ composition, compositionById });
-      const { plannedItems } = planTrackMediaDropPlacements({
-        entries: [{
-          payload: data,
-          label: data.name,
-          mediaType: 'video',
-          durationInFrames: data.durationInFrames,
-          hasLinkedAudio: hasOwnedAudio,
-        }],
-        dropFrame,
-        tracks: store.tracks,
-        existingItems: store.items,
-        dropTargetTrackId: track.id,
-      });
-      const plannedItem = plannedItems[0];
-      if (!plannedItem) {
-        e.dataTransfer.dropEffect = 'none';
-        setIsDragOver(false);
-        clearTrackGhostPreviews();
-        return;
-      }
-      previews.push(
-        ...buildGhostPreviewsFromTrackMediaDropPlan({
-          plannedItems: [plannedItem],
-          frameToPixels: frameToPixelsNow,
-        }).map((preview) => ({
-          ...preview,
-          label: data.name,
-          type: preview.type === 'video' ? 'composition' as const : preview.type,
-        }))
-      );
-      setTrackGhostPreviews(previews);
-      return;
-    }
-
-    if (data.type === 'timeline-template') {
-      const previews = buildGhostPreviewForTemplate(data, dropFrame);
-      if (previews.length === 0) {
-        e.dataTransfer.dropEffect = 'none';
-        setIsDragOver(false);
-      }
-      setTrackGhostPreviews(previews);
-      return;
-    }
-
-    if (data.type === 'media-items' && data.items) {
-      const rawItems = Array.isArray(data.items) ? data.items : [];
-      const validItems = rawItems.filter(isValidDragMediaItem);
-      if (validItems.length !== rawItems.length) {
-        logger.warn('Skipping invalid media-items preview payload entries', {
-          invalidCount: rawItems.length - validItems.length,
-        });
-      }
-
-      const mediaById = new Map(getMedia.map((media) => [media.id, media]));
-      const nextPreviews = buildGhostPreviewsForEntries(
-        validItems.map((item) => ({
-          label: item.fileName,
-          mediaType: item.mediaType,
-          duration: item.duration,
-          hasLinkedAudio: item.mediaType === 'video' && !!mediaById.get(item.mediaId)?.audioCodec,
-        })),
-        dropFrame
-      );
-      if (nextPreviews.length === 0) {
-        e.dataTransfer.dropEffect = 'none';
-        setIsDragOver(false);
-      }
-      previews.push(...nextPreviews);
-      setTrackGhostPreviews(previews);
-      return;
-    }
-
-    if (data.type === 'media-item' && data.mediaId && data.mediaType && data.fileName) {
-      const media = getMedia.find((entry) => entry.id === data.mediaId);
-      if (!media || !isDroppableMediaType(data.mediaType)) {
-        clearTrackGhostPreviews();
-        return;
-      }
-
-      const itemDuration = getDroppedMediaDurationInFrames(media, data.mediaType, fps);
-      const nextPreviews = buildGhostPreviewsForEntries([
-        {
-          label: data.fileName,
-          mediaType: data.mediaType,
-          duration: itemDuration / fps,
-          hasLinkedAudio: data.mediaType === 'video' && !!media.audioCodec,
-        },
-      ], dropFrame);
-      if (nextPreviews.length === 0) {
-        e.dataTransfer.dropEffect = 'none';
-        setIsDragOver(false);
-      }
-      previews.push(...nextPreviews);
-    }
-
-    setTrackGhostPreviews(previews);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOver(false);
-    setIsExternalDragOver(false);
+    if (isDragPointInsideElement(e, e.currentTarget)) {
+      return;
+    }
+    releaseTimelineDropPreviewOwner(previewOwnerId);
+    clearPendingDragPreview();
+    updateDragOverFlags(false, false);
     clearTrackGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
   };
 
+  useEffect(() => () => {
+    releaseTimelineDropPreviewOwner(previewOwnerId);
+    clearPendingDragPreview();
+  }, [clearPendingDragPreview, previewOwnerId]);
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragOver(false);
-    setIsExternalDragOver(false);
+    releaseTimelineDropPreviewOwner(previewOwnerId);
+    clearPendingDragPreview();
+    updateDragOverFlags(false, false);
     clearTrackGhostPreviews();
+    resetDragPreviewCache();
     clearExternalPreviewSession();
 
     if (isDropDisabled) {
@@ -781,59 +1216,57 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   };
 
   return (
-    <ContextMenu key={menuKey} modal={false}>
-      <ContextMenuTrigger asChild disabled={track.locked}>
-        <div
-          ref={trackRef}
-          data-track-id={track.id}
-          className="relative"
-          style={{
-            height: `${track.height}px`,
-            // CSS containment tells browser this element's layout is independent
-            // This significantly improves scroll/paint performance for large timelines
-            contain: 'layout style',
-            // Elevate track above others when it contains a dragging clip
-            zIndex: hasItemBeingDragged ? 100 : undefined,
-          }}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onMouseDown={handleMouseDown}
-          onContextMenu={handleContextMenu}
-        >
-          {!isDropDisabled && (
-            <TimelineDropGhostPreviews
-              ghostPreviews={ghostPreviews}
-              showEmptyOverlay={isDragOver && !isExternalDragOver && ghostPreviews.length === 0}
-              variant="track"
-            />
-          )}
+    <>
+      <div
+        ref={trackRef}
+        data-track-id={track.id}
+        className="relative"
+        style={{
+          height: `${track.height}px`,
+          // CSS containment tells browser this element's layout is independent
+          // This significantly improves scroll/paint performance for large timelines
+          contain: 'layout style',
+          // Elevate track above others when it contains a dragging clip
+          zIndex: hasItemBeingDragged ? 100 : undefined,
+        }}
+        onDragEnterCapture={handleDragEnterCapture}
+        onDragOver={handleDragOver}
+        onDragLeaveCapture={handleDragLeave}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onContextMenu={handleContextMenu}
+      >
+        {!isDropDisabled && (
+          <TrackDropGhostOverlay
+            trackId={track.id}
+            showEmptyOverlay={isDragOver && !isExternalDragOver}
+          />
+        )}
 
-          {/* Render all items for this track - dimmed when track is hidden */}
-          {trackItems.map((item) => (
-            <TimelineItem key={item.id} item={item} timelineDuration={30} trackLocked={track.locked} trackHidden={!track.visible} />
-          ))}
+        {/* Render all items for this track - dimmed when track is hidden */}
+        <TimelineTrackItems trackItems={trackItems} trackLocked={track.locked} trackHidden={!track.visible} />
 
-          {/* Render transitions for this track */}
-          {track.kind !== 'audio' && trackTransitions.map((transition) => (
-            <TransitionItem key={transition.id} transition={transition} trackHidden={!track.visible} />
-          ))}
+        {/* Render transitions for this track */}
+        {track.kind !== 'audio' && trackTransitions.map((transition) => (
+          <TransitionItem key={transition.id} transition={transition} trackHidden={!track.visible} />
+        ))}
 
-          {/* Locked track overlay indicator */}
-          {track.locked && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="text-xs text-muted-foreground/50 font-mono">LOCKED</div>
-            </div>
-          )}
-        </div>
-      </ContextMenuTrigger>
-      {hasAnyItems && contextMenuFrame !== null && (
-        <ContextMenuContent>
-          <ContextMenuItem onClick={handleCloseGap}>
-            Ripple Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
+        {/* Locked track overlay indicator */}
+        {track.locked && (
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="text-xs text-muted-foreground/50 font-mono">LOCKED</div>
+          </div>
+        )}
+      </div>
+      {/* Lazy ContextMenu: only mount Radix tree when the menu is triggered on a gap */}
+      {hasAnyItems && gapContextMenuRequest !== null && (
+        <TrackGapContextMenu
+          key={gapContextMenuRequest.token}
+          request={gapContextMenuRequest}
+          onCloseGap={handleCloseGap}
+          onDismiss={() => setGapContextMenuRequest(null)}
+        />
       )}
-    </ContextMenu>
+    </>
   );
 }, areTrackPropsEqual);

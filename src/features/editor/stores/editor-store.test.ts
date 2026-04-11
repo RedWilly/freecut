@@ -29,6 +29,10 @@ describe('editor-store', () => {
       mediaSkimPreviewFrame: null,
       compoundClipSkimPreviewCompositionId: null,
       compoundClipSkimPreviewFrame: null,
+      sourcePatchVideoEnabled: true,
+      sourcePatchAudioEnabled: true,
+      sourcePatchVideoTrackId: null,
+      sourcePatchAudioTrackId: null,
       linkedSelectionEnabled: true,
       colorScopesOpen: false,
     });
@@ -48,6 +52,10 @@ describe('editor-store', () => {
     expect(state.mediaSkimPreviewFrame).toBe(null);
     expect(state.compoundClipSkimPreviewCompositionId).toBe(null);
     expect(state.compoundClipSkimPreviewFrame).toBe(null);
+    expect(state.sourcePatchVideoEnabled).toBe(true);
+    expect(state.sourcePatchAudioEnabled).toBe(true);
+    expect(state.sourcePatchVideoTrackId).toBe(null);
+    expect(state.sourcePatchAudioTrackId).toBe(null);
     expect(state.linkedSelectionEnabled).toBe(true);
     expect(state.colorScopesOpen).toBe(false);
   });
@@ -204,6 +212,14 @@ describe('editor-store', () => {
 
     useEditorStore.getState().toggleLinkedSelectionEnabled();
     expect(useEditorStore.getState().linkedSelectionEnabled).toBe(true);
+  });
+
+  it('stores independent source patch destination tracks', () => {
+    useEditorStore.getState().setSourcePatchVideoTrackId('track-v4');
+    useEditorStore.getState().setSourcePatchAudioTrackId('track-a1');
+
+    expect(useEditorStore.getState().sourcePatchVideoTrackId).toBe('track-v4');
+    expect(useEditorStore.getState().sourcePatchAudioTrackId).toBe('track-a1');
   });
 
   it('directly sets left/right sidebar open state', () => {
