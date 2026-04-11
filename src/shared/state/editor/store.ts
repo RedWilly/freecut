@@ -53,6 +53,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   compoundClipSkimPreviewFrame: null,
   sourcePatchVideoEnabled: true,
   sourcePatchAudioEnabled: true,
+  sourcePatchVideoTrackId: null,
+  sourcePatchAudioTrackId: null,
   linkedSelectionEnabled: true,
   colorScopesOpen: false,
   mixerFloating: (() => {
@@ -179,6 +181,8 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
   }),
   setSourcePatchVideoEnabled: (enabled) => set({ sourcePatchVideoEnabled: enabled }),
   setSourcePatchAudioEnabled: (enabled) => set({ sourcePatchAudioEnabled: enabled }),
+  setSourcePatchVideoTrackId: (trackId) => set({ sourcePatchVideoTrackId: trackId }),
+  setSourcePatchAudioTrackId: (trackId) => set({ sourcePatchAudioTrackId: trackId }),
   toggleSourcePatchVideoEnabled: () => set((state) => ({ sourcePatchVideoEnabled: !state.sourcePatchVideoEnabled })),
   toggleSourcePatchAudioEnabled: () => set((state) => ({ sourcePatchAudioEnabled: !state.sourcePatchAudioEnabled })),
   setLinkedSelectionEnabled: (enabled) => set({ linkedSelectionEnabled: enabled }),

@@ -17,6 +17,7 @@ export interface SourcePlayerState {
   setHoveredPanel: (panel: 'source' | null) => void;
   setPlayerMethods: (methods: SourcePlayerMethods | null) => void;
   setCurrentMediaId: (id: string | null) => void;
+  releaseCurrentMediaId: (id: string) => void;
   setCurrentSourceFrame: (frame: number) => void;
   setInPoint: (frame: number | null) => void;
   setOutPoint: (frame: number | null) => void;

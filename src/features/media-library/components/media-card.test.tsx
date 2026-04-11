@@ -28,18 +28,29 @@ const mediaStoreState = vi.hoisted(() => ({
   proxyProgress: new Map<string, number>(),
   transcriptStatus: new Map<string, 'idle' | 'transcribing' | 'ready' | 'error'>(),
   transcriptProgress: new Map(),
+  taggingMediaIds: new Set<string>(),
   setProxyStatus: vi.fn(),
   clearProxyStatus: vi.fn(),
   setTranscriptStatus: vi.fn(),
   setTranscriptProgress: vi.fn(),
   clearTranscriptProgress: vi.fn(),
+  setTaggingMedia: vi.fn(),
   showNotification: vi.fn(),
 }));
 
 const editorStoreState = vi.hoisted(() => ({
+  setSourcePreviewMediaId: vi.fn(),
   setMediaSkimPreview: vi.fn(),
   clearMediaSkimPreview: vi.fn(),
   mediaSkimPreviewMediaId: null as string | null,
+}));
+
+const sourcePlayerStoreState = vi.hoisted(() => ({
+  setCurrentMediaId: vi.fn(),
+  clearInOutPoints: vi.fn(),
+  setInPoint: vi.fn(),
+  setOutPoint: vi.fn(),
+  setPendingSeekFrame: vi.fn(),
 }));
 
 vi.mock('@/components/ui/dropdown-menu', () => ({
@@ -70,7 +81,11 @@ vi.mock('@/components/ui/button', () => ({
 }));
 
 vi.mock('./media-info-popover', () => ({
-  MediaInfoPopover: () => <div data-testid="media-info-popover" />,
+  MediaInfoPopover: ({ onSeekToCaption }: { onSeekToCaption?: (timeSec: number) => void }) => (
+    <button data-testid="media-info-popover" onClick={() => onSeekToCaption?.(2.5)}>
+      Open media info
+    </button>
+  ),
 }));
 
 vi.mock('../services/media-library-service', () => ({
@@ -106,6 +121,12 @@ vi.mock('@/shared/state/editor', () => {
 
   return { useEditorStore };
 });
+
+vi.mock('@/shared/state/source-player', () => ({
+  useSourcePlayerStore: {
+    getState: () => sourcePlayerStoreState,
+  },
+}));
 
 vi.mock('../utils/proxy-key', () => ({
   getSharedProxyKey: vi.fn((media: { id: string }) => `proxy-${media.id}`),
@@ -152,6 +173,8 @@ describe('MediaCard', () => {
     mediaStoreState.proxyProgress = new Map();
     mediaStoreState.transcriptStatus = new Map();
     mediaStoreState.transcriptProgress = new Map();
+    mediaStoreState.taggingMediaIds = new Set();
+    editorStoreState.mediaSkimPreviewMediaId = null;
 
     mediaLibraryServiceMocks.getThumbnailBlobUrl.mockResolvedValue(null);
     mediaLibraryServiceMocks.getMediaBlobUrl.mockResolvedValue('blob:media-1');
@@ -186,5 +209,18 @@ describe('MediaCard', () => {
     fireEvent.click(screen.getByText('Relink File...'));
 
     expect(onRelink).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a caption in the source monitor with a default three-second I/O range', () => {
+    render(<MediaCard media={makeMedia()} viewMode="list" />);
+
+    fireEvent.click(screen.getByTestId('media-info-popover'));
+
+    expect(sourcePlayerStoreState.setCurrentMediaId).toHaveBeenCalledWith('media-1');
+    expect(sourcePlayerStoreState.clearInOutPoints).toHaveBeenCalledTimes(1);
+    expect(sourcePlayerStoreState.setInPoint).toHaveBeenCalledWith(75);
+    expect(sourcePlayerStoreState.setOutPoint).toHaveBeenCalledWith(150);
+    expect(sourcePlayerStoreState.setPendingSeekFrame).toHaveBeenCalledWith(75);
+    expect(editorStoreState.setSourcePreviewMediaId).toHaveBeenCalledWith('media-1');
   });
 });

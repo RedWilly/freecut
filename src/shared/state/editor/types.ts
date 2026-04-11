@@ -18,6 +18,8 @@ export interface EditorState {
   compoundClipSkimPreviewFrame: number | null;
   sourcePatchVideoEnabled: boolean;
   sourcePatchAudioEnabled: boolean;
+  sourcePatchVideoTrackId: string | null;
+  sourcePatchAudioTrackId: string | null;
   linkedSelectionEnabled: boolean;
   colorScopesOpen: boolean;
   mixerFloating: boolean;
@@ -54,6 +56,8 @@ export interface EditorActions {
   clearCompoundClipSkimPreview: () => void;
   setSourcePatchVideoEnabled: (enabled: boolean) => void;
   setSourcePatchAudioEnabled: (enabled: boolean) => void;
+  setSourcePatchVideoTrackId: (trackId: string | null) => void;
+  setSourcePatchAudioTrackId: (trackId: string | null) => void;
   toggleSourcePatchVideoEnabled: () => void;
   toggleSourcePatchAudioEnabled: () => void;
   setLinkedSelectionEnabled: (enabled: boolean) => void;

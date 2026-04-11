@@ -58,6 +58,8 @@ interface MediaCardActionMenuProps {
   onDelete: (event: React.MouseEvent) => void;
 }
 
+const DEFAULT_CAPTION_SELECTION_DURATION_SEC = 3;
+
 function MediaCardActionMenuItems({
   isBroken,
   onRelink,
@@ -521,10 +523,21 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
 
   const handleSeekToCaption = useCallback((timeSec: number) => {
     const fps = media.fps || 30;
-    const frame = Math.round(timeSec * fps);
+    const sourceDurationFrames = Math.max(1, Math.round(media.duration * fps));
+    const frame = Math.max(0, Math.min(sourceDurationFrames - 1, Math.round(timeSec * fps)));
+    const outFrame = Math.min(
+      sourceDurationFrames,
+      frame + Math.max(1, Math.round(DEFAULT_CAPTION_SELECTION_DURATION_SEC * fps)),
+    );
+    const sourceStore = useSourcePlayerStore.getState();
+
+    sourceStore.setCurrentMediaId(media.id);
+    sourceStore.clearInOutPoints();
+    sourceStore.setInPoint(frame);
+    sourceStore.setOutPoint(outFrame);
+    sourceStore.setPendingSeekFrame(frame);
     useEditorStore.getState().setSourcePreviewMediaId(media.id);
-    useSourcePlayerStore.getState().setPendingSeekFrame(frame);
-  }, [media.id, media.fps]);
+  }, [media.duration, media.fps, media.id]);
 
   const transcriptProgressLabel = transcriptProgress
     ? `${getTranscriptionStageLabel(transcriptProgress.stage)} (${Math.round(getTranscriptionOverallPercent(transcriptProgress))}%)`
