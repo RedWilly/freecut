@@ -330,7 +330,7 @@ export function useTimelineItemActions({
     };
   }, []);
 
-  const handleDetectScenes = useCallback((method: 'histogram' | 'optical-flow') => {
+  const handleDetectScenes = useCallback((method: 'histogram' | 'optical-flow', verificationModel?: 'gemma' | 'lfm') => {
     if (item.type !== 'video' || !item.mediaId || isBroken) {
       return;
     }
@@ -383,12 +383,14 @@ export function useTimelineItemActions({
         const mediaFps = media?.fps ?? currentFps;
         const cuts = await detectScenes(video, currentFps, {
           method,
+          verificationModel,
           mediaId,
           signal: abortController.signal,
           onProgress: (progress) => {
+            const modelLabel = progress.verificationModel === 'lfm' ? 'LFM' : 'Gemma';
             const stageLabels = {
               'optical-flow': `Analyzing ${method === 'histogram' ? 'frames' : 'motion'} (${progress.sceneCuts} candidates)`,
-              'loading-model': `Loading Gemma model (${progress.percent.toFixed(0)}%)`,
+              'loading-model': `Loading ${modelLabel} model (${progress.percent.toFixed(0)}%)`,
               'verifying': `Verifying cuts (${progress.sceneCuts}/${progress.totalSamples} confirmed)`,
             };
             const label = stageLabels[progress.stage ?? 'optical-flow'];

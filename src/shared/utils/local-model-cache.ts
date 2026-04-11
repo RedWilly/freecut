@@ -3,9 +3,10 @@ export const KITTEN_TTS_MODEL_CACHE_NAME = 'kitten-tts-models';
 export const LOCAL_MODEL_CACHE_STORAGE_LABEL = 'Browser cache storage';
 const WHISPER_CACHE_MATCH_FRAGMENTS = ['/onnx-community/whisper-'];
 const GEMMA_CACHE_MATCH_FRAGMENTS = ['/onnx-community/gemma-4-e4b-it-onnx/'];
+const LFM_CACHE_MATCH_FRAGMENTS = ['/liquidai/lfm2.5-vl-450m-onnx/'];
 
 export interface LocalModelCacheDefinition {
-  id: 'whisper' | 'gemma' | 'kitten-tts';
+  id: 'whisper' | 'gemma' | 'lfm' | 'kitten-tts';
   label: string;
   description: string;
   cacheName: string;
@@ -36,6 +37,13 @@ export const LOCAL_MODEL_CACHE_DEFINITIONS: LocalModelCacheDefinition[] = [
     description: 'Gemma scene-detection ONNX model files and processor assets.',
     cacheName: TRANSFORMERS_CACHE_NAME,
     matchPathFragments: GEMMA_CACHE_MATCH_FRAGMENTS,
+  },
+  {
+    id: 'lfm',
+    label: 'LFM',
+    description: 'LFM 2.5 VL scene-detection ONNX model files and processor assets.',
+    cacheName: TRANSFORMERS_CACHE_NAME,
+    matchPathFragments: LFM_CACHE_MATCH_FRAGMENTS,
   },
   {
     id: 'kitten-tts',

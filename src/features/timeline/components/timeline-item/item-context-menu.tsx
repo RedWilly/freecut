@@ -68,7 +68,7 @@ interface ItemContextMenuProps {
   /** Whether scene detection is available for this item */
   canDetectScenes?: boolean;
   isDetectingScenes?: boolean;
-  onDetectScenes?: (method: 'histogram' | 'optical-flow') => void;
+  onDetectScenes?: (method: 'histogram' | 'optical-flow', verificationModel?: 'gemma' | 'lfm') => void;
 }
 
 /**
@@ -247,8 +247,11 @@ export const ItemContextMenu = memo(function ItemContextMenu({
                   <ContextMenuItem onClick={() => onDetectScenes('histogram')}>
                     Fast (Histogram)
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onDetectScenes('optical-flow')}>
+                  <ContextMenuItem onClick={() => onDetectScenes('optical-flow', 'gemma')}>
                     AI (Gemma)
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => onDetectScenes('optical-flow', 'lfm')}>
+                    AI (LFM)
                   </ContextMenuItem>
                 </ContextMenuSubContent>
               </ContextMenuSub>

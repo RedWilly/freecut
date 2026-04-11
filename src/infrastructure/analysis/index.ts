@@ -4,4 +4,4 @@
  */
 
 export { detectScenes, clearSceneCache } from '@/lib/analysis';
-export type { SceneCut, SceneDetectionProgress } from '@/lib/analysis';
+export type { SceneCut, SceneDetectionProgress, VerificationModel } from '@/lib/analysis';
