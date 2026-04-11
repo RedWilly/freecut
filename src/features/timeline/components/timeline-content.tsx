@@ -256,8 +256,6 @@ export const TimelineContent = memo(function TimelineContent({
   const clearItemSelection = useSelectionStore((s) => s.clearItemSelection);
   // Granular selectors for drag state - avoid subscribing to entire dragState object
   const isDragging = useSelectionStore((s) => !!s.dragState?.isDragging);
-  const activeSnapTarget = useSelectionStore((s) => s.activeSnapTarget);
-
   const containerRef = useRef<HTMLDivElement>(null);
   const tracksContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -1231,9 +1229,7 @@ export const TimelineContent = memo(function TimelineContent({
         )}
 
         {isDragging && (
-          <TimelineGuidelines
-            activeSnapTarget={activeSnapTarget}
-          />
+          <TimelineGuidelines />
         )}
 
         <TimelinePreviewScrubber maxFrame={maxTimelineFrame} />

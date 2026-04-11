@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { TimelineItem as TimelineItemType } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
@@ -11,6 +11,7 @@ import {
   useNewTrackZonePreviewStore,
   type NewTrackZoneGhostPreview,
 } from '../stores/new-track-zone-preview-store';
+import { useTrackDropPreviewStore } from '../stores/track-drop-preview-store';
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
 import { useProjectStore } from '@/features/timeline/deps/projects';
 import { mediaLibraryService } from '@/features/timeline/deps/media-library-service';
@@ -59,6 +60,12 @@ import {
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
+import {
+  claimTimelineDropPreviewOwner,
+  isTimelineDropPreviewOwner,
+  registerTimelineDropPreviewOwner,
+  releaseTimelineDropPreviewOwner,
+} from '../utils/drop-preview-owner';
 import { isDragPointInsideElement } from '../utils/effect-drop';
 
 const logger = createLogger('TimelineMediaDropZone');
@@ -106,6 +113,7 @@ const NewTrackZoneGhostOverlay = memo(function NewTrackZoneGhostOverlay({
 
   const clearGhostPreviews = useCallback(() => {
     previewCountRef.current = 0;
+    showEmptyOverlayRef.current = false;
 
     if (highlightOverlayRef.current) {
       highlightOverlayRef.current.style.display = 'none';
@@ -169,7 +177,7 @@ const NewTrackZoneGhostOverlay = memo(function NewTrackZoneGhostOverlay({
     syncEmptyOverlayVisibility();
   }, [syncEmptyOverlayVisibility]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     showEmptyOverlayRef.current = showEmptyOverlay;
     syncEmptyOverlayVisibility();
   }, [showEmptyOverlay, syncEmptyOverlayVisibility]);
@@ -207,6 +215,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   zone,
   anchorTrackId,
 }: TimelineMediaDropZoneProps) {
+  const previewOwnerId = `zone:${zone}`;
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
   const zoneRef = useRef<HTMLDivElement>(null);
@@ -496,9 +505,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     externalPreviewItemsRef,
     lastDragFrameRef,
     primeExternalPreviewEntries,
-  } = useExternalDragPreview<GhostPreviewItem>({
-    buildGhostPreviews: buildGhostPreviewsForEntries,
-    setGhostPreviews: setZoneGhostPreviews,
+  } = useExternalDragPreview({
     onError: (error) => {
       logger.warn('Failed to build external drag preview:', error);
     },
@@ -624,6 +631,10 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     pendingDragPreviewRef.current = null;
 
     if (!pending) {
+      return;
+    }
+
+    if (!isTimelineDropPreviewOwner(previewOwnerId)) {
       return;
     }
 
@@ -775,6 +786,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     frameToPixels,
     getCollisionTrackItemsMap,
     getPreviewEntriesForDragData,
+    previewOwnerId,
     primeExternalPreviewEntries,
     resetDragPreviewCache,
     setZoneGhostPreviews,
@@ -782,6 +794,35 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     updateDragOverFlags,
     zone,
   ]);
+
+  const claimPreviewOwnership = useCallback((dataTransfer: DataTransfer | null) => {
+    const data = getMediaDragData();
+    const hasExternalFiles = !!dataTransfer && !data && dataTransfer.types.includes('Files');
+    if (!data && !hasExternalFiles) {
+      return;
+    }
+
+    if (claimTimelineDropPreviewOwner(previewOwnerId)) {
+      clearZoneGhostPreviews();
+      useTrackDropPreviewStore.getState().clearGhostPreviews();
+    }
+    updateDragOverFlags(true, hasExternalFiles);
+  }, [clearZoneGhostPreviews, previewOwnerId, updateDragOverFlags]);
+
+  const clearOwnedPreview = useCallback(() => {
+    clearPendingDragPreview();
+    updateDragOverFlags(false, false);
+    clearZoneGhostPreviews();
+    resetDragPreviewCache();
+  }, [clearPendingDragPreview, clearZoneGhostPreviews, resetDragPreviewCache, updateDragOverFlags]);
+
+  const handleDragEnterCapture = useCallback((e: React.DragEvent) => {
+    claimPreviewOwnership(e.dataTransfer);
+  }, [claimPreviewOwnership]);
+
+  useEffect(() => {
+    return registerTimelineDropPreviewOwner(previewOwnerId, clearOwnedPreview);
+  }, [clearOwnedPreview, previewOwnerId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     const data = getMediaDragData();
@@ -796,6 +837,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
 
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+    claimPreviewOwnership(e.dataTransfer);
     updateDragOverFlags(true, hasExternalFiles);
 
     const dropFrame = getDropFrame(e);
@@ -825,6 +867,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
   }, [
     clearZoneGhostPreviews,
     clearPendingDragPreview,
+    claimPreviewOwnership,
     getDropFrame,
     processPendingDragPreview,
     resetDragPreviewCache,
@@ -836,19 +879,22 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     if (isDragPointInsideElement(e, e.currentTarget)) {
       return;
     }
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
     updateDragOverFlags(false, false);
     clearZoneGhostPreviews();
     resetDragPreviewCache();
     clearExternalPreviewSession();
-  }, [clearExternalPreviewSession, clearPendingDragPreview, clearZoneGhostPreviews, resetDragPreviewCache, updateDragOverFlags]);
+  }, [clearExternalPreviewSession, clearPendingDragPreview, clearZoneGhostPreviews, previewOwnerId, resetDragPreviewCache, updateDragOverFlags]);
 
   useEffect(() => () => {
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
-  }, [clearPendingDragPreview]);
+  }, [clearPendingDragPreview, previewOwnerId]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
     updateDragOverFlags(false, false);
     clearZoneGhostPreviews();
@@ -1003,6 +1049,7 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
     getDropFrame,
     getMedia,
     importHandlesForPlacement,
+    previewOwnerId,
     resetDragPreviewCache,
     resolveTimelineItemsForEntries,
     updateDragOverFlags,
@@ -1018,7 +1065,9 @@ export const TimelineMediaDropZone = memo(function TimelineMediaDropZone({
       ref={zoneRef}
       className="relative"
       style={{ height: `${height}px` }}
+      onDragEnterCapture={handleDragEnterCapture}
       onDragOver={handleDragOver}
+      onDragLeaveCapture={handleDragLeave}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >

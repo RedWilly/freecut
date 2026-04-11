@@ -1,4 +1,4 @@
-import { useState, useRef, memo, useCallback, useEffect } from 'react';
+import { useState, useRef, memo, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createLogger } from '@/shared/logging/logger';
 
 const logger = createLogger('TimelineTrack');
@@ -12,6 +12,7 @@ import {
   useTrackDropPreviewStore,
   type TrackDropGhostPreview,
 } from '../stores/track-drop-preview-store';
+import { useNewTrackZonePreviewStore } from '../stores/new-track-zone-preview-store';
 import { useVisibleItems } from '../hooks/use-visible-items';
 import { useItemsStore } from '../stores/items-store';
 import { useCompositionsStore } from '../stores/compositions-store';
@@ -73,6 +74,12 @@ import {
   isDroppableMediaType,
   isValidDragMediaItem,
 } from '../utils/drag-drop-preview';
+import {
+  claimTimelineDropPreviewOwner,
+  isTimelineDropPreviewOwner,
+  registerTimelineDropPreviewOwner,
+  releaseTimelineDropPreviewOwner,
+} from '../utils/drop-preview-owner';
 import { isDragPointInsideElement } from '../utils/effect-drop';
 import { frameToPixelsNow, pixelsToFrameNow } from '@/features/timeline/utils/zoom-conversions';
 
@@ -120,6 +127,7 @@ const TrackDropGhostOverlay = memo(function TrackDropGhostOverlay({
 
   const clearGhostPreviews = useCallback(() => {
     previewCountRef.current = 0;
+    showEmptyOverlayRef.current = false;
 
     if (highlightOverlayRef.current) {
       highlightOverlayRef.current.style.display = 'none';
@@ -181,7 +189,7 @@ const TrackDropGhostOverlay = memo(function TrackDropGhostOverlay({
     syncEmptyOverlayVisibility();
   }, [syncEmptyOverlayVisibility]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     showEmptyOverlayRef.current = showEmptyOverlay;
     syncEmptyOverlayVisibility();
   }, [showEmptyOverlay, syncEmptyOverlayVisibility]);
@@ -278,6 +286,7 @@ const TimelineTrackItems = memo(function TimelineTrackItems({
  */
 
 export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrackProps) {
+  const previewOwnerId = `track:${track.id}`;
   const [isDragOver, setIsDragOver] = useState(false);
   const [isExternalDragOver, setIsExternalDragOver] = useState(false);
   const [contextMenuFrame, setContextMenuFrame] = useState<number | null>(null);
@@ -567,9 +576,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     externalPreviewItemsRef,
     lastDragFrameRef,
     primeExternalPreviewEntries,
-  } = useExternalDragPreview<GhostPreviewItem>({
-    buildGhostPreviews: buildGhostPreviewsForEntries,
-    setGhostPreviews: setTrackGhostPreviews,
+  } = useExternalDragPreview({
     onError: (error) => {
       logger.warn('Failed to build external drag preview:', error);
     },
@@ -695,6 +702,10 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     pendingDragPreviewRef.current = null;
 
     if (!pending) {
+      return;
+    }
+
+    if (!isTimelineDropPreviewOwner(previewOwnerId)) {
       return;
     }
 
@@ -836,6 +847,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     clearTrackGhostPreviews,
     getCollisionTrackItemsMap,
     getPreviewEntriesForDragData,
+    previewOwnerId,
     primeExternalPreviewEntries,
     resetDragPreviewCache,
     setTrackGhostPreviews,
@@ -918,6 +930,35 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     }
   }, [contextMenuFrame, closeGapAtPosition, track.id]);
 
+  const claimPreviewOwnership = useCallback((dataTransfer: DataTransfer | null) => {
+    const data = getMediaDragData();
+    const hasExternalFiles = !!dataTransfer && !data && dataTransfer.types.includes('Files');
+    if (!data && !hasExternalFiles) {
+      return;
+    }
+
+    if (claimTimelineDropPreviewOwner(previewOwnerId)) {
+      clearTrackGhostPreviews();
+      useNewTrackZonePreviewStore.getState().clearGhostPreviews();
+    }
+    updateDragOverFlags(true, hasExternalFiles);
+  }, [clearTrackGhostPreviews, previewOwnerId, updateDragOverFlags]);
+
+  const clearOwnedPreview = useCallback(() => {
+    clearPendingDragPreview();
+    updateDragOverFlags(false, false);
+    clearTrackGhostPreviews();
+    resetDragPreviewCache();
+  }, [clearPendingDragPreview, clearTrackGhostPreviews, resetDragPreviewCache, updateDragOverFlags]);
+
+  const handleDragEnterCapture = useCallback((e: React.DragEvent) => {
+    claimPreviewOwnership(e.dataTransfer);
+  }, [claimPreviewOwnership]);
+
+  useEffect(() => {
+    return registerTimelineDropPreviewOwner(previewOwnerId, clearOwnedPreview);
+  }, [clearOwnedPreview, previewOwnerId]);
+
   const handleDragOver = (e: React.DragEvent) => {
     if (isDropDisabled) {
       e.preventDefault();
@@ -939,6 +980,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
 
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+    claimPreviewOwnership(e.dataTransfer);
     updateDragOverFlags(true, hasExternalFiles);
 
     const dropFrame = getDropFrame(e);
@@ -972,6 +1014,7 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
     if (isDragPointInsideElement(e, e.currentTarget)) {
       return;
     }
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
     updateDragOverFlags(false, false);
     clearTrackGhostPreviews();
@@ -980,11 +1023,13 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   };
 
   useEffect(() => () => {
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
-  }, [clearPendingDragPreview]);
+  }, [clearPendingDragPreview, previewOwnerId]);
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    releaseTimelineDropPreviewOwner(previewOwnerId);
     clearPendingDragPreview();
     updateDragOverFlags(false, false);
     clearTrackGhostPreviews();
@@ -1137,7 +1182,9 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           // Elevate track above others when it contains a dragging clip
           zIndex: hasItemBeingDragged ? 100 : undefined,
         }}
+        onDragEnterCapture={handleDragEnterCapture}
         onDragOver={handleDragOver}
+        onDragLeaveCapture={handleDragLeave}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onContextMenu={handleContextMenu}
