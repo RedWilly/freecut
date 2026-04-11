@@ -17,7 +17,10 @@ const DRIFT_RESYNC_MIN_ELAPSED_SECONDS = 1.0;
 const DRIFT_RESYNC_POSITIVE_THRESHOLD_SECONDS = 1.25;
 const DRIFT_RESYNC_NEGATIVE_THRESHOLD_SECONDS = -0.75;
 const BACKGROUND_RESYNC_GRACE_MS = 250;
-const WAIT_FOR_FULL_DECODE_BEFORE_PLAYBACK = true;
+// Prefer a playable partial decode first, then upgrade to the full buffer in
+// the background. This keeps custom-decoded formats like Vorbis responsive on
+// first play after import/refresh instead of waiting for the whole file.
+const WAIT_FOR_FULL_DECODE_BEFORE_PLAYBACK = false;
 
 let sharedCtx: AudioContext | null = null;
 

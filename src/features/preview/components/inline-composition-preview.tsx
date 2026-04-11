@@ -45,6 +45,7 @@ export const InlineCompositionPreview = memo(function InlineCompositionPreview({
   const composition = useCompositionsStore((s) => s.compositionById[compositionId]);
   const compositionById = useCompositionsStore((s) => s.compositionById);
   const zoom = usePlaybackStore((s) => s.zoom);
+  const useProxy = usePlaybackStore((s) => s.useProxy);
   const [resolvedTracks, setResolvedTracks] = useState<CompositionInputProps['tracks'] | null>(null);
 
   const compositionInput = useMemo(
@@ -65,7 +66,7 @@ export const InlineCompositionPreview = memo(function InlineCompositionPreview({
       const mediaIds = collectSubCompositionMediaIds(compositionId, compositionById);
       await Promise.all(mediaIds.map((mediaId) => resolveMediaUrl(mediaId)));
 
-      const nextResolvedTracks = await resolveMediaUrls(compositionInput.tracks, { useProxy: false });
+      const nextResolvedTracks = await resolveMediaUrls(compositionInput.tracks, { useProxy });
       if (!cancelled) {
         setResolvedTracks(nextResolvedTracks);
       }
@@ -80,7 +81,7 @@ export const InlineCompositionPreview = memo(function InlineCompositionPreview({
     return () => {
       cancelled = true;
     };
-  }, [composition, compositionById, compositionId, compositionInput]);
+  }, [composition, compositionById, compositionId, compositionInput, useProxy]);
 
   const compositionWidth = composition?.width || 640;
   const compositionHeight = composition?.height || 360;
@@ -168,6 +169,7 @@ export const InlineCompositionPreview = memo(function InlineCompositionPreview({
                     <MainComposition
                       {...compositionInput}
                       tracks={resolvedTracks}
+                      useProxyMedia={useProxy}
                     />
                   </VideoConfigProvider>
                 </ClockBridgeProvider>

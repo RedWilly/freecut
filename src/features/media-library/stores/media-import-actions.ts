@@ -65,6 +65,42 @@ function replaceImportPlaceholder(set: Set, tempId: string, metadata: MediaMetad
   }));
 }
 
+function setupImportedVideoProxy(metadata: MediaMetadata): void {
+  if (!proxyService.canGenerateProxy(metadata.mimeType)) {
+    return;
+  }
+
+  const proxyKey = getSharedProxyKey(metadata);
+  proxyService.setProxyKey(metadata.id, proxyKey);
+
+  if (!proxyService.needsProxy(
+    metadata.width,
+    metadata.height,
+    metadata.mimeType,
+    metadata.audioCodec,
+    metadata.id,
+  )) {
+    return;
+  }
+
+  if (proxyService.hasProxy(metadata.id, proxyKey)) {
+    return;
+  }
+
+  try {
+    proxyService.generateProxy(
+      metadata.id,
+      () => mediaLibraryService.getMediaFile(metadata.id),
+      metadata.width,
+      metadata.height,
+      proxyKey,
+      { priority: 'background' },
+    );
+  } catch (error) {
+    logger.warn(`[MediaImport] Failed to enqueue automatic proxy generation for ${metadata.id}:`, error);
+  }
+}
+
 function processImportResults(
   importResults: PromiseSettledResult<CompletedImportTask>[],
   importTasks: ImportTask[],
@@ -95,9 +131,7 @@ function processImportResults(
       } else {
         replaceImportPlaceholder(set, tempId, metadata);
 
-        if (metadata.mimeType.startsWith('video/')) {
-          proxyService.setProxyKey(metadata.id, getSharedProxyKey(metadata));
-        }
+        setupImportedVideoProxy(metadata);
         results.push(metadata);
         importedCount += 1;
 
