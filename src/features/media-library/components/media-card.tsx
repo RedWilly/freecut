@@ -51,7 +51,8 @@ interface MediaCardActionMenuProps {
   isTaggable: boolean;
   isTagging: boolean;
   hasTags: boolean;
-  onGenerateProxy: (event: React.MouseEvent) => Promise<void>;
+  onGenerateProxy: (event: React.MouseEvent) => void | Promise<void>;
+  onCancelProxy: (event: React.MouseEvent) => void | Promise<void>;
   onDeleteProxy: (event: React.MouseEvent) => Promise<void>;
   onGenerateTranscript: (event: React.MouseEvent) => Promise<void>;
   onAnalyzeWithAI: (event: React.MouseEvent) => void;
@@ -75,6 +76,7 @@ function MediaCardActionMenuItems({
   isTagging,
   hasTags,
   onGenerateProxy,
+  onCancelProxy,
   onDeleteProxy,
   onGenerateTranscript,
   onAnalyzeWithAI,
@@ -107,10 +109,16 @@ function MediaCardActionMenuItems({
         </DropdownMenuItem>
       )}
       {proxyStatus === 'generating' && (
-        <DropdownMenuItem disabled>
-          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-          Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
-        </DropdownMenuItem>
+        <>
+          <DropdownMenuItem disabled>
+            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+            Generating Proxy{proxyProgress != null ? ` (${Math.round(proxyProgress * 100)}%)` : '...'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onCancelProxy}>
+            <Square className="w-3 h-3 mr-2" />
+            Cancel Proxy Generation
+          </DropdownMenuItem>
+        </>
       )}
       {hasProxy && (
         <DropdownMenuItem onClick={onDeleteProxy} className="text-destructive focus:text-destructive">
@@ -153,12 +161,11 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
   const mediaType = getMediaType(media.mimeType);
   const isImporting = importingIds.includes(media.id);
   const isTranscribable = mediaType === 'video' || mediaType === 'audio';
-  const canGenerateProxy = proxyService.needsProxy(
-    media.width,
-    media.height,
-    media.mimeType,
-    media.audioCodec
-  );
+  const canGenerateProxy =
+    mediaType === 'video'
+    && !isBroken
+    && !isImporting
+    && proxyService.canGenerateProxy(media.mimeType);
   const hasProxy = proxyStatus === 'ready';
   const hasTranscript = transcriptStatus === 'ready';
   const isTranscribing = transcriptStatus === 'transcribing';
@@ -199,16 +206,19 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     onDelete?.();
   };
 
-  const handleGenerateProxy = async (e: React.MouseEvent) => {
+  const handleGenerateProxy = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      const source = await mediaLibraryService.getMediaFile(media.id);
-      if (source) {
-        const proxyKey = getSharedProxyKey(media);
-        proxyService.setProxyKey(media.id, proxyKey);
-        proxyService.generateProxy(media.id, source, media.width, media.height, proxyKey);
-      }
+      const proxyKey = getSharedProxyKey(media);
+      proxyService.setProxyKey(media.id, proxyKey);
+      proxyService.generateProxy(
+        media.id,
+        () => mediaLibraryService.getMediaFile(media.id),
+        media.width,
+        media.height,
+        proxyKey
+      );
     } catch {
       useMediaLibraryStore.getState().setProxyStatus(media.id, 'error');
     }
@@ -231,6 +241,12 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
     } catch {
       useMediaLibraryStore.getState().setProxyStatus(media.id, 'error');
     }
+  };
+
+  const handleCancelProxy = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    proxyService.cancelProxy(media.id, getSharedProxyKey(media));
   };
 
   const handleGenerateTranscript = async (e: React.MouseEvent) => {
@@ -559,6 +575,7 @@ export function MediaCard({ media, selected = false, isBroken = false, onSelect,
       isTagging={isTagging}
       hasTags={hasCaptions}
       onGenerateProxy={handleGenerateProxy}
+      onCancelProxy={handleCancelProxy}
       onDeleteProxy={handleDeleteProxy}
       onGenerateTranscript={handleGenerateTranscript}
       onAnalyzeWithAI={handleAnalyzeWithAI}

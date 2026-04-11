@@ -5,13 +5,16 @@ import type { MediaMetadata } from '@/types/storage';
 
 const mediaLibraryServiceMocks = vi.hoisted(() => ({
   getThumbnailBlobUrl: vi.fn(),
+  getMediaFile: vi.fn(),
   getMediaBlobUrl: vi.fn(),
 }));
 
 const proxyServiceMocks = vi.hoisted(() => ({
+  canGenerateProxy: vi.fn(),
   needsProxy: vi.fn(),
   setProxyKey: vi.fn(),
   generateProxy: vi.fn(),
+  cancelProxy: vi.fn(),
   deleteProxy: vi.fn(),
   clearProxyKey: vi.fn(),
 }));
@@ -177,7 +180,9 @@ describe('MediaCard', () => {
     editorStoreState.mediaSkimPreviewMediaId = null;
 
     mediaLibraryServiceMocks.getThumbnailBlobUrl.mockResolvedValue(null);
+    mediaLibraryServiceMocks.getMediaFile.mockResolvedValue(new Blob(['video-data']));
     mediaLibraryServiceMocks.getMediaBlobUrl.mockResolvedValue('blob:media-1');
+    proxyServiceMocks.canGenerateProxy.mockReturnValue(true);
     proxyServiceMocks.needsProxy.mockReturnValue(true);
     proxyServiceMocks.deleteProxy.mockResolvedValue(undefined);
     mediaTranscriptionServiceMocks.transcribeMedia.mockResolvedValue(undefined);
@@ -190,16 +195,15 @@ describe('MediaCard', () => {
     fireEvent.click(screen.getByText('Generate Proxy'));
 
     await waitFor(() => {
-      expect(mediaLibraryServiceMocks.getMediaBlobUrl).toHaveBeenCalledWith('media-1');
+      expect(proxyServiceMocks.generateProxy).toHaveBeenCalledTimes(1);
     });
     expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('media-1', 'proxy-media-1');
-    expect(proxyServiceMocks.generateProxy).toHaveBeenCalledWith(
-      'media-1',
-      'blob:media-1',
-      3840,
-      2160,
-      'proxy-media-1'
-    );
+    const generateProxyCall = proxyServiceMocks.generateProxy.mock.calls[0];
+    expect(generateProxyCall?.[0]).toBe('media-1');
+    expect(generateProxyCall?.[2]).toBe(3840);
+    expect(generateProxyCall?.[3]).toBe(2160);
+    expect(generateProxyCall?.[4]).toBe('proxy-media-1');
+    expect(typeof generateProxyCall?.[1]).toBe('function');
   });
 
   it('uses the shared action menu to relink broken media in grid view', () => {
@@ -209,6 +213,17 @@ describe('MediaCard', () => {
     fireEvent.click(screen.getByText('Relink File...'));
 
     expect(onRelink).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows cancelling proxy generation from the action menu', () => {
+    mediaStoreState.proxyStatus = new Map([['media-1', 'generating']]);
+    mediaStoreState.proxyProgress = new Map([['media-1', 0.42]]);
+
+    render(<MediaCard media={makeMedia()} viewMode="list" />);
+
+    fireEvent.click(screen.getByText('Cancel Proxy Generation'));
+
+    expect(proxyServiceMocks.cancelProxy).toHaveBeenCalledWith('media-1', 'proxy-media-1');
   });
 
   it('opens a caption in the source monitor with a default three-second I/O range', () => {

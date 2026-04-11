@@ -16,6 +16,7 @@ import { PROXY_DIR, PROXY_SCHEMA_VERSION } from '../proxy-constants';
 
 const PROXY_WIDTH = 1280;
 const PROXY_HEIGHT = 720;
+const PROXY_STREAM_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
 
 // Message types
 export interface ProxyGenerateRequest {
@@ -48,8 +49,17 @@ export interface ProxyErrorResponse {
   error: string;
 }
 
+export interface ProxyCancelledResponse {
+  type: 'cancelled';
+  mediaId: string;
+}
+
 export type ProxyWorkerRequest = ProxyGenerateRequest | ProxyCancelRequest;
-export type ProxyWorkerResponse = ProxyProgressResponse | ProxyCompleteResponse | ProxyErrorResponse;
+export type ProxyWorkerResponse =
+  | ProxyProgressResponse
+  | ProxyCompleteResponse
+  | ProxyErrorResponse
+  | ProxyCancelledResponse;
 
 // Track active conversions for cancel support
 const activeConversions = new Map<string, { cancel: () => Promise<void> }>();
@@ -65,6 +75,12 @@ async function getProxyDir(mediaId: string): Promise<FileSystemDirectoryHandle> 
   const root = await navigator.storage.getDirectory();
   const proxyRoot = await root.getDirectoryHandle(PROXY_DIR, { create: true });
   return proxyRoot.getDirectoryHandle(mediaId, { create: true });
+}
+
+async function removeProxyDir(mediaId: string): Promise<void> {
+  const root = await navigator.storage.getDirectory();
+  const proxyRoot = await root.getDirectoryHandle(PROXY_DIR, { create: true });
+  await proxyRoot.removeEntry(mediaId, { recursive: true });
 }
 
 /**
@@ -182,7 +198,10 @@ async function generateProxy(request: ProxyGenerateRequest): Promise<void> {
     const fileHandle = await dir.getFileHandle('proxy.mp4', { create: true });
     try {
       writable = await fileHandle.createWritable();
-      const streamTarget = new StreamTarget(writable);
+      const streamTarget = new StreamTarget(writable, {
+        chunked: true,
+        chunkSize: PROXY_STREAM_CHUNK_SIZE_BYTES,
+      });
       streamedToFile = true;
       conversion = await buildConversion(streamTarget, false);
     } catch {
@@ -221,9 +240,11 @@ async function generateProxy(request: ProxyGenerateRequest): Promise<void> {
     } catch (execError) {
       // If cancel() was invoked, activeConversions entry is already deleted.
       if (!activeConversions.has(mediaId)) {
-        if (streamedToFile) {
-          await dir.removeEntry('proxy.mp4').catch(() => undefined);
-        }
+        await removeProxyDir(mediaId).catch(() => undefined);
+        self.postMessage({
+          type: 'cancelled',
+          mediaId,
+        } as ProxyCancelledResponse);
         return;
       }
       throw execError;
@@ -231,9 +252,11 @@ async function generateProxy(request: ProxyGenerateRequest): Promise<void> {
 
     // Check if cancelled during execution (resolved without throwing)
     if (!activeConversions.has(mediaId)) {
-      if (streamedToFile) {
-        await dir.removeEntry('proxy.mp4').catch(() => undefined);
-      }
+      await removeProxyDir(mediaId).catch(() => undefined);
+      self.postMessage({
+        type: 'cancelled',
+        mediaId,
+      } as ProxyCancelledResponse);
       return;
     }
 
@@ -269,6 +292,28 @@ async function generateProxy(request: ProxyGenerateRequest): Promise<void> {
       type: 'complete',
       mediaId,
     } as ProxyCompleteResponse);
+  } catch (error) {
+    if (writable) {
+      try {
+        await writable.abort();
+      } catch {
+        // best-effort cleanup
+      }
+      writable = undefined;
+    }
+
+    await dir.removeEntry('proxy.mp4').catch(() => undefined);
+    await saveMetadata(dir, {
+      version: PROXY_SCHEMA_VERSION,
+      width: proxyDimensions.width,
+      height: proxyDimensions.height,
+      sourceWidth,
+      sourceHeight,
+      status: 'error',
+      createdAt,
+    }).catch(() => undefined);
+
+    throw error;
   } finally {
     activeConversions.delete(mediaId);
     if (writable) {

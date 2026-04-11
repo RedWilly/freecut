@@ -15,6 +15,14 @@ import {
   type HotkeyKey,
   type HotkeyOverrideMap,
 } from '@/config/hotkeys';
+import {
+  DEFAULT_PROXY_GENERATION_MODE,
+  DEFAULT_PROXY_GENERATION_RESOLUTION,
+  normalizeProxyGenerationMode,
+  normalizeProxyGenerationResolution,
+  type ProxyGenerationMode,
+  type ProxyGenerationResolution,
+} from '@/config/proxy-generation';
 
 /**
  * App-wide settings stored in localStorage
@@ -31,6 +39,12 @@ interface AppSettings {
   // Performance
   maxUndoHistory: number;
   autoSaveInterval: number; // minutes (0 = disabled)
+
+  // Proxy generation defaults
+  proxyGenerationMode: ProxyGenerationMode;
+  proxyGenerationResolution: ProxyGenerationResolution;
+  proxyRecommendedMediaIds: string[];
+
   // Whisper defaults
   defaultWhisperModel: MediaTranscriptModel;
   defaultWhisperQuantization: MediaTranscriptQuantization;
@@ -42,6 +56,8 @@ interface AppSettings {
 
 interface SettingsActions {
   setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  markProxyRecommended: (mediaId: string) => void;
+  clearProxyRecommended: (mediaId: string) => void;
   setHotkeyBinding: (key: HotkeyKey, binding: string) => void;
   replaceHotkeyOverrides: (overrides: HotkeyOverrideMap) => void;
   resetHotkeyBinding: (key: HotkeyKey) => void;
@@ -65,6 +81,31 @@ function areHotkeyOverridesEqual(
   return leftKeys.every((key) => left[key as HotkeyKey] === right[key as HotkeyKey]);
 }
 
+function sanitizeProxyRecommendedMediaIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const uniqueIds = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    uniqueIds.add(trimmed);
+    if (uniqueIds.size >= 200) {
+      break;
+    }
+  }
+
+  return [...uniqueIds];
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   // Timeline defaults
   snapEnabled: true,
@@ -77,6 +118,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   // Performance
   maxUndoHistory: 50,
   autoSaveInterval: 0, // Auto-save disabled by default
+
+  // Proxy generation defaults
+  proxyGenerationMode: DEFAULT_PROXY_GENERATION_MODE,
+  proxyGenerationResolution: DEFAULT_PROXY_GENERATION_RESOLUTION,
+  proxyRecommendedMediaIds: [],
+
   // Whisper defaults
   defaultWhisperModel: DEFAULT_WHISPER_MODEL,
   defaultWhisperQuantization: DEFAULT_WHISPER_QUANTIZATION,
@@ -100,6 +147,31 @@ export const useSettingsStore = create<SettingsStore>()(
       ...DEFAULT_SETTINGS,
 
       setSetting: (key, value) => set({ [key]: value }),
+
+      markProxyRecommended: (mediaId) => set((state) => {
+        const normalized = mediaId.trim();
+        if (!normalized || state.proxyRecommendedMediaIds.includes(normalized)) {
+          return state;
+        }
+
+        return {
+          proxyRecommendedMediaIds: sanitizeProxyRecommendedMediaIds([
+            ...state.proxyRecommendedMediaIds,
+            normalized,
+          ]),
+        };
+      }),
+
+      clearProxyRecommended: (mediaId) => set((state) => {
+        const normalized = mediaId.trim();
+        if (!normalized || !state.proxyRecommendedMediaIds.includes(normalized)) {
+          return state;
+        }
+
+        return {
+          proxyRecommendedMediaIds: state.proxyRecommendedMediaIds.filter((id) => id !== normalized),
+        };
+      }),
 
       setHotkeyBinding: (key, binding) => set((state) => {
         const normalizedBinding = normalizeHotkeyBinding(binding);
@@ -163,6 +235,13 @@ export const useSettingsStore = create<SettingsStore>()(
         return {
           ...currentState,
           ...typedState,
+          proxyGenerationMode: normalizeProxyGenerationMode(typedState.proxyGenerationMode),
+          proxyGenerationResolution: normalizeProxyGenerationResolution(
+            typedState.proxyGenerationResolution
+          ),
+          proxyRecommendedMediaIds: sanitizeProxyRecommendedMediaIds(
+            typedState.proxyRecommendedMediaIds
+          ),
           hotkeyOverrides: sanitizeHotkeyOverrides(typedState.hotkeyOverrides),
         };
       },

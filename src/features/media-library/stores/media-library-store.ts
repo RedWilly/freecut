@@ -54,52 +54,34 @@ async function loadTranscriptStatusMap(
   }
 }
 
-function getProxyEligibleVideoItems(mediaItems: MediaMetadata[]): MediaMetadata[] {
+function getProxyCapableVideoItems(mediaItems: MediaMetadata[]): MediaMetadata[] {
   return mediaItems.filter(
-    (item) =>
-      item.mimeType.startsWith('video/')
-      && proxyService.needsProxy(item.width, item.height, item.mimeType, item.audioCodec)
+    (item) => proxyService.canGenerateProxy(item.mimeType)
   );
 }
 
-async function regenerateStaleProxies(videoItems: MediaMetadata[]): Promise<void> {
-  const sourceResults = await Promise.allSettled(
-    videoItems.map((item) => mediaLibraryService.getMediaFile(item.id))
-  );
-
-  sourceResults.forEach((result, index) => {
-    const item = videoItems[index];
-    if (!item) {
-      return;
-    }
-
-    if (result.status !== 'fulfilled') {
-      logger.warn(`[MediaLibraryStore] Failed to load source blob URL for stale proxy ${item.id}:`, result.reason);
-      return;
-    }
-
-    const source = result.value;
-    if (!source) {
-      logger.warn(`[MediaLibraryStore] Missing source blob for stale proxy ${item.id}`);
-      return;
-    }
-
+function enqueueBackgroundProxies(
+  videoItems: MediaMetadata[],
+  reason: 'recovery' | 'automatic',
+): void {
+  videoItems.forEach((item) => {
     try {
       proxyService.generateProxy(
         item.id,
-        source,
+        () => mediaLibraryService.getMediaFile(item.id),
         item.width,
         item.height,
-        getSharedProxyKey(item)
+        getSharedProxyKey(item),
+        { priority: 'background' }
       );
     } catch (error) {
-      logger.warn(`[MediaLibraryStore] Failed to enqueue stale proxy regeneration for ${item.id}:`, error);
+      logger.warn(`[MediaLibraryStore] Failed to enqueue ${reason} proxy generation for ${item.id}:`, error);
     }
   });
 }
 
 async function initializeProxyState(mediaItems: MediaMetadata[]): Promise<void> {
-  const videoItems = getProxyEligibleVideoItems(mediaItems);
+  const videoItems = getProxyCapableVideoItems(mediaItems);
 
   if (videoItems.length === 0) {
     return;
@@ -110,14 +92,25 @@ async function initializeProxyState(mediaItems: MediaMetadata[]): Promise<void> 
   }
 
   const staleProxyIds = await proxyService.loadExistingProxies(videoItems.map((item) => item.id));
-  if (staleProxyIds.length === 0) {
-    return;
-  }
-
   const staleProxyIdSet = new Set(staleProxyIds);
-  await regenerateStaleProxies(
-    videoItems.filter((item) => staleProxyIdSet.has(item.id))
+  enqueueBackgroundProxies(
+    videoItems.filter((item) => staleProxyIdSet.has(item.id)),
+    'recovery'
   );
+
+  const automaticProxyCandidates = videoItems.filter((item) => {
+    if (staleProxyIdSet.has(item.id)) {
+      return false;
+    }
+
+    if (!proxyService.needsProxy(item.width, item.height, item.mimeType, item.audioCodec, item.id)) {
+      return false;
+    }
+
+    return !proxyService.hasProxy(item.id, getSharedProxyKey(item));
+  });
+
+  enqueueBackgroundProxies(automaticProxyCandidates, 'automatic');
 }
 
 export const useMediaLibraryStore = create<
@@ -228,7 +221,8 @@ export const useMediaLibraryStore = create<
 
           event.set('transcriptsReady', [...transcriptStatus.values()].filter((s) => s === 'ready').length);
 
-          // Load existing proxies from OPFS and regenerate stale entries in the background.
+          // Load existing proxies from OPFS, recover interrupted jobs, and
+          // auto-generate missing smart proxies in the background.
           try {
             await initializeProxyState(mediaItems);
           } catch (error) {
@@ -428,6 +422,10 @@ useMediaLibraryStore.subscribe((state) => {
 // Wire up proxy service status listener to update store state
 proxyService.onStatusChange((mediaId, status, progress) => {
   const store = useMediaLibraryStore.getState();
+  if (status === 'idle') {
+    store.clearProxyStatus(mediaId);
+    return;
+  }
   store.setProxyStatus(mediaId, status);
   if (progress !== undefined) {
     store.setProxyProgress(mediaId, progress);

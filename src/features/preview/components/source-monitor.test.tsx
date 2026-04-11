@@ -38,6 +38,10 @@ const mediaStoreState = vi.hoisted(() => ({
   }],
 }));
 
+const proxyServiceState = vi.hoisted(() => ({
+  prioritizeProxy: vi.fn(),
+}));
+
 const itemsStoreState = vi.hoisted(() => ({
   tracks: [],
 }));
@@ -92,6 +96,7 @@ vi.mock('@/features/preview/deps/media-library', () => {
 
   return {
     useMediaLibraryStore,
+    proxyService: proxyServiceState,
     getMediaType: (mimeType: string) => {
       if (mimeType.startsWith('video/')) return 'video';
       if (mimeType.startsWith('audio/')) return 'audio';
@@ -197,5 +202,13 @@ describe('SourceMonitor current media ownership', () => {
     rendered.unmount();
 
     expect(sourcePlayerStoreState.releaseCurrentMediaId).toHaveBeenCalledWith('media-1');
+  });
+
+  it('promotes the active video proxy job when the source monitor opens', async () => {
+    render(<SourceMonitor mediaId="media-1" />);
+
+    await waitFor(() => {
+      expect(proxyServiceState.prioritizeProxy).toHaveBeenCalledWith('media-1');
+    });
   });
 });
