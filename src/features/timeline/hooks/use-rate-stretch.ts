@@ -42,7 +42,6 @@ export function getLoopingMediaStretchPreviewSpeed(initialSpeed: number, deltaFr
  */
 function computeRipplePreviewUpdates(
   items: TimelineItem[],
-  stretchedItemId: string,
   synchronizedIds: Set<string>,
   oldFrom: number,
   oldEnd: number,
@@ -250,6 +249,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
   const fps = useTimelineStore((s) => s.fps);
   const rateStretchItem = useTimelineStore((s) => s.rateStretchItem);
   const setDragState = useSelectionStore((s) => s.setDragState);
+  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget);
 
   // Get fresh item from store to ensure we have latest values after previous operations
   const getItemFromStore = useCallback(() => {
@@ -441,7 +441,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
     const oldEnd = initialFrom + initialDuration;
     const previewEnd = previewFrom + previewDuration;
     const rippleUpdates = computeRipplePreviewUpdates(
-      allItems, item.id, synchronizedIds,
+      allItems, synchronizedIds,
       initialFrom, oldEnd, previewFrom, previewEnd,
     );
 
@@ -456,12 +456,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
 
     if (snapChanged) {
       prevSnapTargetRef.current = snapTarget ? { frame: snapTarget.frame, type: snapTarget.type } : null;
-      setDragState({
-        isDragging: true,
-        draggedItemIds: [item.id],
-        offset: { x: deltaX, y: 0 },
-        activeSnapTarget: snapTarget,
-      });
+      setActiveSnapTarget(snapTarget);
     }
   });
 
@@ -519,6 +514,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
       }
 
       // Clear drag state (including snap indicator)
+      setActiveSnapTarget(null);
       setDragState(null);
       useLinkedEditPreviewStore.getState().clear();
       prevSnapTargetRef.current = null;
@@ -576,8 +572,8 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
         isDragging: true,
         draggedItemIds: [item.id],
         offset: { x: 0, y: 0 },
-        activeSnapTarget: null,
       });
+      setActiveSnapTarget(null);
 
       const currentSpeed = currentItem.speed || 1;
       const isLoopingMedia = currentItem.type === 'image'; // GIFs (images) can loop infinitely
@@ -617,7 +613,7 @@ export function useRateStretch(item: TimelineItem, timelineDuration: number, tra
         constraintLabel: null,
       });
     },
-    [trackLocked, getItemFromStore]
+    [trackLocked, getItemFromStore, item.id, setActiveSnapTarget, setDragState]
   );
 
   // Calculate visual feedback during stretch

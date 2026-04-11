@@ -284,9 +284,13 @@ export function useTimelineDrag(
 
   // Selection store - use granular selectors to prevent re-renders
   // NOTE: dragState subscription removed - activeSnapTarget is read directly in timeline-content.tsx
-  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
+  const selectedSnapExclusionIds = useSelectionStore(
+    useCallback((s) => (s.selectedItemIdSet.has(item.id) ? s.selectedItemIds : null), [item.id])
+  );
   const selectItems = useSelectionStore((s) => s.selectItems);
   const setDragState = useSelectionStore((s) => s.setDragState);
+  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget);
+  const setActiveLinkedDropTarget = useSelectionStore((s) => s.setActiveLinkedDropTarget);
 
   const clearLinkedMovePreview = useCallback(() => {
     if (linkedMovePreviewSignatureRef.current === '') {
@@ -338,11 +342,8 @@ export function useTimelineDrag(
       return null; // Don't exclude any items
     }
     // Normal drag: exclude dragging items from snap targets
-    if (selectedItemIds.includes(item.id)) {
-      return selectedItemIds;
-    }
-    return item.id;
-  }, [selectedItemIds, item.id, isAltDragActive]);
+    return selectedSnapExclusionIds ?? item.id;
+  }, [selectedSnapExclusionIds, item.id, isAltDragActive]);
 
   const { magneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
@@ -359,7 +360,6 @@ export function useTimelineDrag(
   const duplicateItemsRef = useRef(duplicateItems);
   const duplicateItemsWithTrackChangesRef = useRef(duplicateItemsWithTrackChanges);
   const tracksRef = useRef(tracks);
-  const selectedItemIdsRef = useRef(selectedItemIds);
 
   // Helper to get items on-demand (avoids subscription that would cause all items to re-render)
   const getItems = useCallback(() => useTimelineStore.getState().items, []);
@@ -381,8 +381,7 @@ export function useTimelineDrag(
     duplicateItemsRef.current = duplicateItems;
     duplicateItemsWithTrackChangesRef.current = duplicateItemsWithTrackChanges;
     tracksRef.current = tracks;
-    selectedItemIdsRef.current = selectedItemIds;
-  }, [frameToPixels, pixelsToFramePrecise, moveItem, moveItems, moveItemsWithTrackChanges, duplicateItems, duplicateItemsWithTrackChanges, tracks, selectedItemIds]);
+  }, [frameToPixels, pixelsToFramePrecise, moveItem, moveItems, moveItemsWithTrackChanges, duplicateItems, duplicateItemsWithTrackChanges, tracks]);
 
   /**
    * Calculate which track the mouse is over based on Y position
@@ -564,7 +563,7 @@ export function useTimelineDrag(
       e.stopPropagation();
 
       // Check if this item is in current selection
-      const currentSelectedIds = selectedItemIdsRef.current;
+      const currentSelectedIds = useSelectionStore.getState().selectedItemIds;
       const isInSelection = currentSelectedIds.includes(item.id);
 
       const allItems = getItems();
@@ -638,9 +637,10 @@ export function useTimelineDrag(
             isDragging: true,
             draggedItemIds: draggedIds,
             offset: { x: 0, y: 0 },
-            activeLinkedDropTarget: null,
             isAltDrag: e.altKey,
           });
+          setActiveSnapTarget(null);
+          setActiveLinkedDropTarget(null);
           clearLinkedMovePreview();
 
           // Remove this listener - the main useEffect will handle it now
@@ -661,7 +661,7 @@ export function useTimelineDrag(
       window.addEventListener('mousemove', checkDragThreshold);
       window.addEventListener('mouseup', cancelDrag);
     },
-    [clearLinkedMovePreview, item.id, item.from, item.trackId, selectItems, trackLocked, setDragState, getItems]
+    [clearLinkedMovePreview, item.id, item.from, item.trackId, selectItems, trackLocked, setActiveLinkedDropTarget, setActiveSnapTarget, setDragState, getItems]
   );
 
   /**
@@ -908,7 +908,7 @@ export function useTimelineDrag(
       // Only update store when snap target or alt state actually changes to reduce re-renders
       const prevSnap = prevSnapTargetRef.current;
       const newSnap = snapResult.snapTarget;
-      const prevLinkedDropTarget = useSelectionStore.getState().dragState?.activeLinkedDropTarget ?? null;
+      const prevLinkedDropTarget = useSelectionStore.getState().activeLinkedDropTarget;
       const linkedDropChanged =
         (prevLinkedDropTarget === null && linkedDropTarget !== null) ||
         (prevLinkedDropTarget !== null && linkedDropTarget === null) ||
@@ -924,15 +924,17 @@ export function useTimelineDrag(
 
       if (snapChanged || altKeyChanged || linkedDropChanged) {
         prevSnapTargetRef.current = newSnap ? { frame: newSnap.frame, type: newSnap.type } : null;
-        const draggedIds = dragStateRef.current?.draggedItems.map((item) => item.id) || [];
-        setDragState({
-          isDragging: true,
-          draggedItemIds: draggedIds,
-          offset: { x: clampedDeltaX, y: deltaY },
-          activeSnapTarget: snapResult.snapTarget,
-          activeLinkedDropTarget: linkedDropTarget,
-          isAltDrag: e.altKey,
-        });
+        setActiveSnapTarget(snapResult.snapTarget);
+        setActiveLinkedDropTarget(linkedDropTarget);
+        if (altKeyChanged) {
+          const draggedIds = dragStateRef.current?.draggedItems.map((item) => item.id) || [];
+          setDragState({
+            isDragging: true,
+            draggedItemIds: draggedIds,
+            offset: { x: clampedDeltaX, y: deltaY },
+            isAltDrag: e.altKey,
+          });
+        }
       }
     };
 
@@ -1081,7 +1083,11 @@ export function useTimelineDrag(
             document.body.style.userSelect = '';
             setIsDragging(false);
             setDragOffset({ x: 0, y: 0 });
-            queueMicrotask(() => setDragState(null));
+            queueMicrotask(() => {
+              setActiveSnapTarget(null);
+              setActiveLinkedDropTarget(null);
+              setDragState(null);
+            });
             return;
           }
 
@@ -1205,6 +1211,8 @@ export function useTimelineDrag(
       // Defer selection store cleanup to next microtask to avoid
       // synchronous re-render cascade after move operation
       queueMicrotask(() => {
+        setActiveSnapTarget(null);
+        setActiveLinkedDropTarget(null);
         setDragState(null);
       });
     };
@@ -1221,7 +1229,7 @@ export function useTimelineDrag(
         document.body.style.userSelect = '';
       };
     }
-  }, [isDragging, item.id, item.durationInFrames, item.type, getCompatibleTrackIdFromMouseY, getTrackDropTarget, calculateMagneticSnap, clearLinkedMovePreview, elementRef, getItems, setDragState, setLinkedMovePreview]);
+  }, [isDragging, item.id, item.durationInFrames, item.type, getCompatibleTrackIdFromMouseY, getTrackDropTarget, calculateMagneticSnap, clearLinkedMovePreview, elementRef, getItems, setActiveLinkedDropTarget, setActiveSnapTarget, setDragState, setLinkedMovePreview]);
 
   return {
     isDragging,

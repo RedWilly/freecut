@@ -260,11 +260,14 @@ export const TransitionItem = memo(function TransitionItem({
   const containerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
   const bothClipsDragged = useSelectionStore(
-    useCallback((state: SelectionState) => (
-      !!state.dragState?.isDragging
-      && state.dragState.draggedItemIds.includes(transition.leftClipId)
-      && state.dragState.draggedItemIds.includes(transition.rightClipId)
-    ), [transition.leftClipId, transition.rightClipId])
+    useCallback((state: SelectionState) => {
+      if (!state.dragState?.isDragging) {
+        return false;
+      }
+
+      const draggedItemIdSet = state.dragState.draggedItemIdSet ?? new Set(state.dragState.draggedItemIds);
+      return draggedItemIdSet.has(transition.leftClipId) && draggedItemIdSet.has(transition.rightClipId);
+    }, [transition.leftClipId, transition.rightClipId])
   );
   /*
    * This effect subscribes to a boolean derived from selection state instead

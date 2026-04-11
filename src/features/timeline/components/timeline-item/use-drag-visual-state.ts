@@ -80,16 +80,16 @@ export function useDragVisualState({
   }));
   const dragAffectsJoin = useSelectionStore(
     useShallow((state) => {
-      const draggedItemIds = state.dragState?.draggedItemIds ?? [];
-      const itemDragged = draggedItemIds.includes(item.id);
-
       if (!state.dragState?.isDragging) {
         return { left: false, right: false };
       }
 
+      const draggedItemIds = state.dragState.draggedItemIdSet ?? new Set(state.dragState.draggedItemIds);
+      const itemDragged = draggedItemIds.has(item.id);
+
       return {
-        left: itemDragged || !!(neighboringJoinIds.leftId && draggedItemIds.includes(neighboringJoinIds.leftId)),
-        right: itemDragged || !!(neighboringJoinIds.rightId && draggedItemIds.includes(neighboringJoinIds.rightId)),
+        left: itemDragged || !!(neighboringJoinIds.leftId && draggedItemIds.has(neighboringJoinIds.leftId)),
+        right: itemDragged || !!(neighboringJoinIds.rightId && draggedItemIds.has(neighboringJoinIds.rightId)),
       };
     })
   );

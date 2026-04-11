@@ -28,6 +28,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
   const pixelsToTime = pixelsToTimeNow;
   const fps = useTimelineStore((s) => s.fps);
   const setDragState = useSelectionStore((s) => s.setDragState);
+  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget);
   const { getMagneticSnapTargets, getSnapThresholdFrames, snapEnabled } = useSnapCalculator(
     timelineDuration,
     item.id
@@ -99,14 +100,9 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
       (prevSnap !== null && snapTarget !== null && (prevSnap.frame !== snapTarget.frame || prevSnap.type !== snapTarget.type));
     if (snapChanged) {
       prevSnapTargetRef.current = snapTarget ? { frame: snapTarget.frame, type: snapTarget.type } : null;
-      setDragState({
-        isDragging: true,
-        draggedItemIds: [item.id],
-        offset: { x: deltaX, y: 0 },
-        activeSnapTarget: snapTarget,
-      });
+      setActiveSnapTarget(snapTarget);
     }
-  }, [pixelsToTime, fps, trackLocked, findSnapForFrame, setDragState, item.id, item.from]);
+  }, [pixelsToTime, fps, trackLocked, findSnapForFrame, setActiveSnapTarget, item.id, item.from]);
 
   const handleMouseUp = useCallback(() => {
     if (!stateRef.current.isActive) return;
@@ -115,10 +111,11 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
       trackPushItems(item.id, delta);
     }
     useTrackPushPreviewStore.getState().clearPreview();
+    setActiveSnapTarget(null);
     setDragState(null);
     prevSnapTargetRef.current = null;
     setState({ isActive: false, startX: 0, currentDelta: 0, maxLeftFrames: 0 });
-  }, [item.id, setDragState]);
+  }, [item.id, setActiveSnapTarget, setDragState]);
 
   useEffect(() => {
     if (state.isActive) {
@@ -128,10 +125,11 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
         useTrackPushPreviewStore.getState().clearPreview();
+        setActiveSnapTarget(null);
         setDragState(null);
       };
     }
-  }, [state.isActive, handleMouseMove, handleMouseUp]);
+  }, [state.isActive, handleMouseMove, handleMouseUp, setActiveSnapTarget, setDragState]);
 
   const handleTrackPushStart = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0 || trackLocked) return;
@@ -186,8 +184,8 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
       isDragging: true,
       draggedItemIds: [],
       offset: { x: 0, y: 0 },
-      activeSnapTarget: null,
     });
+    setActiveSnapTarget(null);
 
     setState({
       isActive: true,
@@ -195,7 +193,7 @@ export function useTrackPush(item: TimelineItem, timelineDuration: number, track
       currentDelta: 0,
       maxLeftFrames: Math.max(0, minGap),
     });
-  }, [item.id, item.trackId, item.from, trackLocked, setDragState]);
+  }, [item.id, item.trackId, item.from, trackLocked, setActiveSnapTarget, setDragState]);
 
   return {
     isTrackPushActive: state.isActive,

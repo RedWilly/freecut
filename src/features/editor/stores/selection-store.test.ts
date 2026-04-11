@@ -186,7 +186,11 @@ describe('selection-store', () => {
         offset: { x: 10, y: 20 },
       };
       useSelectionStore.getState().setDragState(dragState);
-      expect(useSelectionStore.getState().dragState).toEqual(dragState);
+      expect(useSelectionStore.getState().dragState).toEqual({
+        ...dragState,
+        draggedItemIdSet: new Set(['item-1']),
+        draggedTrackIdSet: new Set(),
+      });
 
       useSelectionStore.getState().setDragState(null);
       expect(useSelectionStore.getState().dragState).toBe(null);

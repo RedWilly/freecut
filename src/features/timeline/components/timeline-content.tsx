@@ -166,6 +166,7 @@ const TimelineMarqueeLayer = memo(function TimelineMarqueeLayer({
     enabled: itemIds.length > 0,
     threshold: 5,
     commitSelectionOnMouseUp: true,
+    liveCommitThrottleMs: 66,
   });
 
   useEffect(() => {
@@ -255,7 +256,7 @@ export const TimelineContent = memo(function TimelineContent({
   const clearItemSelection = useSelectionStore((s) => s.clearItemSelection);
   // Granular selectors for drag state - avoid subscribing to entire dragState object
   const isDragging = useSelectionStore((s) => !!s.dragState?.isDragging);
-  const activeSnapTarget = useSelectionStore((s) => s.dragState?.activeSnapTarget ?? null);
+  const activeSnapTarget = useSelectionStore((s) => s.activeSnapTarget);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const tracksContainerRef = useRef<HTMLDivElement>(null);

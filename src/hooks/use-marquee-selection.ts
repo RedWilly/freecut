@@ -67,7 +67,7 @@ interface UseMarqueeSelectionOptions {
   /** Defer onSelectionChange until mouseup; useful when live commits are too expensive */
   commitSelectionOnMouseUp?: boolean;
 
-  /** When deferring selection, still publish lightweight live commits at this cadence */
+  /** When deferring selection, still publish throttled live commits at this cadence */
   liveCommitThrottleMs?: number;
 }
 
@@ -288,9 +288,8 @@ export function useMarqueeSelection({
     if (!areStringListsEqual(prevIds, intersectingIds)) {
       prevSelectedIdsRef.current = intersectingIds;
       if (commitSelectionOnMouseUp) {
-        if (!scheduleLiveCommit(intersectingIds)) {
-          onPreviewSelectionChangeRef.current?.(intersectingIds);
-        }
+        onPreviewSelectionChangeRef.current?.(intersectingIds);
+        scheduleLiveCommit(intersectingIds);
       } else {
         onSelectionChangeRef.current?.(intersectingIds);
       }
@@ -469,10 +468,10 @@ export function useMarqueeSelection({
     // Only prevent background click if an actual marquee drag happened
     if (wasActualDrag) {
       if (commitSelectionOnMouseUp) {
+        onPreviewSelectionChangeRef.current?.([]);
         if (liveCommitThrottleMs > 0) {
           flushLiveCommit(prevSelectedIdsRef.current);
         } else {
-          onPreviewSelectionChangeRef.current?.([]);
           onSelectionChangeRef.current?.(prevSelectedIdsRef.current);
         }
       }
@@ -490,9 +489,8 @@ export function useMarqueeSelection({
           liveCommitTimeoutRef.current = null;
         }
         pendingLiveCommitIdsRef.current = null;
-      } else {
-        onPreviewSelectionChangeRef.current?.([]);
       }
+      onPreviewSelectionChangeRef.current?.([]);
     }
   });
 

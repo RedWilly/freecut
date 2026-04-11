@@ -223,6 +223,57 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
 
   const selectedAssetCount = selectedMediaIds.length + selectedCompositionIds.length;
   const deleteAssetCount = pendingDeletion.mediaIds.length + pendingDeletion.compositionIds.length;
+  const previewAssetIdsRef = useRef<string[]>([]);
+
+  const setPreviewAssetIds = useCallback((ids: string[]) => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      previewAssetIdsRef.current = ids;
+      return;
+    }
+
+    const nextIds = new Set(ids);
+    for (const previousId of previewAssetIdsRef.current) {
+      if (nextIds.has(previousId)) {
+        continue;
+      }
+
+      if (previousId.startsWith('media:')) {
+        container
+          .querySelector(`[data-media-id="${previousId.slice('media:'.length)}"]`)
+          ?.classList.remove('media-marquee-preview');
+      } else if (previousId.startsWith('composition:')) {
+        container
+          .querySelector(`[data-composition-id="${previousId.slice('composition:'.length)}"]`)
+          ?.classList.remove('composition-marquee-preview');
+      }
+    }
+
+    const previousIds = new Set(previewAssetIdsRef.current);
+    for (const id of ids) {
+      if (previousIds.has(id)) {
+        continue;
+      }
+
+      if (id.startsWith('media:')) {
+        container
+          .querySelector(`[data-media-id="${id.slice('media:'.length)}"]`)
+          ?.classList.add('media-marquee-preview');
+      } else if (id.startsWith('composition:')) {
+        container
+          .querySelector(`[data-composition-id="${id.slice('composition:'.length)}"]`)
+          ?.classList.add('composition-marquee-preview');
+      }
+    }
+
+    previewAssetIdsRef.current = ids;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      setPreviewAssetIds([]);
+    };
+  }, [setPreviewAssetIds]);
 
   const marqueeItems: MarqueeItem[] = useMemo(
     () => [
@@ -266,6 +317,9 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     containerRef: scrollContainerRef as React.RefObject<HTMLElement>,
     items: marqueeItems,
     enabled: marqueeItems.length > 0,
+    onPreviewSelectionChange: setPreviewAssetIds,
+    commitSelectionOnMouseUp: true,
+    liveCommitThrottleMs: 66,
     onSelectionChange: (ids) => {
       const nextMediaIds: string[] = [];
       const nextCompositionIds: string[] = [];

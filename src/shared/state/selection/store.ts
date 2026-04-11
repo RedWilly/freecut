@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SelectionState, SelectionActions } from './types';
+import type { SelectionState, SelectionActions, SelectionDragState } from './types';
 
 function areStringListsEqual(previous: readonly string[], next: readonly string[]): boolean {
   if (previous.length !== next.length) {
@@ -15,6 +15,18 @@ function areStringListsEqual(previous: readonly string[], next: readonly string[
   return true;
 }
 
+function normalizeDragState(dragState: SelectionDragState): SelectionDragState {
+  if (!dragState) {
+    return null;
+  }
+
+  return {
+    ...dragState,
+    draggedItemIdSet: dragState.draggedItemIdSet ?? new Set(dragState.draggedItemIds),
+    draggedTrackIdSet: dragState.draggedTrackIdSet ?? new Set(dragState.draggedTrackIds ?? []),
+  };
+}
+
 export const useSelectionStore = create<SelectionState & SelectionActions>((set) => ({
   // State
   selectedItemIds: [],
@@ -26,6 +38,8 @@ export const useSelectionStore = create<SelectionState & SelectionActions>((set)
   activeTrackId: null,
   selectionType: null,
   activeTool: 'select',
+  activeSnapTarget: null,
+  activeLinkedDropTarget: null,
   dragState: null,
   expandedKeyframeLanes: new Set<string>(),
 
@@ -128,7 +142,13 @@ export const useSelectionStore = create<SelectionState & SelectionActions>((set)
     selectedItemIdSet: new Set<string>(),
     selectionType: state.selectedTrackIds.length > 0 ? 'track' : null,
   })),
-  setDragState: (dragState) => set({ dragState }),
+  setDragState: (dragState) => set((state) => ({
+    dragState: normalizeDragState(dragState),
+    activeSnapTarget: dragState ? state.activeSnapTarget : null,
+    activeLinkedDropTarget: dragState ? state.activeLinkedDropTarget : null,
+  })),
+  setActiveSnapTarget: (activeSnapTarget) => set({ activeSnapTarget }),
+  setActiveLinkedDropTarget: (activeLinkedDropTarget) => set({ activeLinkedDropTarget }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   // Keyframe lanes expansion
   toggleKeyframeLanes: (itemId) => set((state) => {

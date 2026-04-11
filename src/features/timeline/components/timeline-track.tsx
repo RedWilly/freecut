@@ -498,9 +498,8 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
         if (!s.dragState?.isDragging) return false;
         const trackItems = useItemsStore.getState().itemsByTrackId[track.id];
         if (!trackItems) return false;
-        return s.dragState.draggedItemIds.some(
-          (dragId) => trackItems.some((item) => item.id === dragId)
-        );
+        const draggedItemIdSet = s.dragState.draggedItemIdSet ?? new Set(s.dragState.draggedItemIds);
+        return trackItems.some((item) => draggedItemIdSet.has(item.id));
       },
       [track.id]
     )
