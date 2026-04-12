@@ -5,27 +5,31 @@ import { useWaveform } from '../../hooks/use-waveform';
 import { mediaLibraryService } from '@/features/timeline/deps/media-library-service';
 import { resolveMediaUrl } from '@/features/timeline/deps/media-library-resolver';
 import { useMediaBlobUrl } from '../../hooks/use-media-blob-url';
-import { needsCustomAudioDecoder } from '@/features/timeline/deps/composition-runtime';
+import {
+  needsCustomAudioDecoder,
+  startPreviewAudioConform,
+  startPreviewAudioStartupWarm,
+} from '@/features/timeline/deps/composition-runtime';
 import { WAVEFORM_FILL_COLOR, WAVEFORM_STROKE_COLOR } from '../../constants';
 import { createLogger } from '@/shared/logging/logger';
+import { computeWaveformRenderWindow } from './render-window';
+import {
+  getWaveformActiveTileCount,
+  useAdaptiveWaveformRenderVersion,
+} from './adaptive-render-version';
 
 const logger = createLogger('ClipWaveform');
 
 // Continuous filled-path waveform styling (NLE-style)
 const WAVEFORM_VERTICAL_PADDING_PX = 3;
-const ZOOM_SETTLE_MS = 80;
-const RENDER_PPS_QUANTUM = 5;
-
-function quantizeRenderPps(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  return Math.max(1, Math.round(value / RENDER_PPS_QUANTUM) * RENDER_PPS_QUANTUM);
-}
 
 interface ClipWaveformProps {
   /** Media ID from the timeline item */
   mediaId: string;
-  /** Width of the clip in pixels */
+  /** Visible width of the clip in pixels */
   clipWidth: number;
+  /** Optional overscan width used to hide trailing-edge width commit lag */
+  renderWidth?: number;
   /** Source start time in seconds (for trimmed clips) */
   sourceStart: number;
   /** Total source duration in seconds */
@@ -38,6 +42,9 @@ interface ClipWaveformProps {
   fps: number;
   /** Whether the clip is visible (from IntersectionObserver) */
   isVisible: boolean;
+  /** Visible horizontal range within this clip (0-1 ratios) */
+  visibleStartRatio?: number;
+  visibleEndRatio?: number;
   /** Pixels per second from parent (avoids redundant zoom subscription) */
   pixelsPerSecond: number;
 }
@@ -51,12 +58,15 @@ interface ClipWaveformProps {
 export const ClipWaveform = memo(function ClipWaveform({
   mediaId,
   clipWidth,
+  renderWidth,
   sourceStart,
   sourceDuration,
   trimStart,
   speed,
   fps,
   isVisible,
+  visibleStartRatio = 0,
+  visibleEndRatio = 1,
   pixelsPerSecond,
 }: ClipWaveformProps) {
   void fps;
@@ -64,9 +74,7 @@ export const ClipWaveform = memo(function ClipWaveform({
   const pixelsPerSecondRef = useRef(pixelsPerSecond);
   pixelsPerSecondRef.current = pixelsPerSecond;
   const [height, setHeight] = useState(0);
-  const [isZooming, setIsZooming] = useState(false);
-  const zoomSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPpsRef = useRef(pixelsPerSecond);
+  const conformStartedRef = useRef(false);
   const { blobUrl, setBlobUrl, hasStartedLoadingRef, blobUrlVersion } = useMediaBlobUrl(mediaId);
 
   // Measure container height
@@ -93,6 +101,12 @@ export const ClipWaveform = memo(function ClipWaveform({
 
   // Track if audio codec is supported for waveform generation
   const [audioCodecSupported, setAudioCodecSupported] = useState(true);
+  const visibleClipWidth = clipWidth;
+  const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth);
+
+  useEffect(() => {
+    conformStartedRef.current = false;
+  }, [mediaId]);
 
   // Load blob URL for the media when visible, including post-invalidation retries.
   useEffect(() => {
@@ -117,8 +131,12 @@ export const ClipWaveform = memo(function ClipWaveform({
 
         // AC-3/E-AC-3 can still generate waveform via mediabunny even if old metadata
         // marked codec unsupported before custom decode was added.
+        const previewAudioCodec = media?.mimeType.startsWith('audio/')
+          ? media.codec
+          : (media?.audioCodec ?? media?.codec);
+        const requiresCustomDecode = needsCustomAudioDecoder(previewAudioCodec);
         const codecSupported = media
-          ? (media.audioCodecSupported !== false || needsCustomAudioDecoder(media.audioCodec))
+          ? (media.audioCodecSupported !== false || requiresCustomDecode)
           : true;
         setAudioCodecSupported(codecSupported);
 
@@ -130,6 +148,17 @@ export const ClipWaveform = memo(function ClipWaveform({
         const url = await resolveMediaUrl(mediaId);
         if (mounted && url) {
           setBlobUrl(url);
+          if (requiresCustomDecode && !conformStartedRef.current) {
+            conformStartedRef.current = true;
+            const startupWarmup = startPreviewAudioStartupWarm(mediaId, url).catch((error) => {
+              logger.warn('Failed to warm preview startup audio from waveform load:', error);
+            });
+            void startupWarmup.finally(() => {
+              void startPreviewAudioConform(mediaId, url).catch((error) => {
+                logger.warn('Failed to start preview audio conform from waveform load:', error);
+              });
+            });
+          }
         }
       } catch (error) {
         logger.error('Failed to load media blob URL:', error);
@@ -144,53 +173,30 @@ export const ClipWaveform = memo(function ClipWaveform({
   }, [mediaId, isVisible, blobUrlVersion]);
 
   // Use waveform hook - enabled once we have blobUrl (independent of visibility after that)
-  const { peaks, duration, sampleRate, isLoading, progress, error } = useWaveform({
+  const { peaks, duration, sampleRate, stereo, maxPeak, loadedSamples, isLoading, error } = useWaveform({
     mediaId,
     blobUrl,
     isVisible: true, // Always consider visible once we start - prevents re-triggers
     enabled: !!blobUrl,
+    deferDurationSec: sourceDuration,
   });
-
-  // Normalize visual scale per clip so low-amplitude sources are still readable.
-  const normalizationPeak = useMemo(() => {
-    if (!peaks || peaks.length === 0) return 1;
-    let maxPeak = 0;
-    for (let i = 0; i < peaks.length; i++) {
-      const value = peaks[i] ?? 0;
-      if (value > maxPeak) {
-        maxPeak = value;
-      }
-    }
-    return maxPeak > 0 ? maxPeak : 1;
-  }, [peaks]);
-
-  // During active zoom, redraw only when the quantized zoom bucket changes.
-  // Once zoom settles, force one exact redraw at the final pixels-per-second.
-  useEffect(() => {
-    if (lastPpsRef.current === pixelsPerSecond) return;
-    lastPpsRef.current = pixelsPerSecond;
-
-    setIsZooming(true);
-    if (zoomSettleTimeoutRef.current) {
-      clearTimeout(zoomSettleTimeoutRef.current);
-    }
-
-    zoomSettleTimeoutRef.current = setTimeout(() => {
-      setIsZooming(false);
-      zoomSettleTimeoutRef.current = null;
-    }, ZOOM_SETTLE_MS);
-  }, [pixelsPerSecond]);
-
-  useEffect(() => {
-    return () => {
-      if (zoomSettleTimeoutRef.current) {
-        clearTimeout(zoomSettleTimeoutRef.current);
-      }
-    };
-  }, []);
+  const normalizationPeak = maxPeak > 0 ? maxPeak : 1;
+  const peakSampleCount = useMemo(
+    () => (peaks ? (stereo ? Math.floor(peaks.length / 2) : peaks.length) : 0),
+    [peaks, stereo]
+  );
+  const { visibleStartPx, visibleEndPx } = useMemo(
+    () => computeWaveformRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+    }),
+    [renderClipWidth, visibleClipWidth, visibleStartRatio, visibleEndRatio]
+  );
 
   // Render function for tiled canvas. Keep the callback stable through zoom
-  // changes and use versioning to decide when to redraw.
+  // changes and use versioning to trigger redraws at the current zoom level.
   const renderTile = useCallback(
     (
       ctx: CanvasRenderingContext2D,
@@ -198,7 +204,7 @@ export const ClipWaveform = memo(function ClipWaveform({
       tileOffset: number,
       tileWidth: number
     ) => {
-      if (!peaks || peaks.length === 0 || duration === 0) {
+      if (!peaks || peakSampleCount === 0 || duration === 0) {
         return;
       }
 
@@ -220,7 +226,7 @@ export const ClipWaveform = memo(function ClipWaveform({
         }
 
         const peakIndex = Math.floor(sourceTime * sampleRate);
-        if (peakIndex < 0 || peakIndex >= peaks.length) {
+        if (peakIndex < 0 || peakIndex >= peakSampleCount) {
           continue;
         }
 
@@ -232,14 +238,16 @@ export const ClipWaveform = memo(function ClipWaveform({
         const samplesPerPoint = Math.max(1, Math.ceil(pointWindowSeconds * sampleRate));
         const halfWindow = Math.floor(samplesPerPoint / 2);
         const windowStart = Math.max(0, peakIndex - halfWindow);
-        const windowEnd = Math.min(peaks.length, peakIndex + halfWindow + 1);
+        const windowEnd = Math.min(peakSampleCount, peakIndex + halfWindow + 1);
 
         let max1 = 0;
         let max2 = 0;
         let windowSum = 0;
         let sampleCount = 0;
         for (let i = windowStart; i < windowEnd; i++) {
-          const value = peaks[i] ?? 0;
+          const value = stereo
+            ? Math.max(peaks[i * 2] ?? 0, peaks[i * 2 + 1] ?? 0)
+            : (peaks[i] ?? 0);
           if (value >= max1) {
             max2 = max1;
             max1 = value;
@@ -282,8 +290,31 @@ export const ClipWaveform = memo(function ClipWaveform({
       ctx.lineWidth = 0.75;
       ctx.stroke();
     },
-    [peaks, duration, sampleRate, sourceStart, trimStart, speed, sourceDuration, height, normalizationPeak]
+    [
+      peaks,
+      peakSampleCount,
+      duration,
+      sampleRate,
+      sourceStart,
+      trimStart,
+      speed,
+      sourceDuration,
+      height,
+      normalizationPeak,
+      stereo,
+    ]
   );
+
+  const activeTileCount = useMemo(() => getWaveformActiveTileCount({
+    renderWidth: renderClipWidth,
+    visibleStartPx,
+    visibleEndPx,
+  }), [renderClipWidth, visibleStartPx, visibleEndPx]);
+  const renderVersion = useAdaptiveWaveformRenderVersion({
+    baseVersion: `${loadedSamples}:${height}`,
+    pixelsPerSecond,
+    activeTileCount,
+  });
 
   // Show empty state for unsupported/failed waveforms (no infinite skeleton).
   if (!audioCodecSupported || !!error) {
@@ -314,13 +345,6 @@ export const ClipWaveform = memo(function ClipWaveform({
     );
   }
 
-  const progressBucket = Math.floor(progress);
-  const isActiveZoomRender = isZooming || lastPpsRef.current !== pixelsPerSecond;
-  const renderPpsKey = isActiveZoomRender
-    ? `q${quantizeRenderPps(pixelsPerSecond)}`
-    : `e${Math.round(Math.max(1, pixelsPerSecond) * 1000)}`;
-  const renderVersion = `${progressBucket}:${peaks.length}:${height}:${renderPpsKey}`;
-
   return (
     <div ref={containerRef} className="absolute inset-0">
       {/* Show shimmer skeleton behind canvas while loading progressively */}
@@ -328,10 +352,13 @@ export const ClipWaveform = memo(function ClipWaveform({
         <WaveformSkeleton clipWidth={clipWidth} height={height} />
       )}
       <TiledCanvas
-        width={clipWidth}
+        width={renderClipWidth}
         height={height}
         renderTile={renderTile}
         version={renderVersion}
+        visibleStartPx={visibleStartPx}
+        visibleEndPx={visibleEndPx}
+        overscanTiles={1}
       />
     </div>
   );

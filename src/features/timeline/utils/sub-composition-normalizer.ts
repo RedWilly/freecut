@@ -16,6 +16,7 @@ function createFallbackTrack(trackId: string, order: number): TimelineTrack {
     name: `Track ${order + 1}`,
     height: DEFAULT_TRACK_HEIGHT,
     locked: false,
+    syncLock: true,
     visible: true,
     muted: false,
     solo: false,

@@ -3,6 +3,7 @@ import { createRelinkingActions } from './media-relinking-actions';
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import type { MediaLibraryState, MediaLibraryActions, BrokenMediaInfo } from '../types';
 import type { MediaMetadata } from '@/types/storage';
+import type { TimelineItem } from '@/types/timeline';
 
 // Mock external dependencies
 vi.mock('../services/media-library-service', () => ({
@@ -13,18 +14,27 @@ vi.mock('../services/media-library-service', () => ({
 }));
 
 vi.mock('@/features/media-library/deps/timeline-actions', () => ({
-  removeItems: vi.fn(),
-  updateItem: vi.fn(),
+  removeProjectItems: vi.fn(),
+  updateProjectItem: vi.fn(),
 }));
 
 vi.mock('@/features/media-library/deps/timeline-stores', () => ({
   useTimelineSettingsStore: {
     getState: () => ({ fps: 30 }),
   },
+  useItemsStore: {
+    getState: vi.fn(() => ({
+      items: [],
+      itemById: {},
+    })),
+  },
+  getSynchronizedLinkedItems: vi.fn(() => []),
 }));
 
 // Import after mocks
 import { mediaLibraryService } from '../services/media-library-service';
+import { removeProjectItems, updateProjectItem } from '@/features/media-library/deps/timeline-actions';
+import { getSynchronizedLinkedItems, useItemsStore } from '@/features/media-library/deps/timeline-stores';
 
 // Helpers
 type RelinkingState = Partial<MediaLibraryState> & Partial<MediaLibraryActions>;
@@ -49,6 +59,22 @@ function createMockMediaMetadata(id: string, fileName: string): MediaMetadata {
     createdAt: 0,
     updatedAt: 0,
   };
+}
+
+function createMockTimelineItem(
+  overrides: Partial<TimelineItem> & Pick<TimelineItem, 'id' | 'type' | 'trackId' | 'from' | 'durationInFrames' | 'label'>
+): TimelineItem {
+  return {
+    id: 'item-1',
+    type: 'video',
+    trackId: 'track-1',
+    from: 0,
+    durationInFrames: 30,
+    label: 'clip.mp4',
+    mediaId: 'media-1',
+    src: 'blob:test',
+    ...overrides,
+  } as TimelineItem;
 }
 
 function applyStateUpdate(
@@ -93,6 +119,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   blobUrlManager.releaseAll();
   blobUrlCounter = 0;
+
+  (updateProjectItem as Mock).mockReturnValue(true);
+  (removeProjectItems as Mock).mockReturnValue(true);
+  (getSynchronizedLinkedItems as Mock).mockReturnValue([]);
+  (useItemsStore.getState as Mock).mockReturnValue({
+    items: [],
+    itemById: {},
+  });
 
   vi.stubGlobal('URL', {
     ...URL,
@@ -305,5 +339,169 @@ describe('createRelinkingActions', () => {
       expect(blobUrlManager.has('media-2')).toBe(true);
     });
   });
-});
 
+  describe('relinkOrphanedClip', () => {
+    it('relinks a synchronized audio-video pair together', async () => {
+      const replacementMedia = createMockMediaMetadata('media-2', 'replacement.mp4');
+      const videoItem = createMockTimelineItem({
+        id: 'video-1',
+        type: 'video',
+        trackId: 'track-v1',
+        mediaId: 'missing-media',
+        linkedGroupId: 'group-1',
+        label: 'missing.mp4',
+      });
+      const audioItem = createMockTimelineItem({
+        id: 'audio-1',
+        type: 'audio',
+        trackId: 'track-a1',
+        mediaId: 'missing-media',
+        linkedGroupId: 'group-1',
+        label: 'missing.wav',
+        src: 'blob:audio',
+      });
+
+      (mediaLibraryService.getMedia as Mock).mockResolvedValue(replacementMedia);
+      (getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem]);
+      (useItemsStore.getState as Mock).mockReturnValue({
+        items: [videoItem, audioItem],
+        itemById: {
+          'video-1': videoItem,
+          'audio-1': audioItem,
+        },
+      });
+
+      const mockState = createMockState();
+      mockState.orphanedClips = [
+        { itemId: 'video-1', mediaId: 'missing-media', itemType: 'video', fileName: 'missing.mp4', trackId: 'track-v1' },
+        { itemId: 'audio-1', mediaId: 'missing-media', itemType: 'audio', fileName: 'missing.wav', trackId: 'track-a1' },
+      ];
+      let currentState: RelinkingState = mockState;
+      const set = vi.fn((updater: RelinkingUpdater) => {
+        currentState = applyStateUpdate(currentState, updater);
+      });
+      const get = vi.fn(() => currentState as MediaLibraryState & MediaLibraryActions);
+
+      const actions = createRelinkingActions(set, get);
+      const result = await actions.relinkOrphanedClip('video-1', 'media-2');
+
+      expect(result).toBe(true);
+      expect(updateProjectItem).toHaveBeenCalledTimes(2);
+      expect(updateProjectItem).toHaveBeenNthCalledWith(1, 'video-1', expect.objectContaining({
+        mediaId: 'media-2',
+        label: 'replacement.mp4',
+      }));
+      expect(updateProjectItem).toHaveBeenNthCalledWith(2, 'audio-1', expect.objectContaining({
+        mediaId: 'media-2',
+        label: 'replacement.mp4',
+      }));
+      expect(currentState.orphanedClips).toEqual([]);
+      expect(currentState.showNotification).toHaveBeenCalledWith({
+        type: 'success',
+        message: 'Linked clips relinked to "replacement.mp4"',
+      });
+    });
+
+    it('skips duplicate work when the linked pair was already relinked', async () => {
+      const replacementMedia = createMockMediaMetadata('media-2', 'replacement.mp4');
+      const videoItem = createMockTimelineItem({
+        id: 'video-1',
+        type: 'video',
+        trackId: 'track-v1',
+        mediaId: 'media-2',
+        linkedGroupId: 'group-1',
+        label: 'replacement.mp4',
+      });
+      const audioItem = createMockTimelineItem({
+        id: 'audio-1',
+        type: 'audio',
+        trackId: 'track-a1',
+        mediaId: 'media-2',
+        linkedGroupId: 'group-1',
+        label: 'replacement.mp4',
+        src: 'blob:audio',
+      });
+
+      (mediaLibraryService.getMedia as Mock).mockResolvedValue(replacementMedia);
+      (getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem]);
+      (useItemsStore.getState as Mock).mockReturnValue({
+        items: [videoItem, audioItem],
+        itemById: {
+          'video-1': videoItem,
+          'audio-1': audioItem,
+        },
+      });
+
+      const mockState = createMockState();
+      mockState.orphanedClips = [
+        { itemId: 'video-1', mediaId: 'missing-media', itemType: 'video', fileName: 'missing.mp4', trackId: 'track-v1' },
+        { itemId: 'audio-1', mediaId: 'missing-media', itemType: 'audio', fileName: 'missing.wav', trackId: 'track-a1' },
+      ];
+      let currentState: RelinkingState = mockState;
+      const set = vi.fn((updater: RelinkingUpdater) => {
+        currentState = applyStateUpdate(currentState, updater);
+      });
+      const get = vi.fn(() => currentState as MediaLibraryState & MediaLibraryActions);
+
+      const actions = createRelinkingActions(set, get);
+      const result = await actions.relinkOrphanedClip('audio-1', 'media-2');
+
+      expect(result).toBe(true);
+      expect(updateProjectItem).not.toHaveBeenCalled();
+      expect(currentState.orphanedClips).toEqual([]);
+      expect(currentState.showNotification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeOrphanedClips', () => {
+    it('removes a synchronized audio-video pair from one orphan entry', () => {
+      const videoItem = createMockTimelineItem({
+        id: 'video-1',
+        type: 'video',
+        trackId: 'track-v1',
+        mediaId: 'missing-media',
+        linkedGroupId: 'group-1',
+        label: 'missing.mp4',
+      });
+      const audioItem = createMockTimelineItem({
+        id: 'audio-1',
+        type: 'audio',
+        trackId: 'track-a1',
+        mediaId: 'missing-media',
+        linkedGroupId: 'group-1',
+        label: 'missing.wav',
+        src: 'blob:audio',
+      });
+
+      (getSynchronizedLinkedItems as Mock).mockReturnValue([videoItem, audioItem]);
+      (useItemsStore.getState as Mock).mockReturnValue({
+        items: [videoItem, audioItem],
+        itemById: {
+          'video-1': videoItem,
+          'audio-1': audioItem,
+        },
+      });
+
+      let currentState: RelinkingState = {
+        ...createMockState(),
+        orphanedClips: [
+          { itemId: 'video-1', mediaId: 'missing-media', itemType: 'video', fileName: 'missing.mp4', trackId: 'track-v1' },
+        ],
+      };
+      const set = vi.fn((updater: RelinkingUpdater) => {
+        currentState = applyStateUpdate(currentState, updater);
+      });
+      const get = vi.fn(() => currentState as MediaLibraryState & MediaLibraryActions);
+
+      const actions = createRelinkingActions(set, get);
+      actions.removeOrphanedClips(['video-1']);
+
+      expect(removeProjectItems).toHaveBeenCalledWith(['video-1', 'audio-1']);
+      expect(currentState.orphanedClips).toEqual([]);
+      expect(currentState.showNotification).toHaveBeenCalledWith({
+        type: 'info',
+        message: 'Removed 1 orphaned clip',
+      });
+    });
+  });
+});

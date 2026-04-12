@@ -292,13 +292,16 @@ export const ClipContent = memo(function ClipContent({
             >
               <ClipWaveform
                 mediaId={item.mediaId}
-                clipWidth={renderWidth}
+                clipWidth={clipWidth}
+                renderWidth={renderWidth}
                 sourceStart={sourceStart}
                 sourceDuration={sourceDuration}
                 trimStart={trimStart}
                 speed={speed}
                 fps={fps}
                 isVisible={clipVisibility.isVisible}
+                visibleStartRatio={clipVisibility.visibleStartRatio}
+                visibleEndRatio={clipVisibility.visibleEndRatio}
                 pixelsPerSecond={pixelsPerSecond}
               />
             </div>
@@ -316,10 +319,13 @@ export const ClipContent = memo(function ClipContent({
           <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
             <CompoundClipWaveform
               composition={composition}
-              clipWidth={renderWidth}
+              clipWidth={clipWidth}
+              renderWidth={renderWidth}
               sourceStart={compoundClipSourceStart}
               sourceDuration={compoundClipSourceDuration}
               isVisible={clipVisibility.isVisible}
+              visibleStartRatio={clipVisibility.visibleStartRatio}
+              visibleEndRatio={clipVisibility.visibleEndRatio}
               pixelsPerSecond={pixelsPerSecond}
             />
           </div>
@@ -374,10 +380,13 @@ export const ClipContent = memo(function ClipContent({
             >
               <CompoundClipWaveform
                 composition={composition}
-                clipWidth={renderWidth}
+                clipWidth={clipWidth}
+                renderWidth={renderWidth}
                 sourceStart={compoundClipSourceStart}
                 sourceDuration={compoundClipSourceDuration}
                 isVisible={clipVisibility.isVisible}
+                visibleStartRatio={clipVisibility.visibleStartRatio}
+                visibleEndRatio={clipVisibility.visibleEndRatio}
                 pixelsPerSecond={pixelsPerSecond}
               />
             </div>
@@ -393,10 +402,13 @@ export const ClipContent = memo(function ClipContent({
             <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
               <CompoundClipWaveform
                 composition={composition}
-                clipWidth={renderWidth}
+                clipWidth={clipWidth}
+                renderWidth={renderWidth}
                 sourceStart={compoundClipSourceStart}
                 sourceDuration={compoundClipSourceDuration}
                 isVisible={clipVisibility.isVisible}
+                visibleStartRatio={clipVisibility.visibleStartRatio}
+                visibleEndRatio={clipVisibility.visibleEndRatio}
                 pixelsPerSecond={pixelsPerSecond}
               />
             </div>

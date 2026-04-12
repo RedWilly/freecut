@@ -18,6 +18,8 @@ import { createLogger } from '@/shared/logging/logger';
 import { createManagedWorker } from '@/shared/utils/managed-worker';
 import { registerObjectUrl, unregisterObjectUrl } from '@/infrastructure/browser/object-url-registry';
 import { useSettingsStore } from '@/features/media-library/deps/settings-contract';
+import { filmstripCache } from '@/features/media-library/deps/timeline-services';
+import { needsCustomAudioDecoder } from '@/features/media-library/deps/composition-runtime';
 import {
   DEFAULT_PROXY_GENERATION_MODE,
   DEFAULT_PROXY_GENERATION_RESOLUTION,
@@ -29,12 +31,18 @@ import type {
   ProxyWorkerRequest,
   ProxyWorkerResponse,
 } from '../workers/proxy-generation-worker';
+import { useMediaLibraryStore } from '../stores/media-library-store';
+import { enqueueBackgroundMediaWork } from './background-media-work';
 
 const logger = createLogger('ProxyService');
 
 function revokeRegisteredObjectUrl(url: string): void {
   unregisterObjectUrl(url);
   URL.revokeObjectURL(url);
+}
+
+function getProxyOpfsPath(proxyKey: string): string {
+  return `${PROXY_DIR}/${proxyKey}/proxy.mp4`;
 }
 
 const PROXY_PRIORITY_AUDIO_CODECS = new Set([
@@ -121,6 +129,8 @@ interface ProgressEmissionState {
 
 const PROXY_PROGRESS_EMIT_INTERVAL_MS = 150;
 const PROXY_PROGRESS_EMIT_MIN_DELTA = 0.01;
+const PROXY_FILMSTRIP_PREWARM_SECONDS = 12;
+const PROXY_FILMSTRIP_PREWARM_DELAY_MS = 900;
 const PROXY_PLAYBACK_ISSUE_SCORE_THRESHOLD = 5;
 const PROXY_PLAYBACK_ISSUE_WEIGHTS: Record<ProxyPlaybackIssue, number> = {
   'slow-seek': 2,
@@ -350,6 +360,9 @@ class ProxyService {
     if (PROXY_PRIORITY_AUDIO_CODECS.has(normalizedAudioCodec)) {
       return true;
     }
+    if (needsCustomAudioDecoder(audioCodec)) {
+      return true;
+    }
 
     const threshold = getProxyGenerationThreshold(
       settings.proxyGenerationResolution ?? DEFAULT_PROXY_GENERATION_RESOLUTION
@@ -547,7 +560,9 @@ class ProxyService {
           }
 
           if (metadata.status === 'error') {
-            staleProxyIds.push(...collectMappedMediaIds(proxyKey));
+            // Failed proxies are removed, but we do not automatically requeue
+            // them on startup. Repeated deterministic failures should not keep
+            // restarting in the background every session.
             await removeProxyEntry(proxyKey, 'failed');
             continue;
           }
@@ -583,7 +598,11 @@ class ProxyService {
           }
 
           const blobUrl = URL.createObjectURL(proxyFile);
-          registerObjectUrl(blobUrl, proxyFile);
+          registerObjectUrl(blobUrl, proxyFile, {
+            storageType: 'opfs',
+            opfsPath: getProxyOpfsPath(proxyKey),
+            fileSize: proxyFile.size,
+          });
           this.proxyBlobUrlByKey.set(proxyKey, blobUrl);
           this.emitStatusForProxyKey(proxyKey, 'ready');
 
@@ -687,14 +706,45 @@ class ProxyService {
       }
 
       const blobUrl = URL.createObjectURL(proxyFile);
-      registerObjectUrl(blobUrl, proxyFile);
+      registerObjectUrl(blobUrl, proxyFile, {
+        storageType: 'opfs',
+        opfsPath: getProxyOpfsPath(proxyKey),
+        fileSize: proxyFile.size,
+      });
       this.proxyBlobUrlByKey.set(proxyKey, blobUrl);
       this.emitStatusForProxyKey(proxyKey, 'ready');
+      this.prewarmFilmstripFromProxy(proxyKey, proxyFile);
 
       logger.debug(`Proxy ready for ${proxyKey}`);
     } catch (error) {
       logger.error(`Failed to load completed proxy for ${proxyKey}:`, error);
       this.emitStatusForProxyKey(proxyKey, 'error');
+    }
+  }
+
+  private prewarmFilmstripFromProxy(proxyKey: string, proxyFile: Blob): void {
+    const mediaIds = [...(this.mediaIdsByProxyKey.get(proxyKey) ?? [])];
+    if (mediaIds.length === 0) {
+      return;
+    }
+
+    const mediaById = useMediaLibraryStore.getState().mediaById;
+    for (const mediaId of mediaIds) {
+      const media = mediaById[mediaId];
+      if (!media || !media.mimeType.startsWith('video/') || media.duration <= 0) {
+        continue;
+      }
+
+      const warmEndTime = Math.min(media.duration, PROXY_FILMSTRIP_PREWARM_SECONDS);
+      enqueueBackgroundMediaWork(() => (
+        filmstripCache.prewarmPriorityWindow(mediaId, proxyFile, media.duration, {
+          startTime: 0,
+          endTime: warmEndTime,
+        })
+      ), {
+        priority: 'warm',
+        delayMs: PROXY_FILMSTRIP_PREWARM_DELAY_MS,
+      });
     }
   }
 
@@ -747,7 +797,11 @@ class ProxyService {
 
           // Create fresh blob URL from OPFS
           const freshUrl = URL.createObjectURL(proxyFile);
-          registerObjectUrl(freshUrl, proxyFile);
+          registerObjectUrl(freshUrl, proxyFile, {
+            storageType: 'opfs',
+            opfsPath: getProxyOpfsPath(proxyKey),
+            fileSize: proxyFile.size,
+          });
           this.proxyBlobUrlByKey.set(proxyKey, freshUrl);
           refreshed++;
         } catch {

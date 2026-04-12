@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AudioItem, VideoItem } from '@/types/timeline';
+import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline';
 import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
@@ -47,6 +47,20 @@ function makeAudioItem(overrides: Partial<AudioItem> = {}): AudioItem {
     mediaId: 'media-1',
     linkedGroupId: 'group-1',
     originId: 'origin-1',
+    ...overrides,
+  };
+}
+
+function makeTrack(overrides: Partial<TimelineTrack> & Pick<TimelineTrack, 'id' | 'name' | 'order' | 'kind'>): TimelineTrack {
+  return {
+    height: 80,
+    locked: false,
+    syncLock: true,
+    visible: true,
+    muted: false,
+    solo: false,
+    volume: 0,
+    items: [],
     ...overrides,
   };
 }
@@ -237,6 +251,82 @@ describe('linked timeline items', () => {
     expect(items.find((item) => item.id === 'audio-2')).toMatchObject({ from: 30 });
   });
 
+  it('ripple delete auto-blades a sync-locked continuous clip on another track', () => {
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'video-track', name: 'V1', order: 0, kind: 'video' }),
+      makeTrack({ id: 'audio-track', name: 'A1', order: 1, kind: 'audio' }),
+    ]);
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-delete',
+        from: 30,
+        durationInFrames: 20,
+        linkedGroupId: undefined,
+        originId: 'origin-delete',
+        mediaId: 'media-delete',
+      }),
+      makeAudioItem({
+        id: 'music-bed',
+        from: 0,
+        durationInFrames: 100,
+        linkedGroupId: undefined,
+        originId: 'origin-music',
+        mediaId: 'media-music',
+      }),
+    ]);
+
+    rippleDeleteItems(['video-delete']);
+
+    const audioItems = useItemsStore.getState().items
+      .filter((item) => item.trackId === 'audio-track')
+      .toSorted((left, right) => left.from - right.from);
+
+    expect(audioItems).toHaveLength(2);
+    expect(audioItems.map((item) => ({ from: item.from, durationInFrames: item.durationInFrames }))).toEqual([
+      { from: 0, durationInFrames: 30 },
+      { from: 30, durationInFrames: 50 },
+    ]);
+  });
+
+  it('ripple delete leaves sync-lock disabled tracks completely static', () => {
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'video-track', name: 'V1', order: 0, kind: 'video' }),
+      makeTrack({ id: 'audio-track', name: 'A1', order: 1, kind: 'audio', syncLock: false }),
+    ]);
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-delete',
+        from: 30,
+        durationInFrames: 20,
+        linkedGroupId: undefined,
+        originId: 'origin-delete',
+        mediaId: 'media-delete',
+      }),
+      makeAudioItem({
+        id: 'music-bed',
+        from: 0,
+        durationInFrames: 100,
+        linkedGroupId: undefined,
+        originId: 'origin-music',
+        mediaId: 'media-music',
+      }),
+    ]);
+
+    rippleDeleteItems(['video-delete']);
+
+    const audioItems = useItemsStore.getState().items
+      .filter((item) => item.trackId === 'audio-track')
+      .toSorted((left, right) => left.from - right.from);
+
+    expect(audioItems).toEqual([
+      expect.objectContaining({
+        id: 'music-bed',
+        from: 0,
+        durationInFrames: 100,
+      }),
+    ]);
+  });
+
   it('close gap moves linked clips on companion tracks', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({
@@ -380,7 +470,7 @@ describe('linked timeline items', () => {
     expect(items.find((item) => item.id === 'solo-audio')).toMatchObject({ from: 90 });
   });
 
-  it('close gap leaves solo clips before gap end in place', () => {
+       it('close gap removes solo clips inside deleted span', () => {
     useItemsStore.getState().setItems([
       makeVideoItem({
         id: 'video-anchor',
@@ -396,7 +486,6 @@ describe('linked timeline items', () => {
         originId: 'origin-2',
         mediaId: 'media-2',
       }),
-      // Solo audio BEFORE gapEnd (120), should NOT shift
       makeAudioItem({
         id: 'solo-audio',
         from: 80,
@@ -411,10 +500,10 @@ describe('linked timeline items', () => {
 
     const items = useItemsStore.getState().items;
     expect(items.find((item) => item.id === 'video-2')).toMatchObject({ from: 60 });
-    expect(items.find((item) => item.id === 'solo-audio')).toMatchObject({ from: 80 });
+    expect(items.find((item) => item.id === 'solo-audio')).toBeUndefined();
   });
 
-  it('close gap deletes non-shifted items overlapped by shifted items', () => {
+  it('close gap deletes non-shifted items overlapped by shifted items', () => {                                                                  
     useItemsStore.getState().setItems([
       makeVideoItem({
         id: 'video-anchor',

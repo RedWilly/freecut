@@ -114,6 +114,7 @@ function buildTrackClone(params: {
     kind,
     height: sourceTrack?.height ?? DEFAULT_TRACK_HEIGHT,
     locked: sourceTrack?.locked ?? false,
+    syncLock: sourceTrack?.syncLock ?? true,
     visible: sourceTrack?.visible ?? true,
     muted: sourceTrack?.muted ?? false,
     solo: sourceTrack?.solo ?? false,

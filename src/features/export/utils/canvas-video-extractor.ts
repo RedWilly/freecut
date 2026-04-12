@@ -8,6 +8,7 @@
  * - No 500ms timeout fallbacks needed
  */
 
+import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source';
 import { createLogger } from '@/shared/logging/logger';
 import { getAdaptiveStreamStart } from '@/shared/utils/keyframe-index-registry';
 
@@ -21,6 +22,7 @@ interface MediabunnySink {
 
 interface MediabunnySample {
   timestamp: number;
+  duration?: number;
   draw?: (
     context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
     x: number,
@@ -91,11 +93,13 @@ export class VideoFrameExtractor {
   async init(): Promise<boolean> {
     try {
       const mb = await import('mediabunny');
+      const source = createMediabunnyInputSource(mb, this.src);
 
-      // Create input directly from source URL/blob URL.
+      // Prefer direct file-backed reads for OPFS / file handles, with BlobSource
+      // fallback for in-memory blob URLs we manage locally.
       this.input = new mb.Input({
         formats: mb.ALL_FORMATS,
-        source: new mb.UrlSource(this.src),
+        source,
       }) as unknown as MediabunnyInput;
 
       // Get video track
@@ -224,6 +228,7 @@ export class VideoFrameExtractor {
     } else if (
       this.lastRequestedTimestamp !== null
       && timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON < this.lastRequestedTimestamp
+      && !this.currentSampleCoversTimestamp(timestamp)
     ) {
       // Timeline time moved backward for this clip. Restart stream.
       this.resetSampleIterator(timestamp, 'backward');
@@ -263,6 +268,23 @@ export class VideoFrameExtractor {
       }
       break;
     }
+  }
+
+  private currentSampleCoversTimestamp(timestamp: number): boolean {
+    const sample = this.currentSample;
+    if (!sample) {
+      return false;
+    }
+
+    if (sample.timestamp > timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON) {
+      return false;
+    }
+
+    if (typeof sample.duration !== 'number' || !Number.isFinite(sample.duration) || sample.duration <= 0) {
+      return true;
+    }
+
+    return sample.timestamp + sample.duration >= timestamp - VideoFrameExtractor.TIMESTAMP_EPSILON;
   }
 
   private async peekNextSample(): Promise<MediabunnySample | null> {

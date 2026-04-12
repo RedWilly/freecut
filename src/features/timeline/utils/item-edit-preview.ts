@@ -8,6 +8,7 @@ export interface PreviewItemUpdate {
   sourceStart?: number;
   sourceEnd?: number;
   speed?: number;
+  hidden?: boolean;
 }
 
 export function applyTrimStartPreview(item: TimelineItem, trimDelta: number, fps: number): PreviewItemUpdate {

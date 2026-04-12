@@ -70,6 +70,11 @@ export class Clock {
   private _playbackStartTime: number = 0;
   private _playbackStartFrame: number = 0;
 
+  // Audio-as-ground-truth: when set, playback timing derives from the
+  // hardware audio clock (AudioContext.currentTime) instead of
+  // performance.now(). This eliminates audio-video drift by definition.
+  private _audioContext: AudioContext | null = null;
+
   // In/out points for range playback
   private _inFrame: number | null = null;
   private _outFrame: number | null = null;
@@ -200,6 +205,20 @@ export class Clock {
     this._loop = value;
   }
 
+  /**
+   * Attach an AudioContext to use as the timing ground truth.
+   * When set and running, the Clock derives elapsed time from the
+   * hardware audio clock instead of performance.now().
+   */
+  setAudioContext(ctx: AudioContext | null): void {
+    this._audioContext = ctx;
+    // Re-anchor if playing so the new time source takes effect immediately
+    if (this._isPlaying) {
+      this._playbackStartTime = this._now();
+      this._playbackStartFrame = this._currentFrame;
+    }
+  }
+
   set playbackRate(value: number) {
     if (value === 0) {
       throw new Error('Playback rate cannot be zero');
@@ -209,7 +228,7 @@ export class Clock {
 
     // If playing, reset the playback start point to maintain continuity
     if (this._isPlaying) {
-      this._playbackStartTime = performance.now();
+      this._playbackStartTime = this._now();
       this._playbackStartFrame = this._currentFrame;
     }
 
@@ -258,7 +277,7 @@ export class Clock {
     }
 
     this._isPlaying = true;
-    this._playbackStartTime = performance.now();
+    this._playbackStartTime = this._now();
     this._playbackStartFrame = this._currentFrame;
 
     if (import.meta.env.DEV) {
@@ -302,7 +321,7 @@ export class Clock {
 
     // Reset playback reference point if playing
     if (this._isPlaying) {
-      this._playbackStartTime = performance.now();
+      this._playbackStartTime = this._now();
       this._playbackStartFrame = clampedFrame;
     }
 
@@ -452,6 +471,19 @@ export class Clock {
   // Private Methods
   // ============================================
 
+  /**
+   * Current time in ms from the best available clock.
+   * Prefers AudioContext.currentTime (hardware audio clock) when attached
+   * and running; falls back to performance.now() otherwise.
+   */
+  private _now(): number {
+    const ctx = this._audioContext;
+    if (ctx && ctx.state === 'running') {
+      return ctx.currentTime * 1000;
+    }
+    return performance.now();
+  }
+
   private _clampFrame(frame: number): number {
     const minFrame = this.actualFirstFrame;
     const maxFrame = this.actualLastFrame;
@@ -538,7 +570,7 @@ export class Clock {
       return;
     }
 
-    const now = performance.now();
+    const now = this._now();
     const playbackEnded = this._advancePlaybackTo(now);
     if (playbackEnded) {
       return;
@@ -561,7 +593,7 @@ export class Clock {
         return;
       }
 
-      const now = performance.now();
+      const now = this._now();
 
       if (this._advancePlaybackTo(now)) {
         this._animationFrameId = null;

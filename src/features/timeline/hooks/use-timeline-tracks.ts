@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import type { TimelineTrack } from '@/types/timeline';
 import { useTimelineStore } from '../stores/timeline-store';
 import { getTrackKind } from '@/features/timeline/utils/classic-tracks';
+import { isTrackSyncLockActive } from '../utils/track-sync-lock';
 
 function clampTrackVolume(volume: number): number {
   return Math.max(-60, Math.min(12, Math.round(volume * 10) / 10));
@@ -154,6 +155,19 @@ export function useTimelineTracks() {
   );
 
   /**
+   * Toggle track sync lock state.
+   */
+  const toggleTrackSyncLock = useCallback(
+    (id: string) => {
+      const currentTracks = useTimelineStore.getState().tracks;
+      const track = currentTracks.find((t) => t.id === id);
+      if (!track) return;
+      updateTrack(id, { syncLock: !isTrackSyncLockActive(track) });
+    },
+    [updateTrack]
+  );
+
+  /**
    * Toggle track visibility.
    */
   const toggleTrackVisibility = useCallback(
@@ -242,6 +256,7 @@ export function useTimelineTracks() {
     reorderTracks,
     toggleTrackDisabled,
     toggleTrackLock,
+    toggleTrackSyncLock,
     toggleTrackVisibility,
     toggleTrackMute,
     toggleTrackSolo,

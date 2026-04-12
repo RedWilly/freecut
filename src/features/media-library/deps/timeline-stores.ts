@@ -10,5 +10,6 @@ export {
   useCompositionsStore,
   type SubComposition,
   useItemsStore,
+  getSynchronizedLinkedItems,
   wouldCreateCompositionCycle,
 } from './timeline-contract';

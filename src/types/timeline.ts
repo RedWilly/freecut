@@ -167,6 +167,7 @@ export interface TimelineTrack {
   kind?: 'video' | 'audio';
   height: number;
   locked: boolean;
+  syncLock?: boolean; // Defaults to true - controls whether ripple edits propagate to this track
   visible: boolean; // Visual visibility (Eye icon)
   muted: boolean; // Audio muting (Volume icon)
   solo: boolean;

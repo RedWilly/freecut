@@ -2,6 +2,22 @@ import type { TimelineItem } from '@/types/timeline';
 import type { OrphanedClipInfo } from '@/features/timeline/deps/media-library-resolver';
 import type { MediaMetadata } from '@/types/storage';
 import { mediaLibraryService } from '@/features/timeline/deps/media-library-service';
+import { getSynchronizedLinkedItems } from './linked-items';
+
+function isOrphanableMediaItem(
+  item: TimelineItem,
+): item is TimelineItem & { mediaId: string } {
+  return !!item.mediaId
+    && (item.type === 'video' || item.type === 'audio' || item.type === 'image');
+}
+
+function getOrphanGroupRepresentative(
+  items: Array<TimelineItem & { mediaId: string }>,
+): TimelineItem & { mediaId: string } {
+  return items.find((item) => item.type === 'video')
+    ?? items.find((item) => item.type === 'image')
+    ?? items[0]!;
+}
 
 /**
  * Validates that all timeline items have valid media references.
@@ -17,11 +33,7 @@ export async function validateMediaReferences(
   const orphans: OrphanedClipInfo[] = [];
 
   // Get all unique mediaIds from timeline items that have media references
-  const mediaItems = items.filter(
-    (item): item is TimelineItem & { mediaId: string } =>
-      !!item.mediaId &&
-      (item.type === 'video' || item.type === 'audio' || item.type === 'image')
-  );
+  const mediaItems = items.filter(isOrphanableMediaItem);
 
   if (mediaItems.length === 0) {
     return orphans;
@@ -31,15 +43,29 @@ export async function validateMediaReferences(
   const mediaLibrary = await mediaLibraryService.getMediaForProject(projectId);
   const validMediaIds = new Set(mediaLibrary.map((m) => m.id));
 
-  // Find items with missing media
+  const visitedItemIds = new Set<string>();
+
+  // Find items with missing media, collapsing synchronized linked A/V pairs
   for (const item of mediaItems) {
+    if (visitedItemIds.has(item.id) || validMediaIds.has(item.mediaId)) {
+      continue;
+    }
+
+    const groupedItems = getSynchronizedLinkedItems(mediaItems, item.id)
+      .filter((candidate): candidate is TimelineItem & { mediaId: string } => (
+        isOrphanableMediaItem(candidate) && candidate.mediaId === item.mediaId
+      ));
+    const orphanGroup = groupedItems.length > 0 ? groupedItems : [item];
+    orphanGroup.forEach((groupedItem) => visitedItemIds.add(groupedItem.id));
+
+    const representative = getOrphanGroupRepresentative(orphanGroup);
     if (!validMediaIds.has(item.mediaId)) {
       orphans.push({
-        itemId: item.id,
-        mediaId: item.mediaId,
-        itemType: item.type as 'video' | 'audio' | 'image',
-        fileName: item.label || 'Unknown',
-        trackId: item.trackId,
+        itemId: representative.id,
+        mediaId: representative.mediaId,
+        itemType: representative.type as 'video' | 'audio' | 'image',
+        fileName: representative.label || 'Unknown',
+        trackId: representative.trackId,
       });
     }
   }

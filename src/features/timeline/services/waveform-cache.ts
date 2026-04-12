@@ -13,6 +13,10 @@
 import { createLogger } from '@/shared/logging/logger';
 import { createManagedWorker } from '@/shared/utils/managed-worker';
 import {
+  getObjectUrlBlob,
+  getObjectUrlDirectFileMetadata,
+} from '@/infrastructure/browser/object-url-registry';
+import {
   waveformOPFSStorage,
   WAVEFORM_LEVELS,
   chooseLevelForZoom,
@@ -36,10 +40,13 @@ const logger = createLogger('WaveformCache');
 // Memory cache configuration
 const MAX_CACHE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 const MAX_CONCURRENT_WAVEFORM_GENERATIONS = 1;
+const WAVEFORM_PROGRESS_NOTIFY_INTERVAL_MS = 120;
+const WAVEFORM_PROGRESS_NOTIFY_STEP = 2;
+const WAVEFORM_NOTIFY_INTERVAL_MS = 180;
 
 // Samples per second for waveform generation (highest resolution)
 const SAMPLES_PER_SECOND = WAVEFORM_LEVELS[0]; // 1000 samples/sec
-const WAVEFORM_BIN_DURATION_SEC = 5;
+const WAVEFORM_BIN_DURATION_SEC = 30;
 const WAVEFORM_BIN_SAMPLES = SAMPLES_PER_SECOND * WAVEFORM_BIN_DURATION_SEC;
 
 export interface CachedWaveform {
@@ -48,6 +55,8 @@ export interface CachedWaveform {
   sampleRate: number;
   channels: number;
   stereo: boolean;
+  maxPeak: number;
+  loadedSamples: number;
   sizeBytes: number;
   lastAccessed: number;
   isComplete: boolean;
@@ -237,7 +246,9 @@ class WaveformCacheService {
     duration: number,
     channels: number,
     isComplete: boolean,
-    stereo = false
+    stereo = false,
+    maxPeak = 1,
+    loadedSamples = peaks.length
   ): CachedWaveform {
     return {
       peaks,
@@ -245,10 +256,23 @@ class WaveformCacheService {
       sampleRate: SAMPLES_PER_SECOND,
       channels,
       stereo,
+      maxPeak: maxPeak > 0 ? maxPeak : 1,
+      loadedSamples: Math.max(0, Math.min(peaks.length, loadedSamples)),
       sizeBytes: peaks.byteLength,
       lastAccessed: Date.now(),
       isComplete,
     };
+  }
+
+  private computeMaxPeak(peaks: Float32Array): number {
+    let maxPeak = 0;
+    for (let i = 0; i < peaks.length; i++) {
+      const value = peaks[i] ?? 0;
+      if (value > maxPeak) {
+        maxPeak = value;
+      }
+    }
+    return maxPeak > 0 ? maxPeak : 1;
   }
 
   private async persistToOPFS(
@@ -372,6 +396,8 @@ class WaveformCacheService {
               sampleRate: meta.sampleRate,
               channels: meta.channels,
               stereo: meta.stereo === true,
+              maxPeak: this.computeMaxPeak(peaks),
+              loadedSamples: peaks.length,
               sizeBytes: peaks.byteLength,
               lastAccessed: Date.now(),
               isComplete: true,
@@ -415,6 +441,8 @@ class WaveformCacheService {
           sampleRate: level.sampleRate,
           channels: level.channels,
           stereo: level.channels >= 2,
+          maxPeak: this.computeMaxPeak(level.peaks),
+          loadedSamples: level.peaks.length,
           sizeBytes: level.peaks.byteLength,
           lastAccessed: Date.now(),
           isComplete: true,
@@ -444,6 +472,8 @@ class WaveformCacheService {
           sampleRate: stored.sampleRate,
           channels: stored.channels,
           stereo: false,
+          maxPeak: this.computeMaxPeak(peaks),
+          loadedSamples: peaks.length,
           sizeBytes: stored.peaks.byteLength,
           lastAccessed: Date.now(),
           isComplete: true,
@@ -514,7 +544,13 @@ class WaveformCacheService {
       let channels = 1;
       let stereo = false;
       let peaks: Float32Array | null = null;
+      let loadedSamples = 0;
+      let maxPeak = 0;
       let settled = false;
+      let lastReportedProgress = -1;
+      let lastProgressReportAt = 0;
+      let lastWaveformNotifyAt = 0;
+      let lastNotifiedLoadedSamples = 0;
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -537,6 +573,57 @@ class WaveformCacheService {
         resolve(waveform);
       };
 
+      const reportProgress = (nextProgress: number, force = false) => {
+        if (!onProgress) return;
+        const clamped = Math.max(0, Math.min(100, Math.round(nextProgress)));
+        const now = Date.now();
+        if (
+          force
+          || clamped === 100
+          || lastReportedProgress < 0
+          || clamped - lastReportedProgress >= WAVEFORM_PROGRESS_NOTIFY_STEP
+          || now - lastProgressReportAt >= WAVEFORM_PROGRESS_NOTIFY_INTERVAL_MS
+        ) {
+          lastReportedProgress = clamped;
+          lastProgressReportAt = now;
+          onProgress(clamped);
+        }
+      };
+
+      const notifyWaveformUpdate = (force = false) => {
+        if (!peaks) return;
+        const now = Date.now();
+        if (
+          !force
+          && loadedSamples < peaks.length
+          && loadedSamples === lastNotifiedLoadedSamples
+        ) {
+          return;
+        }
+
+        if (
+          !force
+          && now - lastWaveformNotifyAt < WAVEFORM_NOTIFY_INTERVAL_MS
+          && loadedSamples < peaks.length
+        ) {
+          return;
+        }
+
+        lastWaveformNotifyAt = now;
+        lastNotifiedLoadedSamples = loadedSamples;
+        const cached = this.makeCachedWaveform(
+          peaks,
+          duration,
+          channels,
+          loadedSamples >= peaks.length,
+          stereo,
+          maxPeak,
+          loadedSamples,
+        );
+        this.addToMemoryCache(mediaId, cached);
+        this.notifyUpdate(mediaId, cached);
+      };
+
       // Add timeout - long clips (e.g. 10+ minutes) need more processing time.
       const timeout = setTimeout(() => {
         try {
@@ -555,7 +642,7 @@ class WaveformCacheService {
         try {
           switch (event.data.type) {
             case 'progress':
-              onProgress?.(event.data.progress);
+              reportProgress(event.data.progress);
               break;
 
             case 'init': {
@@ -563,10 +650,6 @@ class WaveformCacheService {
               channels = event.data.channels;
               stereo = event.data.stereo;
               peaks = new Float32Array(event.data.totalSamples);
-
-              const cached = this.makeCachedWaveform(peaks, duration, channels, false, stereo);
-              this.addToMemoryCache(mediaId, cached);
-              this.notifyUpdate(mediaId, cached);
               break;
             }
 
@@ -574,9 +657,16 @@ class WaveformCacheService {
               if (!peaks) break;
               const { startIndex, peaks: chunkPeaks } = event.data;
               peaks.set(chunkPeaks, startIndex);
+              loadedSamples = Math.max(loadedSamples, startIndex + chunkPeaks.length);
 
               const effectiveBinSamples = WAVEFORM_BIN_SAMPLES * (stereo ? 2 : 1);
               const binIndex = Math.floor(startIndex / effectiveBinSamples);
+              for (let i = 0; i < chunkPeaks.length; i++) {
+                const value = chunkPeaks[i] ?? 0;
+                if (value > maxPeak) {
+                  maxPeak = value;
+                }
+              }
               const bin: WaveformBin = {
                 id: `${mediaId}:bin:${binIndex}`,
                 mediaId,
@@ -591,10 +681,7 @@ class WaveformCacheService {
                   logger.warn(`Failed to persist waveform bin ${mediaId}:${binIndex}`, saveError);
                 })
               );
-
-              const cached = this.makeCachedWaveform(peaks, duration, channels, false, stereo);
-              this.addToMemoryCache(mediaId, cached);
-              this.notifyUpdate(mediaId, cached);
+              notifyWaveformUpdate();
               break;
             }
 
@@ -623,12 +710,21 @@ class WaveformCacheService {
                 createdAt: Date.now(),
               });
 
-              const cached = this.makeCachedWaveform(peaks, duration, channels, true, stereo);
-              this.addToMemoryCache(mediaId, cached);
-              this.notifyUpdate(mediaId, cached);
+              loadedSamples = peaks.length;
+              maxPeak = event.data.maxPeak > 0 ? event.data.maxPeak : Math.max(maxPeak, 1);
+              notifyWaveformUpdate(true);
+              const cached = this.makeCachedWaveform(
+                peaks,
+                duration,
+                channels,
+                true,
+                stereo,
+                maxPeak,
+                loadedSamples,
+              );
               void this.persistToOPFS(mediaId, peaks, duration, channels);
 
-              onProgress?.(100);
+              reportProgress(100, true);
               resolveOnce(cached);
               break;
             }
@@ -661,6 +757,8 @@ class WaveformCacheService {
           type: 'generate',
           requestId,
           blobUrl,
+          blob: getObjectUrlDirectFileMetadata(blobUrl) ? undefined : (getObjectUrlBlob(blobUrl) ?? undefined),
+          sourceMetadata: getObjectUrlDirectFileMetadata(blobUrl) ?? undefined,
           samplesPerSecond: SAMPLES_PER_SECOND,
           binDurationSec: WAVEFORM_BIN_DURATION_SEC,
         });
@@ -918,9 +1016,11 @@ class WaveformCacheService {
     blobUrl: string,
     onProgress?: (progress: number) => void
   ): Promise<CachedWaveform> {
-    // Check memory cache first
+    // Prefer complete cached waveforms, but keep in-flight generations attached
+    // to their running promise so callers do not accidentally "complete" on a
+    // partial progressive snapshot.
     const memoryCached = this.getFromMemoryCache(mediaId);
-    if (memoryCached) {
+    if (memoryCached?.isComplete) {
       return memoryCached;
     }
 
@@ -928,6 +1028,10 @@ class WaveformCacheService {
     const pending = this.pendingRequests.get(mediaId);
     if (pending) {
       return pending.promise;
+    }
+
+    if (memoryCached) {
+      return memoryCached;
     }
 
     // Check OPFS/IndexedDB for persisted waveform

@@ -402,6 +402,7 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
   const linkedEditPreviewUpdate = useLinkedEditPreviewStore(
     useCallback((s) => s.updatesById[item.id] ?? null, [item.id])
   );
+  const isHiddenByLinkedEditPreview = linkedEditPreviewUpdate?.hidden === true;
   const moveDragPreviewFromDelta = useMemo(() => {
     if (!linkedEditPreviewUpdate || !(isDragging || isPartOfDrag) || gestureMode !== 'none') {
       return 0;
@@ -2398,6 +2399,10 @@ export const TimelineItem = memo(function TimelineItem({ item, timelineDuration 
       }
     }
   }, [item.id]);
+
+  if (isHiddenByLinkedEditPreview) {
+    return null;
+  }
 
   return (
     <>

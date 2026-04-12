@@ -15,6 +15,9 @@ import {
   expandIdsWithLinkedItems,
 } from './linked-edit';
 import {
+  propagateRemovedIntervalsToSyncLockedTracks,
+} from './sync-lock-ripple';
+import {
   canLinkSelection,
   expandSelectionWithLinkedItems,
   getLinkedItemIds,
@@ -151,6 +154,17 @@ export function rippleDeleteItems(ids: string[]): void {
   const idsToDelete = new Set(expandedIds);
   const remainingItems = items.filter((item) => !idsToDelete.has(item.id));
   const baseShiftByItemId = new Map<string, number>();
+  const editedTrackIds = new Set(
+    items
+      .filter((item) => idsToDelete.has(item.id))
+      .map((item) => item.trackId),
+  );
+  const removedIntervals = items
+    .filter((item) => idsToDelete.has(item.id))
+    .map((item) => ({
+      start: item.from,
+      end: item.from + item.durationInFrames,
+    }));
 
   // Per-track: shift downstream items on the same track as each deleted item.
   // Linked counterparts on other tracks shift via buildLinkedLeftShiftUpdates.
@@ -166,7 +180,12 @@ export function rippleDeleteItems(ids: string[]): void {
     }
   }
 
-  const updates = buildLinkedLeftShiftUpdates(remainingItems, baseShiftByItemId, linkedSelectionEnabled);
+  const updates = remainingItems.flatMap((item) => {
+    const shiftAmount = baseShiftByItemId.get(item.id) ?? 0;
+    return shiftAmount > 0
+      ? [{ id: item.id, from: item.from - shiftAmount }]
+      : [];
+  });
 
   // Detect non-shifted items that would be overlapped by shifted items.
   // These get deleted rather than creating overlaps.
@@ -207,9 +226,15 @@ export function rippleDeleteItems(ids: string[]): void {
       useItemsStore.getState()._moveItems(filteredUpdates);
     }
 
+    const syncLockResult = propagateRemovedIntervalsToSyncLockedTracks({
+      editedTrackIds,
+      intervals: removedIntervals,
+    });
+
     // Cascade: Remove transitions and keyframes
-    useTransitionsStore.getState()._removeTransitionsForItems(allRemoveIds);
-    useKeyframesStore.getState()._removeKeyframesForItems(allRemoveIds);
+    const cascadedRemoveIds = Array.from(new Set([...allRemoveIds, ...syncLockResult.removedIds]));
+    useTransitionsStore.getState()._removeTransitionsForItems(cascadedRemoveIds);
+    useKeyframesStore.getState()._removeKeyframesForItems(cascadedRemoveIds);
 
     // Repair transitions on moved clips (they may now overlap or gap differently)
     if (filteredUpdates.length > 0) {
@@ -217,9 +242,12 @@ export function rippleDeleteItems(ids: string[]): void {
     }
 
     // Repair transitions for surviving clips that were shifted
-    if (updates.length > 0) {
-      const movedClipIds = updates.map((update) => update.id);
-      applyTransitionRepairs(movedClipIds, new Set(expandedIds));
+    const repairedClipIds = Array.from(new Set([
+      ...updates.map((update) => update.id),
+      ...syncLockResult.affectedIds,
+    ]));
+    if (repairedClipIds.length > 0) {
+      applyTransitionRepairs(repairedClipIds, new Set(cascadedRemoveIds));
     }
 
     useTimelineSettingsStore.getState().markDirty();
@@ -249,43 +277,31 @@ export function closeGapAtPosition(trackId: string, frame: number): void {
   if (gapEnd <= gapStart) return;
 
   const gapSize = gapEnd - gapStart;
-  const baseShiftByItemId = new Map<string, number>();
-  for (const item of items) {
-    // Shift ALL items at or after the gap end across every track
-    if (item.from >= gapEnd) {
-      baseShiftByItemId.set(item.id, gapSize);
-    }
-  }
-
-  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId, isLinkedSelectionEnabled());
+  const updates = items
+    .filter((item) => item.trackId === trackId && item.from >= gapEnd)
+    .map((item) => ({ id: item.id, from: item.from - gapSize }));
   if (updates.length === 0) return;
 
-  // Detect non-shifted items that would be overlapped by shifted items — delete them.
-  const shiftedById = new Map(updates.map((u) => [u.id, u.from]));
-  const coveredIds: string[] = [];
-  for (const item of items) {
-    if (shiftedById.has(item.id)) continue;
-    const itemEnd = item.from + item.durationInFrames;
-    for (const other of items) {
-      const newFrom = shiftedById.get(other.id);
-      if (newFrom === undefined || other.trackId !== item.trackId) continue;
-      const newEnd = newFrom + other.durationInFrames;
-      if (newFrom < itemEnd && newEnd > item.from) {
-        coveredIds.push(item.id);
-        break;
-      }
-    }
-  }
-
   execute('CLOSE_GAP', () => {
-    if (coveredIds.length > 0) {
-      useItemsStore.getState()._removeItems(coveredIds);
-      useTransitionsStore.getState()._removeTransitionsForItems(coveredIds);
-      useKeyframesStore.getState()._removeKeyframesForItems(coveredIds);
-    }
     useItemsStore.getState()._moveItems(updates);
+    const syncLockResult = propagateRemovedIntervalsToSyncLockedTracks({
+      editedTrackIds: new Set([trackId]),
+      intervals: [{ start: gapStart, end: gapEnd }],
+    });
 
-    applyTransitionRepairs(updates.map((update) => update.id));
+    const removedIds = syncLockResult.removedIds;
+    if (removedIds.length > 0) {
+      useTransitionsStore.getState()._removeTransitionsForItems(removedIds);
+      useKeyframesStore.getState()._removeKeyframesForItems(removedIds);
+    }
+
+    applyTransitionRepairs(
+      Array.from(new Set([
+        ...updates.map((update) => update.id),
+        ...syncLockResult.affectedIds,
+      ])),
+      removedIds.length > 0 ? new Set(removedIds) : undefined,
+    );
 
     useTimelineSettingsStore.getState().markDirty();
   }, { trackId, frame });

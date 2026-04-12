@@ -38,6 +38,7 @@ function renderTrackHeader(track: TimelineTrack, onToggleDisabled = vi.fn()) {
       canDeleteTrack
       canDeleteEmptyTracks
       onToggleLock={() => undefined}
+      onToggleSyncLock={() => undefined}
       onToggleDisabled={onToggleDisabled}
       onToggleSolo={() => undefined}
       onSelect={() => undefined}
@@ -87,5 +88,51 @@ describe('TrackHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enable track' }));
 
     expect(onToggleDisabled).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders sync lock enabled by default and toggles the label when disabled', () => {
+    const { rerender } = render(
+      <TrackHeader
+        track={makeTrack()}
+        isActive={false}
+        isSelected={false}
+        canDeleteTrack
+        canDeleteEmptyTracks
+        onToggleLock={() => undefined}
+        onToggleSyncLock={() => undefined}
+        onToggleDisabled={() => undefined}
+        onToggleSolo={() => undefined}
+        onSelect={() => undefined}
+        onCloseGaps={() => undefined}
+        onAddVideoTrack={() => undefined}
+        onAddAudioTrack={() => undefined}
+        onDeleteTrack={() => undefined}
+        onDeleteEmptyTracks={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Disable sync lock' })).toBeInTheDocument();
+
+    rerender(
+      <TrackHeader
+        track={makeTrack({ syncLock: false })}
+        isActive={false}
+        isSelected={false}
+        canDeleteTrack
+        canDeleteEmptyTracks
+        onToggleLock={() => undefined}
+        onToggleSyncLock={() => undefined}
+        onToggleDisabled={() => undefined}
+        onToggleSolo={() => undefined}
+        onSelect={() => undefined}
+        onCloseGaps={() => undefined}
+        onAddVideoTrack={() => undefined}
+        onAddAudioTrack={() => undefined}
+        onDeleteTrack={() => undefined}
+        onDeleteEmptyTracks={() => undefined}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Enable sync lock' })).toBeInTheDocument();
   });
 });

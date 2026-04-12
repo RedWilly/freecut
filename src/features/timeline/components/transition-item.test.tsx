@@ -10,6 +10,7 @@ import { useRollingEditPreviewStore } from '../stores/rolling-edit-preview-store
 import { useRippleEditPreviewStore } from '../stores/ripple-edit-preview-store';
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store';
 import { useTransitionBreakPreviewStore } from '../stores/transition-break-preview-store';
+import { useLinkedEditPreviewStore } from '../stores/linked-edit-preview-store';
 import { TransitionItem } from './transition-item';
 
 function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
@@ -48,6 +49,7 @@ describe('TransitionItem preview bridge motion', () => {
     useSlideEditPreviewStore.getState().clearPreview();
     useRippleEditPreviewStore.getState().clearPreview();
     useTransitionBreakPreviewStore.getState().clearPreview();
+    useLinkedEditPreviewStore.getState().clear();
   });
 
   it('updates bridge position in realtime while slide preview delta changes', () => {
@@ -169,6 +171,21 @@ describe('TransitionItem preview bridge motion', () => {
         handle: 'end',
         delta: -8,
       });
+    });
+
+    expect(screen.queryByTitle('Fade (0.7s)')).toBeNull();
+  });
+
+  it('hides the bridge when a linked preview temporarily hides either clip', () => {
+    const left = makeVideoItem({ id: 'left', from: 100, durationInFrames: 60 });
+    const right = makeVideoItem({ id: 'right', from: 140, durationInFrames: 80, mediaId: 'media-2' });
+    useItemsStore.getState().setItems([left, right]);
+
+    render(<TransitionItem transition={transition} />);
+    expect(screen.getByTitle('Fade (0.7s)')).toBeInTheDocument();
+
+    act(() => {
+      useLinkedEditPreviewStore.getState().setUpdates([{ id: 'left', hidden: true }]);
     });
 
     expect(screen.queryByTitle('Fade (0.7s)')).toBeNull();

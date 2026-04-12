@@ -21,14 +21,36 @@ const mediaProcessorMocks = vi.hoisted(() => ({
   processMedia: vi.fn(),
 }));
 
+const proxyMocks = vi.hoisted(() => ({
+  onStatusChange: vi.fn(),
+  deleteProxy: vi.fn(),
+  clearProxyKey: vi.fn(),
+}));
+
+const backgroundMediaWorkMocks = vi.hoisted(() => ({
+  enqueueBackgroundMediaWork: vi.fn((run: () => unknown) => {
+    const result = run();
+    if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+      void (result as PromiseLike<unknown>);
+    }
+    return vi.fn();
+  }),
+}));
+
 const gifFrameCacheMocks = vi.hoisted(() => ({
   getGifFrames: vi.fn(),
   clearMedia: vi.fn(),
 }));
 
+const filmstripCacheMocks = vi.hoisted(() => ({
+  prewarmPriorityWindow: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/infrastructure/storage/indexeddb', () => ({
   getAllMedia: vi.fn(),
   getMedia: vi.fn(),
+  getTranscript: vi.fn(),
+  getTranscriptMediaIds: vi.fn(),
   createMedia: indexedDbMocks.createMedia,
   updateMedia: vi.fn(),
   deleteMedia: indexedDbMocks.deleteMedia,
@@ -44,11 +66,18 @@ vi.mock('@/infrastructure/storage/indexeddb', () => ({
   getProjectsUsingMedia: vi.fn(),
   getMediaForProject: vi.fn(),
   deleteTranscript: vi.fn(),
+  saveTranscript: vi.fn(),
 }));
 
 vi.mock('./opfs-service', () => ({
   opfsService: opfsMocks,
 }));
+
+vi.mock('./proxy-service', () => ({
+  proxyService: proxyMocks,
+}));
+
+vi.mock('./background-media-work', () => backgroundMediaWorkMocks);
 
 vi.mock('../utils/thumbnail-generator', () => ({
   generateThumbnail: thumbnailMocks.generateThumbnail,
@@ -60,6 +89,7 @@ vi.mock('./media-processor-service', () => ({
 
 vi.mock('@/features/media-library/deps/timeline-services', () => ({
   gifFrameCache: gifFrameCacheMocks,
+  filmstripCache: filmstripCacheMocks,
 }));
 
 import { mediaLibraryService } from './media-library-service';

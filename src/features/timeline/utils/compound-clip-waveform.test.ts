@@ -9,6 +9,8 @@ function makeWaveform(peaks: number[], sampleRate = 10): CachedWaveform {
     sampleRate,
     channels: 1,
     stereo: false,
+    maxPeak: Math.max(...peaks, 1),
+    loadedSamples: peaks.length,
     sizeBytes: peaks.length * Float32Array.BYTES_PER_ELEMENT,
     lastAccessed: Date.now(),
     isComplete: true,

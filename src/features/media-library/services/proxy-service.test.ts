@@ -22,6 +22,28 @@ const loggerMocks = vi.hoisted(() => ({
   setLevel: vi.fn(),
 }));
 
+const timelineServiceMocks = vi.hoisted(() => ({
+  filmstripCache: {
+    prewarmPriorityWindow: vi.fn(async () => undefined),
+  },
+}));
+
+const mediaLibraryStoreMocks = vi.hoisted(() => ({
+  getState: vi.fn(() => ({
+    mediaById: {},
+  })),
+}));
+
+const backgroundMediaWorkMocks = vi.hoisted(() => ({
+  enqueueBackgroundMediaWork: vi.fn((run: () => unknown) => {
+    const result = run();
+    if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+      void (result as PromiseLike<unknown>);
+    }
+    return vi.fn();
+  }),
+}));
+
 vi.mock('@/shared/utils/managed-worker', () => ({
   createManagedWorker: vi.fn(() => workerManagerMocks),
 }));
@@ -33,6 +55,16 @@ vi.mock('@/infrastructure/browser/object-url-registry', () => ({
 
 vi.mock('@/shared/logging/logger', () => ({
   createLogger: vi.fn(() => loggerMocks),
+}));
+
+vi.mock('@/features/media-library/deps/timeline-services', () => timelineServiceMocks);
+
+vi.mock('./background-media-work', () => backgroundMediaWorkMocks);
+
+vi.mock('../stores/media-library-store', () => ({
+  useMediaLibraryStore: {
+    getState: mediaLibraryStoreMocks.getState,
+  },
 }));
 
 type MockStoredFile = {
@@ -102,6 +134,17 @@ describe('proxyService.loadExistingProxies', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:proxy'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    mediaLibraryStoreMocks.getState.mockReturnValue({
+      mediaById: {},
+    });
   });
 
   it('allows manual proxy generation for any video clip', async () => {
@@ -129,6 +172,17 @@ describe('proxyService.loadExistingProxies', () => {
 
     useSettingsStore.getState().setSetting('proxyGenerationMode', 'all');
     expect(proxyService.needsProxy(1280, 720, 'video/mp4')).toBe(true);
+  });
+
+  it('treats custom-decoded audio codecs as smart proxy candidates', async () => {
+    const { useSettingsStore } = await import('@/features/media-library/deps/settings-contract');
+    const { proxyService } = await import('./proxy-service');
+
+    useSettingsStore.getState().resetToDefaults();
+    useSettingsStore.getState().setSetting('proxyGenerationMode', 'smart');
+    useSettingsStore.getState().setSetting('proxyGenerationResolution', '2160p');
+
+    expect(proxyService.needsProxy(1280, 720, 'video/webm', 'vorbis')).toBe(true);
   });
 
   it('records runtime playback trouble and auto-queues a smart proxy recommendation', async () => {
@@ -290,5 +344,54 @@ describe('proxyService.loadExistingProxies', () => {
 
     await expect(proxyService.loadExistingProxies(['video-3'])).resolves.toEqual(['video-3']);
     expect(removeEntry).toHaveBeenCalledWith('proxy-video-3', { recursive: true });
+  });
+
+  it('prewarms the first filmstrip window when a proxy finishes loading', async () => {
+    const proxyDirectory = createDirectoryHandle({
+      files: {
+        'proxy.mp4': createBinaryFile(1024),
+      },
+    });
+    const proxyRoot = createDirectoryHandle({
+      directories: {
+        'proxy-video-4': proxyDirectory,
+      },
+    });
+    const root = createDirectoryHandle({
+      directories: {
+        proxies: proxyRoot,
+      },
+    });
+
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: {
+        getDirectory: vi.fn().mockResolvedValue(root),
+      },
+    });
+
+    mediaLibraryStoreMocks.getState.mockReturnValue({
+      mediaById: {
+        'video-4': {
+          id: 'video-4',
+          mimeType: 'video/mp4',
+          duration: 20,
+        },
+      },
+    });
+
+    const { proxyService } = await import('./proxy-service');
+    proxyService.setProxyKey('video-4', 'proxy-video-4');
+
+    await (proxyService as unknown as {
+      loadCompletedProxy: (proxyKey: string) => Promise<void>;
+    }).loadCompletedProxy('proxy-video-4');
+
+    expect(timelineServiceMocks.filmstripCache.prewarmPriorityWindow).toHaveBeenCalledWith(
+      'video-4',
+      expect.objectContaining({ size: 1024 }),
+      20,
+      { startTime: 0, endTime: 12 },
+    );
   });
 });

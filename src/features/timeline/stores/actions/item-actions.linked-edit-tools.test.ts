@@ -25,6 +25,7 @@ function makeTrack(overrides: Partial<TimelineTrack> & Pick<TimelineTrack, 'id' 
   return {
     height: 80,
     locked: false,
+    syncLock: true,
     visible: true,
     muted: false,
     solo: false,
@@ -222,6 +223,66 @@ describe('linked edit tools', () => {
     expect(itemById['audio-1']).toMatchObject({ from: 0, durationInFrames: 50, sourceStart: 10 });
     expect(itemById['video-2']).toMatchObject({ from: 80 });
     expect(itemById['audio-2']).toMatchObject({ from: 80 });
+  });
+
+  it('ripple trim auto-blades a sync-locked continuous clip on another track', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false });
+    useItemsStore.getState().setItems([
+      makeVideoItem({ id: 'video-1', linkedGroupId: undefined }),
+      makeAudioItem({
+        id: 'music-bed',
+        linkedGroupId: undefined,
+        from: 0,
+        durationInFrames: 120,
+        sourceEnd: 120,
+        sourceDuration: 180,
+      }),
+    ]);
+
+    rippleTrimItem('video-1', 'end', -10);
+
+    const audioItems = useItemsStore.getState().items
+      .filter((item) => item.trackId === 'audio-track')
+      .toSorted((left, right) => left.from - right.from);
+
+    expect(audioItems).toHaveLength(2);
+    expect(audioItems.map((item) => ({ from: item.from, durationInFrames: item.durationInFrames }))).toEqual([
+      { from: 0, durationInFrames: 50 },
+      { from: 50, durationInFrames: 60 },
+    ]);
+  });
+
+  it('ripple trim leaves sync-lock disabled tracks static', () => {
+    useEditorStore.setState({ linkedSelectionEnabled: false });
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'video-track', name: 'V1', order: 0, kind: 'video' }),
+      makeTrack({ id: 'audio-track', name: 'A1', order: 1, kind: 'audio', syncLock: false }),
+    ]);
+    useItemsStore.getState().setItems([
+      makeVideoItem({ id: 'video-1', linkedGroupId: undefined }),
+      makeAudioItem({
+        id: 'music-bed',
+        linkedGroupId: undefined,
+        from: 0,
+        durationInFrames: 120,
+        sourceEnd: 120,
+        sourceDuration: 180,
+      }),
+    ]);
+
+    rippleTrimItem('video-1', 'end', -10);
+
+    const audioItems = useItemsStore.getState().items
+      .filter((item) => item.trackId === 'audio-track')
+      .toSorted((left, right) => left.from - right.from);
+
+    expect(audioItems).toEqual([
+      expect.objectContaining({
+        id: 'music-bed',
+        from: 0,
+        durationInFrames: 120,
+      }),
+    ]);
   });
 
   it('allows ripple trim on a transitioned edge and keeps the cut aligned', () => {

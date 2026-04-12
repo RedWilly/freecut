@@ -25,6 +25,8 @@ import {
   SCROLL_GESTURE_TIMEOUT,
   ZOOM_FRICTION,
   ZOOM_MIN_VELOCITY,
+  TIMELINE_RULER_HEIGHT,
+  TRACK_SECTION_DIVIDER_HEIGHT,
 } from '../constants';
 
 // Components
@@ -58,6 +60,240 @@ const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
   'timeline-cursor-slide-smart',
   'timeline-cursor-gauge',
 ] as const;
+
+type TrackScrollbarSection = 'video' | 'audio' | 'single';
+
+/**
+ * Tracks whether a scroll container has vertical overflow.
+ * Only re-renders the parent when overflow state changes (resize/content change),
+ * NOT on scroll events.
+ */
+function useTrackSectionHasOverflow(
+  scrollRef?: React.RefObject<HTMLDivElement | null>,
+  deps: readonly unknown[] = []
+) {
+  const [hasOverflow, setHasOverflow] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = scrollRef?.current;
+    if (!element) {
+      setHasOverflow(false);
+      return;
+    }
+
+    const checkOverflow = () => {
+      setHasOverflow(element.scrollHeight > element.clientHeight);
+    };
+
+    checkOverflow();
+
+    const resizeObserver = new ResizeObserver(checkOverflow);
+    resizeObserver.observe(element);
+
+    const contentElement = element.firstElementChild;
+    if (contentElement instanceof HTMLElement) {
+      resizeObserver.observe(contentElement);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [scrollRef, ...deps]);
+
+  return hasOverflow;
+}
+
+/**
+ * Scrollbar that tracks scroll position imperatively via DOM manipulation.
+ * No React state for scrollTop — thumb updates bypass the React render cycle.
+ */
+function TrackSectionScrollbarOverlay({
+  section,
+  height,
+  scrollRef,
+}: {
+  section: TrackScrollbarSection;
+  height: number;
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const thumbRef = useRef<HTMLDivElement | null>(null);
+  const dragOffsetRef = useRef(0);
+  const detachDragListenersRef = useRef<(() => void) | null>(null);
+  // Cache layout-derived values in refs so drag/scroll handlers use current values
+  // without needing React re-renders
+  const layoutRef = useRef({ railHeight: 0, thumbHeight: 0, maxThumbTravel: 0, overflowHeight: 0 });
+  const railInset = 4;
+
+  // Compute layout metrics and update thumb size/position imperatively
+  const updateThumbLayout = useCallback(() => {
+    const element = scrollRef?.current;
+    const thumb = thumbRef.current;
+    if (!element || !thumb) return;
+
+    const clientHeight = element.clientHeight;
+    const scrollHeight = element.scrollHeight;
+    const overflowHeight = scrollHeight - clientHeight;
+    const railHeight = Math.max(0, height - railInset * 2);
+    const thumbHeight = overflowHeight > 0
+      ? Math.min(railHeight, Math.max(24, (clientHeight / scrollHeight) * railHeight))
+      : 0;
+    const maxThumbTravel = Math.max(0, railHeight - thumbHeight);
+    const scrollTop = element.scrollTop;
+    const thumbTop = overflowHeight > 0
+      ? (scrollTop / overflowHeight) * maxThumbTravel
+      : 0;
+
+    layoutRef.current = { railHeight, thumbHeight, maxThumbTravel, overflowHeight };
+
+    thumb.style.height = `${thumbHeight}px`;
+    thumb.style.top = `${railInset + thumbTop}px`;
+    thumb.style.display = thumbHeight > 0 ? '' : 'none';
+  }, [height, scrollRef]);
+
+  // Update thumb position only (cheaper — called on scroll)
+  const updateThumbPosition = useCallback(() => {
+    const element = scrollRef?.current;
+    const thumb = thumbRef.current;
+    if (!element || !thumb) return;
+
+    const { maxThumbTravel, overflowHeight } = layoutRef.current;
+    if (overflowHeight <= 0 || maxThumbTravel <= 0) return;
+
+    const thumbTop = (element.scrollTop / overflowHeight) * maxThumbTravel;
+    thumb.style.top = `${railInset + thumbTop}px`;
+  }, [scrollRef]);
+
+  // Listen for scroll + resize, update thumb imperatively (no setState)
+  useEffect(() => {
+    const element = scrollRef?.current;
+    if (!element) return;
+
+    let scrollFrameId = 0;
+    const scheduleThumbUpdate = () => {
+      if (scrollFrameId !== 0) return;
+      scrollFrameId = window.requestAnimationFrame(() => {
+        scrollFrameId = 0;
+        updateThumbPosition();
+      });
+    };
+
+    // Full layout recalc on resize
+    const resizeObserver = new ResizeObserver(() => {
+      updateThumbLayout();
+    });
+    resizeObserver.observe(element);
+    const contentElement = element.firstElementChild;
+    if (contentElement instanceof HTMLElement) {
+      resizeObserver.observe(contentElement);
+    }
+
+    element.addEventListener('scroll', scheduleThumbUpdate, { passive: true });
+
+    // Initial layout
+    updateThumbLayout();
+
+    return () => {
+      if (scrollFrameId !== 0) cancelAnimationFrame(scrollFrameId);
+      element.removeEventListener('scroll', scheduleThumbUpdate);
+      resizeObserver.disconnect();
+    };
+  }, [scrollRef, updateThumbLayout, updateThumbPosition]);
+
+  // Also recalc on height prop change
+  useEffect(() => {
+    updateThumbLayout();
+  }, [height, updateThumbLayout]);
+
+  const syncScrollFromClientY = useCallback((clientY: number) => {
+    const rail = railRef.current;
+    const scrollElement = scrollRef?.current;
+    const { maxThumbTravel, overflowHeight } = layoutRef.current;
+    if (!rail || !scrollElement || maxThumbTravel <= 0 || overflowHeight <= 0) return;
+
+    const railRect = rail.getBoundingClientRect();
+    const nextThumbTop = Math.max(
+      0,
+      Math.min(maxThumbTravel, clientY - railRect.top - dragOffsetRef.current)
+    );
+
+    scrollElement.scrollTop = (nextThumbTop / maxThumbTravel) * overflowHeight;
+  }, [scrollRef]);
+
+  const stopDragging = useCallback(() => {
+    if (detachDragListenersRef.current) {
+      detachDragListenersRef.current();
+      detachDragListenersRef.current = null;
+    }
+    document.body.style.userSelect = '';
+  }, []);
+
+  useEffect(() => {
+    return stopDragging;
+  }, [stopDragging]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const thumbRect = thumbRef.current?.getBoundingClientRect();
+    const pointerStartedOnThumb = !!thumbRect
+      && event.clientY >= thumbRect.top
+      && event.clientY <= thumbRect.bottom;
+
+    dragOffsetRef.current = pointerStartedOnThumb && thumbRect
+      ? event.clientY - thumbRect.top
+      : layoutRef.current.thumbHeight / 2;
+
+    syncScrollFromClientY(event.clientY);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      syncScrollFromClientY(moveEvent.clientY);
+    };
+
+    const handlePointerUp = () => {
+      stopDragging();
+    };
+
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp, { passive: true });
+    window.addEventListener('pointercancel', handlePointerUp, { passive: true });
+
+    detachDragListenersRef.current = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [stopDragging, syncScrollFromClientY]);
+
+  if (height <= 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className="relative shrink-0"
+      style={{ height: `${height}px` }}
+      role="scrollbar"
+      aria-label={`${section} track section scrollbar`}
+      aria-controls="timeline-track-sections"
+      aria-orientation="vertical"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      tabIndex={-1}
+      onPointerDown={handlePointerDown}
+    >
+      <div ref={railRef} className="absolute inset-y-1 inset-x-0.5 rounded-sm bg-secondary/70">
+        <div
+          ref={thumbRef}
+          className="absolute inset-x-0 rounded-sm bg-muted-foreground/55 hover:bg-muted-foreground/70 transition-colors cursor-grab active:cursor-grabbing active:bg-muted-foreground/75"
+        />
+      </div>
+    </div>
+  );
+}
 
 
 interface TimelineContentProps {
@@ -1100,14 +1336,32 @@ export const TimelineContent = memo(function TimelineContent({
     return () => {
       container.removeEventListener('wheel', wheelHandler);
     };
-  }, [applyZoomWithPlayheadCentering, getVerticalScrollTarget, startMomentumScroll]);
+  }, [applyZoomWithPlayheadCentering, getVerticalScrollTarget, hasTrackSections, startMomentumScroll]);
 
   const singleSectionTracks = videoTracks.length > 0 ? videoTracks : audioTracks;
   const singleSectionKind = videoTracks.length > 0 ? 'video' : 'audio';
   const singleSectionHeight = videoTracks.length > 0 ? videoPaneHeight : audioPaneHeight;
   const singleSectionZoneHeight = videoTracks.length > 0 ? videoZoneHeight : audioZoneHeight;
   const singleSectionAnchorTrackId = videoTracks.length > 0 ? topZoneAnchorTrackId : bottomZoneAnchorTrackId;
-
+  const videoSectionHasOverflow = useTrackSectionHasOverflow(videoTracksScrollRef, [
+    hasTrackSections,
+    videoPaneHeight,
+    videoTracks.length,
+    videoSectionContentHeight,
+  ]);
+  const audioSectionHasOverflow = useTrackSectionHasOverflow(audioTracksScrollRef, [
+    hasTrackSections,
+    audioPaneHeight,
+    audioTracks.length,
+    audioSectionContentHeight,
+  ]);
+  const singleSectionHasOverflow = useTrackSectionHasOverflow(allTracksScrollRef, [
+    hasTrackSections,
+    singleSectionHeight,
+    singleSectionTracks.length,
+    videoSectionContentHeight,
+    audioSectionContentHeight,
+  ]);
   const renderTrackSection = (
     sectionTracks: TimelineTrackType[],
     options: {
@@ -1160,81 +1414,116 @@ export const TimelineContent = memo(function TimelineContent({
     </div>
   );
 
+  const anyOverflow = hasTrackSections
+    ? (videoSectionHasOverflow || audioSectionHasOverflow)
+    : singleSectionHasOverflow;
+
   return (
-    <div
-      ref={mergedRef}
-      data-timeline-scroll-container
-      className="timeline-container relative flex flex-1 flex-col overflow-x-auto overflow-y-hidden bg-background/30"
-      style={{
-        scrollBehavior: 'auto',
-        willChange: 'scroll-position',
-      }}
-      onMouseDownCapture={handleTimelineMouseDownCapture}
-      onClick={handleContainerClick}
-      onMouseMove={handleTimelineMouseMove}
-      onMouseLeave={handleTimelineMouseLeave}
-    >
-      <TimelineMarqueeLayer
-        containerRef={containerRef}
-        itemIds={itemIds}
-        onSelectionChange={handleMarqueeSelectionChange}
-        onMarqueeActiveChange={handleMarqueeActiveChange}
-      />
-
-      <div className="relative z-30 shrink-0 timeline-ruler bg-background" style={{ width: `${timelineWidth}px` }}>
-        <TimelineMarkers duration={actualDuration} width={timelineWidth} />
-        <TimelinePreviewScrubber inRuler maxFrame={maxTimelineFrame} />
-        <TimelinePlayhead inRuler maxFrame={maxTimelineFrame} />
-      </div>
-
+    <div className="flex flex-1 min-h-0 min-w-0 bg-background/30">
       <div
-        ref={tracksContainerRef}
-        className="relative timeline-tracks flex flex-1 min-h-0 flex-col"
+        ref={mergedRef}
+        data-timeline-scroll-container
+        className="timeline-container relative flex flex-1 flex-col overflow-x-auto overflow-y-hidden"
         style={{
-          width: `${timelineWidth}px`,
-          contain: 'layout style paint',
-          '--timeline-px-per-frame': fps > 0 ? `${(zoomLevel * 100) / fps}px` : '0px',
-          '--timeline-pixels-per-second': `${zoomLevel * 100}px`,
-        } as React.CSSProperties}
+          scrollBehavior: 'auto',
+          willChange: 'scroll-position',
+        }}
+        onMouseDownCapture={handleTimelineMouseDownCapture}
+        onClick={handleContainerClick}
+        onMouseMove={handleTimelineMouseMove}
+        onMouseLeave={handleTimelineMouseLeave}
       >
-        {hasTrackSections ? (
-          <>
-            {renderTrackSection(videoTracks, {
-              section: 'video',
-              height: videoPaneHeight,
-              zoneHeight: videoZoneHeight,
-              anchorTrackId: topZoneAnchorTrackId,
+        <TimelineMarqueeLayer
+          containerRef={containerRef}
+          itemIds={itemIds}
+          onSelectionChange={handleMarqueeSelectionChange}
+          onMarqueeActiveChange={handleMarqueeActiveChange}
+        />
+
+        <div className="relative z-30 shrink-0 timeline-ruler bg-background" style={{ width: `${timelineWidth}px` }}>
+          <TimelineMarkers duration={actualDuration} width={timelineWidth} />
+          <TimelinePreviewScrubber inRuler maxFrame={maxTimelineFrame} />
+          <TimelinePlayhead inRuler maxFrame={maxTimelineFrame} />
+        </div>
+
+        <div
+          id="timeline-track-sections"
+          ref={tracksContainerRef}
+          className="relative timeline-tracks flex flex-1 min-h-0 flex-col"
+          style={{
+            width: `${timelineWidth}px`,
+            contain: 'layout style paint',
+            '--timeline-px-per-frame': fps > 0 ? `${(zoomLevel * 100) / fps}px` : '0px',
+            '--timeline-pixels-per-second': `${zoomLevel * 100}px`,
+          } as React.CSSProperties}
+        >
+          {hasTrackSections ? (
+            <>
+              {renderTrackSection(videoTracks, {
+                section: 'video',
+                height: videoPaneHeight,
+                zoneHeight: videoZoneHeight,
+                anchorTrackId: topZoneAnchorTrackId,
+                showTopDividerForFirstTrack: true,
+                scrollRef: videoTracksScrollRef,
+              })}
+              <TrackSectionDivider onMouseDown={onSectionDividerMouseDown} />
+              {renderTrackSection(audioTracks, {
+                section: 'audio',
+                height: audioPaneHeight,
+                zoneHeight: audioZoneHeight,
+                anchorTrackId: bottomZoneAnchorTrackId,
+                showTopDividerForFirstTrack: false,
+                scrollRef: audioTracksScrollRef,
+              })}
+            </>
+          ) : (
+            renderTrackSection(singleSectionTracks, {
+              section: singleSectionKind,
+              height: singleSectionHeight,
+              zoneHeight: singleSectionZoneHeight,
+              anchorTrackId: singleSectionAnchorTrackId,
               showTopDividerForFirstTrack: true,
-              scrollRef: videoTracksScrollRef,
-            })}
-            <TrackSectionDivider onMouseDown={onSectionDividerMouseDown} />
-            {renderTrackSection(audioTracks, {
-              section: 'audio',
-              height: audioPaneHeight,
-              zoneHeight: audioZoneHeight,
-              anchorTrackId: bottomZoneAnchorTrackId,
-              showTopDividerForFirstTrack: false,
-              scrollRef: audioTracksScrollRef,
-            })}
-          </>
-        ) : (
-          renderTrackSection(singleSectionTracks, {
-            section: singleSectionKind,
-            height: singleSectionHeight,
-            zoneHeight: singleSectionZoneHeight,
-            anchorTrackId: singleSectionAnchorTrackId,
-            showTopDividerForFirstTrack: true,
-            scrollRef: allTracksScrollRef,
-          })
-        )}
+              scrollRef: allTracksScrollRef,
+            })
+          )}
 
-        {isDragging && (
-          <TimelineGuidelines />
-        )}
+          {isDragging && (
+            <TimelineGuidelines />
+          )}
 
-        <TimelinePreviewScrubber maxFrame={maxTimelineFrame} />
-        <TimelinePlayhead maxFrame={maxTimelineFrame} />
+          <TimelinePreviewScrubber maxFrame={maxTimelineFrame} />
+          <TimelinePlayhead maxFrame={maxTimelineFrame} />
+        </div>
       </div>
+
+      {anyOverflow && (
+        <div className="flex shrink-0 flex-col w-3 bg-background/80">
+          {/* Ruler spacer */}
+          <div className="shrink-0" style={{ height: `${TIMELINE_RULER_HEIGHT}px` }} />
+          {hasTrackSections ? (
+            <>
+              <TrackSectionScrollbarOverlay
+                section="video"
+                height={videoPaneHeight}
+                scrollRef={videoTracksScrollRef}
+              />
+              <div className="shrink-0" style={{ height: `${TRACK_SECTION_DIVIDER_HEIGHT}px` }} />
+              <TrackSectionScrollbarOverlay
+                section="audio"
+                height={audioPaneHeight}
+                scrollRef={audioTracksScrollRef}
+              />
+            </>
+          ) : (
+            <TrackSectionScrollbarOverlay
+              section="single"
+              height={singleSectionHeight}
+              scrollRef={allTracksScrollRef}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 });

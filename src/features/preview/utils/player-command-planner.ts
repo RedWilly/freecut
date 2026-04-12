@@ -31,6 +31,7 @@ export interface BackwardScrubSeekState {
 export interface PlayerPreviewFrameSyncPlan {
   command: Extract<PlayerCommand, { type: 'noop' | 'seek' }>;
   backwardScrubState: BackwardScrubSeekState;
+  useBackgroundWarmSeek: boolean;
 }
 
 export function planPlaybackStateCommand(input: {
@@ -141,6 +142,7 @@ export function planPreviewFrameSyncCommand(input: {
     return {
       command: { type: 'noop' },
       backwardScrubState,
+      useBackgroundWarmSeek: false,
     };
   }
 
@@ -149,13 +151,7 @@ export function planPreviewFrameSyncCommand(input: {
     return {
       command: { type: 'noop' },
       backwardScrubState: resetBackwardScrubState,
-    };
-  }
-
-  if (interactionMode === 'scrubbing' && bypassPreviewSeek) {
-    return {
-      command: { type: 'noop' },
-      backwardScrubState: resetBackwardScrubState,
+      useBackgroundWarmSeek: false,
     };
   }
 
@@ -166,14 +162,20 @@ export function planPreviewFrameSyncCommand(input: {
     && currentFrame === previewFrame
     && currentFrameEpoch === previewFrameEpoch
   );
-  if (shouldUseFastScrubOnly) {
+  const useBackgroundWarmSeek = (
+    interactionMode === 'scrubbing'
+    && (bypassPreviewSeek || shouldUseFastScrubOnly)
+  );
+
+  const targetFrame = transition.next.anchorFrame;
+  if (useBackgroundWarmSeek) {
     return {
-      command: { type: 'noop' },
+      command: { type: 'seek', targetFrame },
       backwardScrubState: resetBackwardScrubState,
+      useBackgroundWarmSeek: true,
     };
   }
 
-  const targetFrame = transition.next.anchorFrame;
   const scrubDirection = interactionMode === 'scrubbing'
     ? getFrameDirection(transition.prev.anchorFrame, transition.next.anchorFrame)
     : 0;
@@ -193,6 +195,7 @@ export function planPreviewFrameSyncCommand(input: {
       return {
         command: { type: 'noop' },
         backwardScrubState,
+        useBackgroundWarmSeek,
       };
     }
 
@@ -202,11 +205,13 @@ export function planPreviewFrameSyncCommand(input: {
         lastSeekAtMs: nowMs,
         lastSeekFrame: quantizedFrame,
       },
+      useBackgroundWarmSeek,
     };
   }
 
   return {
     command: { type: 'seek', targetFrame },
     backwardScrubState: resetBackwardScrubState,
+    useBackgroundWarmSeek,
   };
 }

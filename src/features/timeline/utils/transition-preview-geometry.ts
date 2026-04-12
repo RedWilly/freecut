@@ -23,6 +23,7 @@ export interface RipplePreviewLike {
 export interface LinkedEditPreviewLike {
   from?: number;
   durationInFrames?: number;
+  hidden?: boolean;
 }
 
 export interface TrackPushPreviewLike {

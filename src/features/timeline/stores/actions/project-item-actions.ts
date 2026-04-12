@@ -6,6 +6,7 @@ import { useTimelineSettingsStore } from '../timeline-settings-store';
 import { useCompositionsStore } from '../compositions-store';
 import { useCompositionNavigationStore } from '../composition-navigation-store';
 import { useSelectionStore } from '@/shared/state/selection';
+import { getLinkedItems } from '../../utils/linked-items';
 import {
   applyTransitionRepairs,
   execute,
@@ -26,14 +27,35 @@ function isMediaReferenceItem(item: TimelineItem, mediaIds: ReadonlySet<string>)
   return !!item.mediaId && mediaIds.has(item.mediaId);
 }
 
-function countMediaReferenceItems(items: TimelineItem[], mediaIds: ReadonlySet<string>): number {
-  return items.filter((item) => isMediaReferenceItem(item, mediaIds)).length;
-}
-
 function collectMediaReferenceItemIds(items: TimelineItem[], mediaIds: ReadonlySet<string>): string[] {
   return items
     .filter((item) => isMediaReferenceItem(item, mediaIds))
     .map((item) => item.id);
+}
+
+function shouldCountLogicalMediaReference(
+  item: TimelineItem,
+  items: TimelineItem[],
+  mediaIds: ReadonlySet<string>,
+): boolean {
+  if (!isMediaReferenceItem(item, mediaIds)) {
+    return false;
+  }
+
+  if (item.type !== 'audio') {
+    return true;
+  }
+
+  const linkedItems = getLinkedItems(items, item.id);
+  return !linkedItems.some((linkedItem) => (
+    linkedItem.id !== item.id
+    && linkedItem.type !== 'audio'
+    && isMediaReferenceItem(linkedItem, mediaIds)
+  ));
+}
+
+function countLogicalMediaReferences(items: TimelineItem[], mediaIds: ReadonlySet<string>): number {
+  return items.filter((item) => shouldCountLogicalMediaReference(item, items, mediaIds)).length;
 }
 
 function sanitizeSnapshotByItemIds<TSnapshot extends TimelineSnapshotLike>(
@@ -103,13 +125,15 @@ export function getMediaDeletionImpact(mediaIds: string[]): MediaDeletionImpact 
   const nestedItemIds = getEffectiveCompositions(currentSnapshot)
     .flatMap((composition) => collectMediaReferenceItemIds(composition.items, targetMediaIds));
   const itemIds = Array.from(new Set([...rootItemIds, ...nestedItemIds]));
+  const rootReferenceCount = countLogicalMediaReferences(rootSnapshot.items, targetMediaIds);
+  const nestedReferenceCount = getEffectiveCompositions(currentSnapshot)
+    .reduce((count, composition) => count + countLogicalMediaReferences(composition.items, targetMediaIds), 0);
 
   return {
     itemIds,
-    rootReferenceCount: countMediaReferenceItems(rootSnapshot.items, targetMediaIds),
-    nestedReferenceCount: getEffectiveCompositions(currentSnapshot)
-      .reduce((count, composition) => count + countMediaReferenceItems(composition.items, targetMediaIds), 0),
-    totalReferenceCount: itemIds.length,
+    rootReferenceCount,
+    nestedReferenceCount,
+    totalReferenceCount: rootReferenceCount + nestedReferenceCount,
   };
 }
 

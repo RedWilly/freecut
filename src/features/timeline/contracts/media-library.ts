@@ -13,6 +13,7 @@ export {
 } from '../stores/compositions-store';
 export { useItemsStore } from '../stores/items-store';
 export { wouldCreateCompositionCycle } from '../utils/composition-graph';
+export { getSynchronizedLinkedItems } from '../utils/linked-items';
 
 export {
   deleteCompoundClips,
@@ -30,6 +31,8 @@ export {
 
 export { autoMatchOrphanedClips } from '../utils/media-validation';
 export { gifFrameCache } from '../services/gif-frame-cache';
+export { filmstripCache } from '../services/filmstrip-cache';
+export { schedulePreviewWork } from '../hooks/preview-work-budget';
 export { resolveMediaUrl, resolveMediaUrls } from '../deps/media-library-contract';
 export { renderSingleFrame } from '../deps/export-contract';
 export {

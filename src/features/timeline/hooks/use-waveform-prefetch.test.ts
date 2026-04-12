@@ -1,14 +1,17 @@
 import { createElement } from 'react';
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
+import { useSelectionStore } from '@/shared/state/selection';
 import type { AudioItem, VideoItem } from '@/types/timeline';
 
 import { useWaveformPrefetch } from './use-waveform-prefetch';
+import { waveformCache } from '../services/waveform-cache';
 import { useItemsStore } from '../stores/items-store';
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store';
-import { useZoomStore } from '../stores/zoom-store';
+import { _resetZoomStoreForTest } from '../stores/zoom-store';
 
 function makeVideoItem(id: string, from: number, duration: number): VideoItem {
   return {
@@ -90,7 +93,8 @@ describe('waveform prefetch filtering', () => {
       isDirty: false,
       isTimelineLoading: false,
     });
-    useZoomStore.getState().setZoomLevelImmediate(1);
+    _resetZoomStoreForTest();
+    useSelectionStore.getState().setDragState(null);
     useItemsStore.getState().setItems([]);
     useItemsStore.getState().setTracks([]);
     useTimelineViewportStore.getState().setViewport({
@@ -99,6 +103,10 @@ describe('waveform prefetch filtering', () => {
       viewportWidth: 1000,
       viewportHeight: 120,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('prefetches clips in the ahead zone but not in the visible zone', () => {
@@ -152,5 +160,56 @@ describe('waveform prefetch filtering', () => {
     });
 
     expect(onRender).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for active drag interactions before prefetching', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestIdleCallback', (callback: IdleRequestCallback) => {
+      return window.setTimeout(() => {
+        callback({
+          didTimeout: false,
+          timeRemaining: () => 50,
+        } as IdleDeadline);
+      }, 0);
+    });
+    vi.stubGlobal('cancelIdleCallback', (id: number) => {
+      window.clearTimeout(id);
+    });
+
+    try {
+      const item = makeVideoItem('ahead', 400, 100);
+      useItemsStore.getState().setItems([item]);
+      vi.spyOn(blobUrlManager, 'get').mockReturnValue('blob:prefetch');
+      const prefetchSpy = vi.spyOn(waveformCache, 'prefetch').mockImplementation(() => {});
+
+      useSelectionStore.getState().setDragState({
+        isDragging: true,
+        draggedItemIds: [],
+        offset: { x: 0, y: 0 },
+      });
+
+      render(createElement(WaveformPrefetchProbe, { onRender: () => {} }));
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(prefetchSpy).not.toHaveBeenCalled();
+
+      act(() => {
+        useSelectionStore.getState().setDragState(null);
+        useTimelineViewportStore.getState().setViewport({
+          scrollLeft: 1,
+          scrollTop: 0,
+          viewportWidth: 1000,
+          viewportHeight: 120,
+        });
+        vi.runAllTimers();
+      });
+
+      expect(prefetchSpy).toHaveBeenCalledWith(item.mediaId, 'blob:prefetch');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

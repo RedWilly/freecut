@@ -55,4 +55,47 @@ describe('validateProjectMediaReferences', () => {
       },
     ]);
   });
+
+  it('collapses a linked synchronized audio-video pair into one orphan entry', async () => {
+    mediaLibraryServiceMocks.getMediaForProject.mockResolvedValue([]);
+
+    const orphans = await validateProjectMediaReferences({
+      rootItems: [
+        {
+          id: 'video-1',
+          type: 'video',
+          trackId: 'track-v1',
+          from: 0,
+          durationInFrames: 60,
+          label: 'paired.mp4',
+          src: 'blob:video',
+          mediaId: 'media-missing',
+          linkedGroupId: 'group-1',
+        },
+        {
+          id: 'audio-1',
+          type: 'audio',
+          trackId: 'track-a1',
+          from: 0,
+          durationInFrames: 60,
+          label: 'paired.mp4',
+          src: 'blob:audio',
+          mediaId: 'media-missing',
+          linkedGroupId: 'group-1',
+        },
+      ],
+      compositions: [],
+      projectId: 'project-1',
+    });
+
+    expect(orphans).toEqual([
+      {
+        itemId: 'video-1',
+        mediaId: 'media-missing',
+        itemType: 'video',
+        fileName: 'paired.mp4',
+        trackId: 'track-v1',
+      },
+    ]);
+  });
 });

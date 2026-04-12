@@ -101,7 +101,7 @@ describe('planCurrentFrameSyncCommand', () => {
 });
 
 describe('planPreviewFrameSyncCommand', () => {
-  it('skips player seeks when fast scrub overlay can own the frame', () => {
+  it('still computes a background warm seek when fast scrub overlay owns the frame', () => {
     const transition = resolvePreviewTransitionDecision({
       prev: {
         isPlaying: false,
@@ -131,11 +131,51 @@ describe('planPreviewFrameSyncCommand', () => {
         lastSeekFrame: 40,
       },
     })).toEqual({
-      command: { type: 'noop' },
+      command: { type: 'seek', targetFrame: 48 },
       backwardScrubState: {
         lastSeekAtMs: 0,
         lastSeekFrame: null,
       },
+      useBackgroundWarmSeek: true,
+    });
+  });
+
+  it('warms the exact backward scrub target when the overlay owns presentation', () => {
+    const transition = resolvePreviewTransitionDecision({
+      prev: {
+        isPlaying: false,
+        previewFrame: 100,
+        currentFrame: 100,
+        isGizmoInteracting: false,
+      },
+      next: {
+        isPlaying: false,
+        previewFrame: 93,
+        currentFrame: 93,
+        isGizmoInteracting: false,
+      },
+    });
+
+    expect(planPreviewFrameSyncCommand({
+      transition,
+      currentFrame: 93,
+      previewFrame: 93,
+      currentFrameEpoch: 6,
+      previewFrameEpoch: 6,
+      bypassPreviewSeek: false,
+      preferPlayerForStyledTextScrub: false,
+      nowMs: 1000,
+      backwardScrubState: {
+        lastSeekAtMs: 980,
+        lastSeekFrame: 90,
+      },
+    })).toEqual({
+      command: { type: 'seek', targetFrame: 93 },
+      backwardScrubState: {
+        lastSeekAtMs: 0,
+        lastSeekFrame: null,
+      },
+      useBackgroundWarmSeek: true,
     });
   });
 
@@ -175,6 +215,7 @@ describe('planPreviewFrameSyncCommand', () => {
       throw new Error('Expected seek plan');
     }
     expect(plan.command.targetFrame).toBeLessThanOrEqual(93);
+    expect(plan.useBackgroundWarmSeek).toBe(false);
     expect(plan.backwardScrubState).toEqual({
       lastSeekAtMs: 1000,
       lastSeekFrame: plan.command.targetFrame,
@@ -216,6 +257,46 @@ describe('planPreviewFrameSyncCommand', () => {
         lastSeekAtMs: 1000,
         lastSeekFrame: 90,
       },
+      useBackgroundWarmSeek: false,
+    });
+  });
+
+  it('marks bypassed scrub seeks as background warm seeks', () => {
+    const transition = resolvePreviewTransitionDecision({
+      prev: {
+        isPlaying: false,
+        previewFrame: 60,
+        currentFrame: 60,
+        isGizmoInteracting: false,
+      },
+      next: {
+        isPlaying: false,
+        previewFrame: 72,
+        currentFrame: 72,
+        isGizmoInteracting: false,
+      },
+    });
+
+    expect(planPreviewFrameSyncCommand({
+      transition,
+      currentFrame: 72,
+      previewFrame: 72,
+      currentFrameEpoch: 9,
+      previewFrameEpoch: 9,
+      bypassPreviewSeek: true,
+      preferPlayerForStyledTextScrub: false,
+      nowMs: 1400,
+      backwardScrubState: {
+        lastSeekAtMs: 0,
+        lastSeekFrame: null,
+      },
+    })).toEqual({
+      command: { type: 'seek', targetFrame: 72 },
+      backwardScrubState: {
+        lastSeekAtMs: 0,
+        lastSeekFrame: null,
+      },
+      useBackgroundWarmSeek: true,
     });
   });
 });

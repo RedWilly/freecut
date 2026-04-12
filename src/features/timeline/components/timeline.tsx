@@ -58,6 +58,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     removeTracks,
     toggleTrackDisabled,
     toggleTrackLock,
+    toggleTrackSyncLock,
     toggleTrackSolo,
   } = useTimelineTracks();
   // Selection state - use granular selectors
@@ -644,6 +645,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                   canDeleteTrack={tracks.length > 1}
                   canDeleteEmptyTracks={canDeleteEmptyTracks}
                   onToggleLock={() => toggleTrackLock(track.id)}
+                  onToggleSyncLock={() => toggleTrackSyncLock(track.id)}
                   onToggleDisabled={() => toggleTrackDisabled(track.id)}
                   onToggleSolo={() => toggleTrackSolo(track.id)}
                   onCloseGaps={() => useTimelineStore.getState().closeAllGapsOnTrack(track.id)}

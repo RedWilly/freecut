@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { TimelineTrack, VideoItem } from '@/types/timeline';
+import type { AudioItem, TimelineTrack, VideoItem } from '@/types/timeline';
 import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
@@ -35,6 +35,24 @@ function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
     durationInFrames: 60,
     label: 'clip.mp4',
     src: 'blob:video',
+    mediaId: 'media-1',
+    sourceStart: 0,
+    sourceEnd: 60,
+    sourceDuration: 120,
+    sourceFps: 30,
+    ...overrides,
+  };
+}
+
+function makeAudioItem(overrides: Partial<AudioItem> = {}): AudioItem {
+  return {
+    id: 'audio-1',
+    type: 'audio',
+    trackId: 'track-a1',
+    from: 0,
+    durationInFrames: 60,
+    label: 'clip.wav',
+    src: 'blob:audio',
     mediaId: 'media-1',
     sourceStart: 0,
     sourceEnd: 60,
@@ -149,5 +167,35 @@ describe('project-item-actions', () => {
       label: 'new.mp4',
       src: 'blob:new',
     });
+  });
+
+  it('counts a linked audio-video pair as one clip while still removing both timeline items', () => {
+    useItemsStore.getState().setTracks([
+      makeTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+      makeTrack({ id: 'track-a1', name: 'A1', kind: 'audio', order: 1 }),
+    ]);
+    useItemsStore.getState().setItems([
+      makeVideoItem({
+        id: 'video-ref',
+        mediaId: 'media-delete',
+        linkedGroupId: 'linked-ref',
+      }),
+      makeAudioItem({
+        id: 'audio-ref',
+        trackId: 'track-a1',
+        mediaId: 'media-delete',
+        linkedGroupId: 'linked-ref',
+      }),
+    ]);
+
+    expect(getMediaDeletionImpact(['media-delete'])).toEqual({
+      itemIds: ['video-ref', 'audio-ref'],
+      rootReferenceCount: 1,
+      nestedReferenceCount: 0,
+      totalReferenceCount: 1,
+    });
+
+    expect(removeProjectItems(['video-ref', 'audio-ref'])).toBe(true);
+    expect(useItemsStore.getState().items).toHaveLength(0);
   });
 });

@@ -24,6 +24,7 @@ const opfsMocks = vi.hoisted(() => ({
   saveFile: vi.fn(),
   deleteFile: vi.fn(),
   getFile: vi.fn(),
+  getFileBlob: vi.fn(),
 }));
 
 const proxyMocks = vi.hoisted(() => ({
@@ -36,9 +37,33 @@ const mediaProcessorMocks = vi.hoisted(() => ({
   hasUnsupportedAudioCodec: vi.fn(),
 }));
 
+const compositionRuntimeMocks = vi.hoisted(() => ({
+  needsCustomAudioDecoder: vi.fn(() => false),
+  startPreviewAudioConform: vi.fn(async () => undefined),
+  startPreviewAudioStartupWarm: vi.fn(async () => undefined),
+}));
+
+const previewAudioConformMocks = vi.hoisted(() => ({
+  deletePreviewAudioConform: vi.fn(async () => undefined),
+}));
+
 const gifFrameCacheMocks = vi.hoisted(() => ({
   getGifFrames: vi.fn(),
   clearMedia: vi.fn(),
+}));
+
+const filmstripCacheMocks = vi.hoisted(() => ({
+  prewarmPriorityWindow: vi.fn(async () => undefined),
+}));
+
+const backgroundMediaWorkMocks = vi.hoisted(() => ({
+  enqueueBackgroundMediaWork: vi.fn((run: () => unknown) => {
+    const result = run();
+    if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+      void (result as PromiseLike<unknown>);
+    }
+    return vi.fn();
+  }),
 }));
 
 vi.mock('@/infrastructure/storage/indexeddb', () => indexedDbMocks);
@@ -51,12 +76,28 @@ vi.mock('./proxy-service', () => ({
   proxyService: proxyMocks,
 }));
 
+vi.mock('./background-media-work', () => backgroundMediaWorkMocks);
+
 vi.mock('./media-processor-service', () => ({
   mediaProcessorService: mediaProcessorMocks,
 }));
 
+vi.mock('@/features/composition-runtime/utils/audio-codec-detection', () => ({
+  needsCustomAudioDecoder: compositionRuntimeMocks.needsCustomAudioDecoder,
+}));
+
+vi.mock('@/features/composition-runtime/utils/audio-decode-cache', () => ({
+  startPreviewAudioConform: compositionRuntimeMocks.startPreviewAudioConform,
+  startPreviewAudioStartupWarm: compositionRuntimeMocks.startPreviewAudioStartupWarm,
+}));
+
+vi.mock('@/features/composition-runtime/utils/preview-audio-conform', () => ({
+  deletePreviewAudioConform: previewAudioConformMocks.deletePreviewAudioConform,
+}));
+
 vi.mock('@/features/media-library/deps/timeline-services', () => ({
   gifFrameCache: gifFrameCacheMocks,
+  filmstripCache: filmstripCacheMocks,
 }));
 
 vi.mock('../utils/validation', () => ({
@@ -94,6 +135,9 @@ function makeMediaMetadata(overrides: Partial<MediaMetadata> = {}): MediaMetadat
 describe('MediaLibraryService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    compositionRuntimeMocks.needsCustomAudioDecoder.mockReturnValue(false);
+    compositionRuntimeMocks.startPreviewAudioStartupWarm.mockResolvedValue(undefined);
+    filmstripCacheMocks.prewarmPriorityWindow.mockResolvedValue(undefined);
   });
 
   describe('getAllMedia', () => {
@@ -159,6 +203,12 @@ describe('MediaLibraryService', () => {
       expect(indexedDbMocks.createMedia).toHaveBeenCalledTimes(1);
       expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id);
       expect(indexedDbMocks.saveThumbnail).toHaveBeenCalledTimes(1);
+      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenCalledWith(
+        result.id,
+        mockFile,
+        10,
+        { startTime: 0, endTime: 10 },
+      );
     });
 
     it('returns existing media with isDuplicate flag when file already in project', async () => {
@@ -182,6 +232,40 @@ describe('MediaLibraryService', () => {
       expect(result.isDuplicate).toBe(true);
       expect(result.id).toBe('existing-1');
       expect(indexedDbMocks.createMedia).not.toHaveBeenCalled();
+    });
+
+    it('starts preview audio conform in background for custom-decoded imports', async () => {
+      const mockFile = new File(['audio'], 'clip.webm', { type: 'video/webm' });
+      const mockHandle = {
+        name: 'clip.webm',
+        getFile: vi.fn().mockResolvedValue(mockFile),
+        queryPermission: vi.fn().mockResolvedValue('granted'),
+        requestPermission: vi.fn().mockResolvedValue('granted'),
+      } as unknown as FileSystemFileHandle;
+
+      mediaProcessorMocks.processMedia.mockResolvedValue({
+        metadata: {
+          type: 'video',
+          duration: 10,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          codec: 'vp9',
+          audioCodec: 'vorbis',
+          audioCodecSupported: true,
+          bitrate: 5000,
+        },
+      });
+      mediaProcessorMocks.hasUnsupportedAudioCodec.mockReturnValue({ unsupported: false });
+      indexedDbMocks.getMediaForProject.mockResolvedValue([]);
+      compositionRuntimeMocks.needsCustomAudioDecoder.mockReturnValue(true);
+
+      const result = await mediaLibraryService.importMediaWithHandle(mockHandle, 'project-1');
+      await Promise.resolve();
+
+      expect(result.id).toBeTruthy();
+      expect(compositionRuntimeMocks.startPreviewAudioStartupWarm).toHaveBeenCalledWith(result.id, mockFile);
+      expect(compositionRuntimeMocks.startPreviewAudioConform).toHaveBeenCalledWith(result.id, mockFile);
     });
 
     it('throws FileAccessError when permission is denied', async () => {
@@ -208,6 +292,7 @@ describe('MediaLibraryService', () => {
 
       expect(indexedDbMocks.removeMediaFromProject).toHaveBeenCalledWith('project-1', 'm1');
       expect(indexedDbMocks.deleteMedia).toHaveBeenCalledWith('m1');
+      expect(previewAudioConformMocks.deletePreviewAudioConform).toHaveBeenCalledWith(media, { clearMetadata: false });
     });
 
     it('only removes association when other projects still use the media', async () => {
@@ -298,11 +383,28 @@ describe('MediaLibraryService', () => {
         mimeType: 'video/mp4',
       });
       indexedDbMocks.getMedia.mockResolvedValue(media);
-      opfsMocks.getFile.mockResolvedValue(new ArrayBuffer(1024));
+      opfsMocks.getFileBlob.mockResolvedValue(new File(['data'], 'video.mp4', { type: 'video/mp4' }));
 
       const result = await mediaLibraryService.getMediaFile('m1');
       expect(result).toBeInstanceOf(Blob);
       expect(result?.type).toBe('video/mp4');
+    });
+
+    it('falls back to ArrayBuffer OPFS reads when direct file access fails', async () => {
+      const media = makeMediaMetadata({
+        id: 'm1',
+        storageType: 'opfs',
+        opfsPath: 'content/ab/cd/m1/data',
+        mimeType: 'video/mp4',
+      });
+      indexedDbMocks.getMedia.mockResolvedValue(media);
+      opfsMocks.getFileBlob.mockRejectedValue(new Error('direct file unsupported'));
+      opfsMocks.getFile.mockResolvedValue(new ArrayBuffer(1024));
+
+      const result = await mediaLibraryService.getMediaFile('m1');
+      expect(result).toBeInstanceOf(Blob);
+      expect(opfsMocks.getFileBlob).toHaveBeenCalledWith('content/ab/cd/m1/data');
+      expect(opfsMocks.getFile).toHaveBeenCalledWith('content/ab/cd/m1/data');
     });
 
     it('returns null when media not found', async () => {

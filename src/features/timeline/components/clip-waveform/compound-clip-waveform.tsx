@@ -10,45 +10,47 @@ import { waveformCache, type CachedWaveform } from '../../services/waveform-cach
 import { WAVEFORM_FILL_COLOR, WAVEFORM_STROKE_COLOR } from '../../constants';
 import { getCompositionOwnedAudioSources } from '../../utils/composition-clip-summary';
 import { mixCompoundClipWaveformPeaks } from '../../utils/compound-clip-waveform';
+import { computeWaveformRenderWindow } from './render-window';
+import { getPreviewStartupDelayMs, schedulePreviewWork } from '../../hooks/preview-work-budget';
+import {
+  getWaveformActiveTileCount,
+  useAdaptiveWaveformRenderVersion,
+} from './adaptive-render-version';
 
 const logger = createLogger('CompoundClipWaveform');
 const WAVEFORM_VERTICAL_PADDING_PX = 3;
-const ZOOM_SETTLE_MS = 80;
-const RENDER_PPS_QUANTUM = 5;
-
-function quantizeRenderPps(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  return Math.max(1, Math.round(value / RENDER_PPS_QUANTUM) * RENDER_PPS_QUANTUM);
-}
 
 interface CompoundClipWaveformProps {
   composition: SubComposition;
   clipWidth: number;
+  renderWidth?: number;
   sourceStart: number;
   sourceDuration: number;
   isVisible: boolean;
+  visibleStartRatio?: number;
+  visibleEndRatio?: number;
   pixelsPerSecond: number;
 }
 
 export const CompoundClipWaveform = memo(function CompoundClipWaveform({
   composition,
   clipWidth,
+  renderWidth,
   sourceStart,
   sourceDuration,
   isVisible,
+  visibleStartRatio = 0,
+  visibleEndRatio = 1,
   pixelsPerSecond,
 }: CompoundClipWaveformProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const requestTokenRef = useRef(0);
   const pixelsPerSecondRef = useRef(pixelsPerSecond);
   pixelsPerSecondRef.current = pixelsPerSecond;
-  const lastPpsRef = useRef(pixelsPerSecond);
-  const zoomSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [height, setHeight] = useState(0);
   const [waveformsByMediaId, setWaveformsByMediaId] = useState<Map<string, CachedWaveform>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [isZooming, setIsZooming] = useState(false);
   const mediaById = useMediaLibraryStore((s) => s.mediaById);
   const compositionById = useCompositionsStore((s) => s.compositionById);
 
@@ -96,6 +98,8 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     [ownedAudioSources]
   );
   const mediaIdsKey = useMemo(() => mediaIds.join('|'), [mediaIds]);
+  const visibleClipWidth = clipWidth;
+  const renderClipWidth = Math.max(visibleClipWidth, renderWidth ?? visibleClipWidth);
 
   useEffect(() => {
     requestTokenRef.current += 1;
@@ -126,38 +130,43 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     setIsLoading(true);
     setHasError(false);
 
-    void Promise.allSettled(missingIds.map(async (mediaId) => {
-      const blobUrl = await resolveMediaUrl(mediaId);
-      if (!blobUrl) {
-        throw new Error(`Missing blob URL for ${mediaId}`);
-      }
-      const waveform = await waveformCache.getWaveform(mediaId, blobUrl);
-      return [mediaId, waveform] as const;
-    })).then((results) => {
-      if (cancelled || requestToken !== requestTokenRef.current) {
-        return;
-      }
-
-      const resolved = new Map(cachedMap);
-      let hadFailure = false;
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          resolved.set(result.value[0], result.value[1]);
-        } else {
-          hadFailure = true;
-          logger.warn('Failed to load compound waveform source', result.reason);
+    const cancelScheduledStart = schedulePreviewWork(() => {
+      void Promise.allSettled(missingIds.map(async (mediaId) => {
+        const blobUrl = await resolveMediaUrl(mediaId);
+        if (!blobUrl) {
+          throw new Error(`Missing blob URL for ${mediaId}`);
         }
-      }
+        const waveform = await waveformCache.getWaveform(mediaId, blobUrl);
+        return [mediaId, waveform] as const;
+      })).then((results) => {
+        if (cancelled || requestToken !== requestTokenRef.current) {
+          return;
+        }
 
-      setWaveformsByMediaId(resolved);
-      setHasError(hadFailure && resolved.size === 0);
-      setIsLoading(false);
+        const resolved = new Map(cachedMap);
+        let hadFailure = false;
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            resolved.set(result.value[0], result.value[1]);
+          } else {
+            hadFailure = true;
+            logger.warn('Failed to load compound waveform source', result.reason);
+          }
+        }
+
+        setWaveformsByMediaId(resolved);
+        setHasError(hadFailure && resolved.size === 0);
+        setIsLoading(false);
+      });
+    }, {
+      delayMs: getPreviewStartupDelayMs(sourceDuration),
     });
 
     return () => {
       cancelled = true;
+      cancelScheduledStart();
     };
-  }, [isVisible, mediaIds, mediaIdsKey]);
+  }, [isVisible, mediaIds, mediaIdsKey, sourceDuration]);
 
   const mixedWaveform = useMemo(() => {
     if (ownedAudioSources.length === 0 || waveformsByMediaId.size === 0) {
@@ -174,6 +183,15 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
 
   const peaks = mixedWaveform?.peaks ?? null;
   const sampleRate = mixedWaveform?.sampleRate ?? 0;
+  const { visibleStartPx, visibleEndPx } = useMemo(
+    () => computeWaveformRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+    }),
+    [renderClipWidth, visibleClipWidth, visibleStartRatio, visibleEndRatio]
+  );
   const normalizationPeak = useMemo(() => {
     if (!peaks || peaks.length === 0) return 1;
     let maxPeak = 0;
@@ -185,29 +203,6 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     }
     return maxPeak > 0 ? maxPeak : 1;
   }, [peaks]);
-
-  useEffect(() => {
-    if (lastPpsRef.current === pixelsPerSecond) return;
-    lastPpsRef.current = pixelsPerSecond;
-
-    setIsZooming(true);
-    if (zoomSettleTimeoutRef.current) {
-      clearTimeout(zoomSettleTimeoutRef.current);
-    }
-
-    zoomSettleTimeoutRef.current = setTimeout(() => {
-      setIsZooming(false);
-      zoomSettleTimeoutRef.current = null;
-    }, ZOOM_SETTLE_MS);
-  }, [pixelsPerSecond]);
-
-  useEffect(() => {
-    return () => {
-      if (zoomSettleTimeoutRef.current) {
-        clearTimeout(zoomSettleTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const renderTile = useCallback((
     ctx: CanvasRenderingContext2D,
@@ -292,6 +287,17 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     ctx.stroke();
   }, [height, normalizationPeak, peaks, sampleRate, sourceDuration, sourceStart]);
 
+  const activeTileCount = useMemo(() => getWaveformActiveTileCount({
+    renderWidth: renderClipWidth,
+    visibleStartPx,
+    visibleEndPx,
+  }), [renderClipWidth, visibleStartPx, visibleEndPx]);
+  const renderVersion = useAdaptiveWaveformRenderVersion({
+    baseVersion: `${peaks?.length ?? 0}:${height}:${waveformsByMediaId.size}`,
+    pixelsPerSecond,
+    activeTileCount,
+  });
+
   if (hasError) {
     return (
       <div ref={containerRef} className="absolute inset-0 flex items-center">
@@ -310,25 +316,22 @@ export const CompoundClipWaveform = memo(function CompoundClipWaveform({
     }
     return (
       <div ref={containerRef} className="absolute inset-0">
-        <WaveformSkeleton clipWidth={clipWidth} height={height || 24} />
+        <WaveformSkeleton clipWidth={visibleClipWidth} height={height || 24} />
       </div>
     );
   }
 
-  const isActiveZoomRender = isZooming || lastPpsRef.current !== pixelsPerSecond;
-  const renderPpsKey = isActiveZoomRender
-    ? `q${quantizeRenderPps(pixelsPerSecond)}`
-    : `e${Math.round(Math.max(1, pixelsPerSecond) * 1000)}`;
-  const renderVersion = `${peaks.length}:${height}:${waveformsByMediaId.size}:${renderPpsKey}`;
-
   return (
     <div ref={containerRef} className="absolute inset-0">
-      {isLoading && <WaveformSkeleton clipWidth={clipWidth} height={height} />}
+      {isLoading && <WaveformSkeleton clipWidth={visibleClipWidth} height={height} />}
       <TiledCanvas
-        width={clipWidth}
+        width={renderClipWidth}
         height={height}
         renderTile={renderTile}
         version={renderVersion}
+        visibleStartPx={visibleStartPx}
+        visibleEndPx={visibleEndPx}
+        overscanTiles={1}
       />
     </div>
   );

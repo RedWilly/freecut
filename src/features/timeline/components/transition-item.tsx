@@ -218,7 +218,7 @@ export const TransitionItem = memo(function TransitionItem({
       useCallback((s) => {
         const update = s.updatesById[transition.leftClipId];
         if (!update) return null;
-        return { from: update.from, durationInFrames: update.durationInFrames };
+        return { from: update.from, durationInFrames: update.durationInFrames, hidden: update.hidden };
       }, [transition.leftClipId])
     )
   );
@@ -227,7 +227,7 @@ export const TransitionItem = memo(function TransitionItem({
       useCallback((s) => {
         const update = s.updatesById[transition.rightClipId];
         if (!update) return null;
-        return { from: update.from, durationInFrames: update.durationInFrames };
+        return { from: update.from, durationInFrames: update.durationInFrames, hidden: update.hidden };
       }, [transition.rightClipId])
     )
   );
@@ -313,6 +313,7 @@ export const TransitionItem = memo(function TransitionItem({
   // as the duration changes. The left handle tracks the cursor 1:1.
   const effectiveLeftClip = useMemo(() => {
     if (!leftClip) return null;
+    if (leftLinkedEditPreview?.hidden) return null;
     return applyPreviewGeometryToClip(
       leftClip.id,
       leftClip.from,
@@ -333,6 +334,7 @@ export const TransitionItem = memo(function TransitionItem({
 
   const effectiveRightClip = useMemo(() => {
     if (!rightClip) return null;
+    if (rightLinkedEditPreview?.hidden) return null;
     return applyPreviewGeometryToClip(
       rightClip.id,
       rightClip.from,

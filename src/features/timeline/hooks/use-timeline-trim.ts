@@ -5,6 +5,7 @@ import { useEditorStore } from '@/shared/state/editor';
 import { toast } from 'sonner';
 import type { SnapTarget } from '../types/drag';
 import { useTimelineStore } from '../stores/timeline-store';
+import { useItemsStore } from '../stores/items-store';
 import { useSelectionStore } from '@/shared/state/selection';
 import { pixelsToTimeNow } from '../utils/zoom-conversions';
 import { useSnapCalculator } from './use-snap-calculator';
@@ -19,6 +20,10 @@ import {
   rippleTrimItem,
   trimItemBreakingTransition,
 } from '../stores/actions/item-actions';
+import {
+  buildInsertedGapPreviewUpdatesForSyncLockedTracks,
+  buildRemovedIntervalPreviewUpdatesForSyncLockedTracks,
+} from '../stores/actions/sync-lock-ripple';
 import { findHandleNeighborWithTransitions } from '../utils/transition-linked-neighbors';
 import {
   buildSynchronizedLinkedMoveUpdates,
@@ -514,6 +519,31 @@ export function useTimelineTrim(item: TimelineItem, timelineDuration: number, tr
                 update.from - (allItems.find((candidate) => candidate.id === update.id)?.from ?? update.from),
               )),
           );
+        }
+
+        if (rippleShift !== 0) {
+          const editedTrackIds = new Set(
+            synchronizedItems.map((linkedItem) => linkedItem.trackId),
+          );
+          const syncLockPreviewUpdates = rippleShift < 0
+            ? buildRemovedIntervalPreviewUpdatesForSyncLockedTracks({
+              items: allItems,
+              tracks: useItemsStore.getState().tracks,
+              editedTrackIds,
+              intervals: [{
+                start: currentItem.from + currentItem.durationInFrames + rippleShift,
+                end: currentItem.from + currentItem.durationInFrames,
+              }],
+            })
+            : buildInsertedGapPreviewUpdatesForSyncLockedTracks({
+              items: allItems,
+              tracks: useItemsStore.getState().tracks,
+              editedTrackIds,
+              cutFrame: currentItem.from + currentItem.durationInFrames,
+              amount: rippleShift,
+            });
+
+          linkedPreviewUpdates.push(...syncLockPreviewUpdates);
         }
       } else {
         const synchronizedItems = linkedSelectionEnabled

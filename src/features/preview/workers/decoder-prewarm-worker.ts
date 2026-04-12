@@ -6,6 +6,9 @@
  * Returns decoded ImageBitmaps that the render loop can draw directly.
  */
 
+import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source';
+import type { ObjectUrlSourceMetadata } from '@/infrastructure/browser/object-url-registry';
+
 const TIMESTAMP_EPSILON = 1e-4;
 const LOOKAHEAD_TOLERANCE_SECONDS = 0.05;
 const STREAM_BACKTRACK_SECONDS = 1.0;
@@ -72,7 +75,12 @@ interface ExtractorState {
 const extractors = new Map<string, ExtractorState>();
 const initPromises = new Map<string, Promise<ExtractorState | null>>();
 
-async function getExtractor(src: string, blob?: Blob): Promise<ExtractorState | null> {
+interface WorkerSourceOptions {
+  blob?: Blob;
+  sourceMetadata?: ObjectUrlSourceMetadata;
+}
+
+async function getExtractor(src: string, options?: WorkerSourceOptions): Promise<ExtractorState | null> {
   const existing = extractors.get(src);
   if (existing) return existing;
 
@@ -81,9 +89,10 @@ async function getExtractor(src: string, blob?: Blob): Promise<ExtractorState | 
 
   const promise = (async () => {
     const mediabunny = await getMediabunny();
-    const source = blob
-      ? new mediabunny.BlobSource(blob)
-      : new mediabunny.UrlSource(src);
+    const source = createMediabunnyInputSource(mediabunny, src, {
+      metadata: options?.sourceMetadata,
+      fallbackBlob: options?.blob,
+    });
     const input = new mediabunny.Input({
       formats: mediabunny.ALL_FORMATS,
       source,
@@ -101,6 +110,33 @@ async function getExtractor(src: string, blob?: Blob): Promise<ExtractorState | 
       if (typeof videoTrack.canDecode === 'function' && !(await videoTrack.canDecode())) {
         input.dispose?.();
         return null;
+      }
+
+      // Lazy-extract keyframe index for sources that arrive without one.
+      // Uses metadata-only key-packet chain: O(K) — typically < 10ms.
+      // Ensures adaptive seek is available from the very first decode.
+      if (!keyframeIndexBySrc.has(src)) {
+        try {
+          const eps = new mediabunny.EncodedPacketSink(videoTrack);
+          const kfTimestamps: number[] = [];
+          const metadataOpts = { metadataOnly: true } as const;
+          let pkt = await eps.getFirstKeyPacket(metadataOpts);
+          while (pkt) {
+            kfTimestamps.push(pkt.timestamp);
+            pkt = await eps.getNextKeyPacket(pkt, metadataOpts);
+          }
+          eps.dispose?.();
+          if (kfTimestamps.length > 0) {
+            keyframeIndexBySrc.set(src, kfTimestamps);
+            self.postMessage({
+              type: 'keyframes_extracted',
+              src,
+              keyframeTimestamps: kfTimestamps,
+            });
+          }
+        } catch {
+          // Non-fatal — falls back to fixed 1s backtrack
+        }
       }
 
       const sink = new mediabunny.VideoSampleSink(videoTrack);
@@ -211,6 +247,7 @@ async function ensureSampleForTimestamp(state: ExtractorState, timestamp: number
   } else if (
     state.lastRequestedTimestamp !== null
     && timestamp + TIMESTAMP_EPSILON < state.lastRequestedTimestamp
+    && !currentSampleCoversTimestamp(state, timestamp)
   ) {
     resetSampleIterator(state, timestamp, src);
   } else if (
@@ -243,6 +280,23 @@ async function ensureSampleForTimestamp(state: ExtractorState, timestamp: number
     }
     break;
   }
+}
+
+function currentSampleCoversTimestamp(state: ExtractorState, timestamp: number): boolean {
+  const sample = state.currentSample as { timestamp?: number; duration?: number } | null;
+  if (!sample || typeof sample.timestamp !== 'number') {
+    return false;
+  }
+
+  if (sample.timestamp > timestamp + TIMESTAMP_EPSILON) {
+    return false;
+  }
+
+  if (typeof sample.duration !== 'number' || !Number.isFinite(sample.duration) || sample.duration <= 0) {
+    return true;
+  }
+
+  return sample.timestamp + sample.duration >= timestamp - TIMESTAMP_EPSILON;
 }
 
 function getOrCreateCurrentVideoFrame(state: ExtractorState): VideoFrame | null {
@@ -346,8 +400,13 @@ async function preseekWithState(state: ExtractorState, timestamp: number, src?: 
   }
 }
 
-async function preseek(src: string, timestamp: number, blob?: Blob): Promise<ImageBitmap | null> {
-  const state = await getExtractor(src, blob);
+async function preseek(
+  src: string,
+  timestamp: number,
+  blob?: Blob,
+  sourceMetadata?: ObjectUrlSourceMetadata,
+): Promise<ImageBitmap | null> {
+  const state = await getExtractor(src, { blob, sourceMetadata });
   if (!state) return null;
 
   const previous = state.drawLock ?? Promise.resolve();
@@ -368,9 +427,10 @@ async function batchPreseek(
   src: string,
   timestamps: number[],
   blob?: Blob,
+  sourceMetadata?: ObjectUrlSourceMetadata,
 ): Promise<Map<number, ImageBitmap>> {
   const results = new Map<number, ImageBitmap>();
-  const state = await getExtractor(src, blob);
+  const state = await getExtractor(src, { blob, sourceMetadata });
   if (!state || timestamps.length === 0) return results;
 
   // Serialize with the single-frame path via drawLock
@@ -468,7 +528,7 @@ self.onmessage = async (event: MessageEvent) => {
     }
     try {
       const sorted = [...msg.timestamps].sort((a: number, b: number) => a - b);
-      const bitmaps = await batchPreseek(msg.src, sorted, msg.blob);
+      const bitmaps = await batchPreseek(msg.src, sorted, msg.blob, msg.sourceMetadata);
       const transfer: Transferable[] = [];
       const entries: Array<{ timestamp: number; bitmap: ImageBitmap }> = [];
       for (const [ts, bitmap] of bitmaps) {
@@ -498,7 +558,7 @@ self.onmessage = async (event: MessageEvent) => {
   }
 
   try {
-    const bitmap = await preseek(msg.src, msg.timestamp, msg.blob);
+    const bitmap = await preseek(msg.src, msg.timestamp, msg.blob, msg.sourceMetadata);
     if (bitmap) {
       self.postMessage(
         { type: 'preseek_done', id: msg.id, success: true, timestamp: msg.timestamp, bitmap },

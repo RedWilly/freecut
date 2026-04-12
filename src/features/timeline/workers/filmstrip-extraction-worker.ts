@@ -10,6 +10,8 @@
  *     0.jpg, 1.jpg, 2.jpg, ... (legacy caches may still include .webp)
  */
 
+import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source';
+import type { ObjectUrlSourceMetadata } from '@/infrastructure/browser/object-url-registry';
 import { safeWrite } from '../utils/opfs-safe-write';
 
 const FILMSTRIP_DIR = 'filmstrips';
@@ -24,6 +26,8 @@ export interface ExtractRequest {
   requestId: string;
   mediaId: string;
   blobUrl: string;
+  blob?: Blob;
+  sourceMetadata?: ObjectUrlSourceMetadata;
   duration: number;
   width: number;
   height: number;
@@ -118,7 +122,7 @@ async function extractAndSave(
   state: { aborted: boolean }
 ): Promise<void> {
   const {
-    requestId, mediaId, blobUrl, duration, width, height, skipIndices, priorityIndices, targetIndices,
+    requestId, mediaId, blobUrl, blob, sourceMetadata, duration, width, height, skipIndices, priorityIndices, targetIndices,
     startIndex, endIndex, totalFrames: totalFramesOverride, maxParallelSaves
   } = request;
 
@@ -183,7 +187,7 @@ async function extractAndSave(
   const dir = await getFilmstripDir(mediaId);
 
   // Load mediabunny
-  const { Input, UrlSource, CanvasSink, ALL_FORMATS } = await loadMediabunny();
+  const { Input, CanvasSink, ALL_FORMATS } = await loadMediabunny();
 
   let input: InstanceType<typeof Input> | null = null;
   let sink: InstanceType<typeof CanvasSink> | null = null;
@@ -191,7 +195,10 @@ async function extractAndSave(
   try {
     // Create input from blob URL
     input = new Input({
-      source: new UrlSource(blobUrl),
+      source: createMediabunnyInputSource(await loadMediabunny(), blobUrl, {
+        metadata: sourceMetadata,
+        fallbackBlob: blob,
+      }),
       formats: ALL_FORMATS,
     });
 

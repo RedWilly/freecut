@@ -18,7 +18,6 @@ import {
 import { toast } from 'sonner';
 import { execute, applyTransitionRepairs, getLogger } from './shared';
 import {
-  buildSynchronizedLinkedMoveUpdatesForEdit,
   getLinkedItemsForEdit,
   getMatchingSynchronizedLinkedCounterpartForEdit,
   getSynchronizedLinkedCounterpartPairForEdit,
@@ -31,6 +30,11 @@ import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
 import { clampSlideDeltaToPreserveTransitions } from '../../utils/transition-utils';
 import { calculateTransitionPortions } from '@/domain/timeline/transitions/transition-planner';
 import { getLinkedItemIds } from '../../utils/linked-items';
+import {
+  propagateInsertedGapToSyncLockedTracks,
+  propagateRemovedIntervalsToSyncLockedTracks,
+} from './sync-lock-ripple';
+import { applySplitBookkeeping, type SplitResultEntry } from './split-bookkeeping';
 
 function isLinkedSelectionEnabled(): boolean {
   return useEditorStore.getState().linkedSelectionEnabled;
@@ -143,39 +147,15 @@ export function splitItem(
     const splitResults = itemsToSplit
       .map((item) => ({
         originalId: item.id,
+        originalLinkedGroupId: item.linkedGroupId,
         result: itemsStore._splitItem(item.id, splitFrame),
       }))
-      .filter((entry): entry is { originalId: string; result: { leftItem: TimelineItem; rightItem: TimelineItem } } => entry.result !== null);
+      .filter((entry): entry is SplitResultEntry => entry.result !== null);
 
     const anchorResult = splitResults.find((entry) => entry.originalId === id)?.result ?? null;
     if (!anchorResult) return null;
 
-    // Update transitions pointing to split item
-    const transitions = useTransitionsStore.getState().transitions;
-    const splitRightByOriginalId = new Map(splitResults.map((entry) => [entry.originalId, entry.result.rightItem.id]));
-    const updatedTransitions = transitions.map((transition) => {
-      const leftReplacementId = splitRightByOriginalId.get(transition.leftClipId);
-      if (leftReplacementId) {
-        // Transition was from this clip - now from right half
-        return { ...transition, leftClipId: leftReplacementId };
-      }
-      if (splitRightByOriginalId.has(transition.rightClipId)) {
-        // Transition was to this clip - stays pointing to left half (original ID)
-        return transition;
-      }
-      return transition;
-    });
-    useTransitionsStore.getState().setTransitions(updatedTransitions);
-
-    if (itemsToSplit.some((item) => item.linkedGroupId)) {
-      const leftLinkedGroupId = splitResults.length > 1 ? crypto.randomUUID() : undefined;
-      const rightLinkedGroupId = splitResults.length > 1 ? crypto.randomUUID() : undefined;
-
-      for (const entry of splitResults) {
-        itemsStore._updateItem(entry.result.leftItem.id, { linkedGroupId: leftLinkedGroupId });
-        itemsStore._updateItem(entry.result.rightItem.id, { linkedGroupId: rightLinkedGroupId });
-      }
-    }
+    applySplitBookkeeping(splitResults);
 
     // Keep selection anchored to the split clip for immediate downstream
     // adjacency/transition detection across all split entry points.
@@ -239,23 +219,16 @@ export function splitItemAtFrames(
       const frameSplitResults = itemsToSplit
         .map((item) => ({
           originalId: item.id,
+          originalLinkedGroupId: item.linkedGroupId,
           result: useItemsStore.getState()._splitItem(item.id, frame),
         }))
-        .filter((entry): entry is { originalId: string; result: { leftItem: TimelineItem; rightItem: TimelineItem } } => entry.result !== null);
+        .filter((entry): entry is SplitResultEntry => entry.result !== null);
 
       if (frameSplitResults.length !== itemsToSplit.length) {
         continue;
       }
 
-      if (itemsToSplit.some((item) => item.linkedGroupId)) {
-        const leftLinkedGroupId = frameSplitResults.length > 1 ? crypto.randomUUID() : undefined;
-        const rightLinkedGroupId = frameSplitResults.length > 1 ? crypto.randomUUID() : undefined;
-
-        for (const entry of frameSplitResults) {
-          useItemsStore.getState()._updateItem(entry.result.leftItem.id, { linkedGroupId: leftLinkedGroupId });
-          useItemsStore.getState()._updateItem(entry.result.rightItem.id, { linkedGroupId: rightLinkedGroupId });
-        }
-      }
+      applySplitBookkeeping(frameSplitResults);
 
       splitCount++;
 
@@ -925,7 +898,7 @@ export async function insertFreezeFrame(
 /**
  * Ripple edit: trim a clip and shift all downstream items on the same track.
  *
- * Unlike normal trim which leaves gaps, ripple edit closes/opens gaps by
+ * Unlike normal trim which leaves gaps, ripple edit closes or opens gaps by
  * shifting everything after the trim point.
  *
  * End handle: trims the end, shifts downstream items by the change in end position.
@@ -939,117 +912,100 @@ export async function insertFreezeFrame(
  */
 export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: number): void {
   if (trimDelta === 0) return;
-
   execute('RIPPLE_EDIT', () => {
-    const itemsStore = useItemsStore.getState();
-    const itemsBefore = itemsStore.items;
-    const item = itemsBefore.find((i) => i.id === id);
+    const store = useItemsStore.getState();
+    const item = store.items.find((candidate) => candidate.id === id);
     if (!item) return;
-    const synchronizedItems = getSynchronizedLinkedItemsForEdit(itemsBefore, id, isLinkedSelectionEnabled());
-    const synchronizedIds = new Set(synchronizedItems.map((synchronizedItem) => synchronizedItem.id));
-    const oldById = new Map(synchronizedItems.map((synchronizedItem) => [synchronizedItem.id, synchronizedItem]));
-
+    const synced = getSynchronizedLinkedItemsForEdit(store.items, id, isLinkedSelectionEnabled());
+    const syncedIds = new Set(synced.map((candidate) => candidate.id));
+    const oldById = new Map(synced.map((candidate) => [candidate.id, candidate]));
     const oldFrom = item.from;
     const oldEnd = item.from + item.durationInFrames;
-
-    // Apply the trim — skip adjacency clamping since downstream items will be shifted
-    if (handle === 'start') {
-      itemsStore._trimItemStart(id, trimDelta, { skipAdjacentClamp: true });
-    } else {
-      itemsStore._trimItemEnd(id, trimDelta, { skipAdjacentClamp: true });
-    }
-
-    const itemsAfterTrim = useItemsStore.getState().items;
-    const trimmedItem = itemsAfterTrim.find((i) => i.id === id);
-    if (!trimmedItem) return;
-
-    let shiftAmount: number;
-
+    if (handle === 'start') store._trimItemStart(id, trimDelta, { skipAdjacentClamp: true });
+    else store._trimItemEnd(id, trimDelta, { skipAdjacentClamp: true }); 
+    const trimmed = useItemsStore.getState().itemById[id];
+    if (!trimmed) return;
+    let shift = 0;
+    let interval: { start: number; end: number } | null = null;
+    let insertAt: number | null = null;
     if (handle === 'end') {
-      // End handle: downstream items shift by the change in end position
-      const newEnd = trimmedItem.from + trimmedItem.durationInFrames;
-      shiftAmount = newEnd - oldEnd;
-
-      if (shiftAmount !== 0) {
-        for (const synchronizedItem of synchronizedItems) {
-          if (synchronizedItem.id === id) continue;
-          itemsStore._trimItemEnd(synchronizedItem.id, shiftAmount, { skipAdjacentClamp: true });
+      const newEnd = trimmed.from + trimmed.durationInFrames;
+      shift = newEnd - oldEnd;
+      if (shift < 0) interval = { start: newEnd, end: oldEnd };
+      else if (shift > 0) insertAt = oldEnd;
+      for (const syncedItem of synced) {
+        if (syncedItem.id !== id && shift !== 0) {
+          store._trimItemEnd(syncedItem.id, shift, { skipAdjacentClamp: true });
         }
       }
     } else {
-      // Start handle: _trimItemStart moved `from` — move it back and compute
-      // the shift from the duration change.
-      // _trimItemStart: newFrom = oldFrom + clamped, newDuration = oldDuration - clamped
-      // We want: from stays at oldFrom, same newDuration, downstream shifts by -clamped
-      const actualClamped = trimmedItem.from - oldFrom;
-      if (actualClamped !== 0) {
-        itemsStore._moveItem(id, oldFrom);
-        for (const synchronizedItem of synchronizedItems) {
-          if (synchronizedItem.id === id) continue;
-          itemsStore._trimItemStart(synchronizedItem.id, actualClamped, { skipAdjacentClamp: true });
-          const synchronizedBefore = oldById.get(synchronizedItem.id);
-          if (synchronizedBefore) {
-            itemsStore._moveItem(synchronizedItem.id, synchronizedBefore.from);
-          }
+      const actual = trimmed.from - oldFrom;
+      if (actual !== 0) {
+        store._moveItem(id, oldFrom);
+        for (const syncedItem of synced) {
+          if (syncedItem.id === id) continue;
+          store._trimItemStart(syncedItem.id, actual, { skipAdjacentClamp: true });
+          const before = oldById.get(syncedItem.id);
+          if (before) store._moveItem(syncedItem.id, before.from);
         }
       }
-      // Duration got shorter by `actualClamped` (positive = shorter), so downstream
-      // should shift left (negative) by the same amount â†’ shift = -actualClamped
-      shiftAmount = -actualClamped;
+      shift = -actual;
+      if (shift < 0) interval = { start: oldEnd + shift, end: oldEnd };
+      else if (shift > 0) insertAt = oldEnd;
     }
-
-    if (shiftAmount !== 0) {
-      const freshItems = useItemsStore.getState().items;
-      const baseDeltaByItemId = new Map<string, number>();
+    let lockedAffected: string[] = [];
+    let lockedRemoved: string[] = [];
+    if (shift !== 0) {
+      const fresh = useItemsStore.getState().items;
+      const deltas = new Map<string, number>();
       const transitions = useTransitionsStore.getState().transitions;
-
-      for (const synchronizedItem of synchronizedItems) {
-        const synchronizedBefore = oldById.get(synchronizedItem.id);
-        if (!synchronizedBefore) continue;
-
-        const synchronizedOldEnd = synchronizedBefore.from + synchronizedBefore.durationInFrames;
-        const transitionNeighborIds = new Set<string>();
+      for (const syncedItem of synced) {
+        const before = oldById.get(syncedItem.id);
+        if (!before) continue;
+        const oldSyncedEnd = before.from + before.durationInFrames;
+        const neighbors = new Set<string>();
         for (const transition of transitions) {
-          if (transition.leftClipId === synchronizedItem.id) {
-            transitionNeighborIds.add(transition.rightClipId);
-          }
+          if (transition.leftClipId === syncedItem.id) neighbors.add(transition.rightClipId);
         }
-
-        for (const candidate of freshItems) {
-          if (synchronizedIds.has(candidate.id)) continue;
-          if (candidate.trackId !== synchronizedBefore.trackId) continue;
-          if (candidate.from >= synchronizedOldEnd || transitionNeighborIds.has(candidate.id)) {
-            baseDeltaByItemId.set(candidate.id, shiftAmount);
-          }
+        for (const candidate of fresh) {
+          if (syncedIds.has(candidate.id) || candidate.trackId !== before.trackId) continue;
+          if (candidate.from >= oldSyncedEnd || neighbors.has(candidate.id)) deltas.set(candidate.id, shift);
         }
       }
-
-      const updates = buildSynchronizedLinkedMoveUpdatesForEdit(
-        freshItems,
-        baseDeltaByItemId,
-        isLinkedSelectionEnabled(),
-      );
-      if (updates.length > 0) {
-        itemsStore._moveItems(updates);
+      const updates = fresh.flatMap((candidate) => {
+        const delta = deltas.get(candidate.id) ?? 0;
+        return delta === 0 ? [] : [{ id: candidate.id, from: candidate.from + delta }];
+      });
+      if (updates.length > 0) store._moveItems(updates);
+      const editedTracks = new Set(synced.map((candidate) => candidate.trackId));
+      if (interval) {
+        const result = propagateRemovedIntervalsToSyncLockedTracks({ editedTrackIds: editedTracks, intervals: [interval] });
+        lockedAffected = result.affectedIds;
+        lockedRemoved = result.removedIds;
+      } else if (insertAt !== null) {
+        const result = propagateInsertedGapToSyncLockedTracks({ editedTrackIds: editedTracks, cutFrame: insertAt, amount: shift });
+        lockedAffected = result.affectedIds;
       }
     }
-
-    // Repair transitions for the trimmed item and all downstream items
-    const finalItems = useItemsStore.getState().items;
-    const allAffected = Array.from(new Set([
-      ...synchronizedItems.map((synchronizedItem) => synchronizedItem.id),
-      ...finalItems
-        .filter((candidate) => !synchronizedIds.has(candidate.id) && synchronizedItems.some((synchronizedItem) => candidate.trackId === synchronizedItem.trackId && candidate.from >= synchronizedItem.from))
+    const final = useItemsStore.getState().items;
+    const affected = Array.from(new Set([
+      ...synced.map((candidate) => candidate.id),
+      ...lockedAffected,
+      ...final
+        .filter((candidate) => !syncedIds.has(candidate.id) && synced.some((syncedItem) => candidate.trackId === syncedItem.trackId && candidate.from >= syncedItem.from))
         .map((candidate) => candidate.id),
     ]));
-    applyTransitionRepairs(allAffected);
-
+    if (lockedRemoved.length > 0) {
+      useTransitionsStore.getState()._removeTransitionsForItems(lockedRemoved);
+      useKeyframesStore.getState()._removeKeyframesForItems(lockedRemoved);
+    }
+    applyTransitionRepairs(affected, lockedRemoved.length > 0 ? new Set(lockedRemoved) : undefined);
     useTimelineSettingsStore.getState().markDirty();
   }, { id, handle, trimDelta });
 }
 
 /**
- * Rolling edit: move the edit point between two adjacent clips.
+ * Rolling edit                                                                                                                                                                                                                                                                                                                    
  * Trims the left clip's end and the right clip's start by the same amount,
  * keeping total timeline duration unchanged.
  *

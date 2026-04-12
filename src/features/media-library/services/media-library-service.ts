@@ -23,10 +23,11 @@ import {
   getMediaForProject as getMediaForProjectDB,
   deleteTranscript,
 } from '@/infrastructure/storage/indexeddb';
-import { gifFrameCache } from '@/features/media-library/deps/timeline-services';
+import { filmstripCache, gifFrameCache } from '@/features/media-library/deps/timeline-services';
 import { opfsService } from './opfs-service';
 import { proxyService } from './proxy-service';
 import { ensureFileHandlePermission, FileAccessError } from './file-access';
+import { enqueueBackgroundMediaWork } from './background-media-work';
 import {
   buildGeneratedMediaOpfsPath,
   getGeneratedImageDimensions,
@@ -37,7 +38,17 @@ import { validateMediaFile, getMimeType } from '../utils/validation';
 import { getSharedProxyKey } from '../utils/proxy-key';
 import { mediaProcessorService } from './media-processor-service';
 import { generateThumbnail } from '../utils/thumbnail-generator';
+import {
+  needsCustomAudioDecoder,
+  startPreviewAudioConform,
+  startPreviewAudioStartupWarm,
+  deletePreviewAudioConform,
+} from '@/features/media-library/deps/composition-runtime';
 export { FileAccessError } from './file-access';
+
+const IMPORT_FILMSTRIP_PREWARM_SECONDS = 12;
+const IMPORT_BACKGROUND_WARM_DELAY_MS = 600;
+const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200;
 
 /**
  * Media Library Service - Coordinates OPFS + IndexedDB + metadata extraction
@@ -277,12 +288,52 @@ class MediaLibraryService {
     // Stage 7: Associate with project
     await associateMediaWithProject(projectId, id);
 
+    if (metadata.type === 'video' && mediaMetadata.duration > 0) {
+      const warmEndTime = Math.min(mediaMetadata.duration, IMPORT_FILMSTRIP_PREWARM_SECONDS);
+      enqueueBackgroundMediaWork(() => (
+        filmstripCache.prewarmPriorityWindow(id, file, mediaMetadata.duration, {
+          startTime: 0,
+          endTime: warmEndTime,
+        })
+      ), {
+        priority: 'warm',
+        delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
+      });
+    }
+
+    const previewAudioCodec = metadata.type === 'audio'
+      ? metadata.codec
+      : metadata.type === 'video'
+        ? metadata.audioCodec
+        : undefined;
+    if (needsCustomAudioDecoder(previewAudioCodec)) {
+      enqueueBackgroundMediaWork(() => (
+        startPreviewAudioStartupWarm(id, file)
+      ), {
+        priority: 'warm',
+        delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
+      });
+      enqueueBackgroundMediaWork(() => (
+        startPreviewAudioConform(id, file)
+      ), {
+        priority: 'heavy',
+        delayMs: IMPORT_BACKGROUND_HEAVY_DELAY_MS,
+      });
+    }
+
     // Pre-extract GIF frames in background
     if (resolvedMimeType === 'image/gif') {
-      const blobUrl = URL.createObjectURL(file);
-      void gifFrameCache.getGifFrames(id, blobUrl)
-        .catch((err) => logger.warn('Failed to pre-extract GIF frames:', err))
-        .finally(() => URL.revokeObjectURL(blobUrl));
+      enqueueBackgroundMediaWork(async () => {
+        const blobUrl = URL.createObjectURL(file);
+        try {
+          await gifFrameCache.getGifFrames(id, blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      }, {
+        priority: 'warm',
+        delayMs: IMPORT_BACKGROUND_WARM_DELAY_MS,
+      });
     }
 
     return {
@@ -521,6 +572,7 @@ class MediaLibraryService {
       await this.deleteTranscriptSafely(mediaId);
       await this.deleteThumbnailsSafely(mediaId);
       await this.clearGifFrameCacheSafely(mediaId);
+      await deletePreviewAudioConform(media, { clearMetadata: false });
       await this.deleteProxySafely(media, { preserveSharedAliases: true });
       await this.deleteOpfsContentIfUnreferenced(media);
       // For handle storage: File stays on user's disk - nothing to delete
@@ -605,6 +657,7 @@ class MediaLibraryService {
     // Handle storage: nothing to delete, file stays on disk
 
     await this.deleteThumbnailsSafely(id);
+    await deletePreviewAudioConform(media, { clearMetadata: false });
     await this.deleteProxySafely(media);
 
     await deleteMediaDB(id);
@@ -722,14 +775,24 @@ class MediaLibraryService {
     // Also handle old records without storageType (treat as OPFS)
     if (media.opfsPath) {
       try {
-        const arrayBuffer = await opfsService.getFile(media.opfsPath);
-        const blob = new Blob([arrayBuffer], {
+        const blob = await opfsService.getFileBlob(media.opfsPath);
+        if (blob.type === media.mimeType || !media.mimeType) {
+          return blob;
+        }
+        return new Blob([blob], {
           type: media.mimeType,
         });
-        return blob;
       } catch (error) {
-        logger.error('Failed to get media file from OPFS:', error);
-        return null;
+        logger.warn('Failed to get OPFS media as file blob, falling back to ArrayBuffer read:', error);
+        try {
+          const arrayBuffer = await opfsService.getFile(media.opfsPath);
+          return new Blob([arrayBuffer], {
+            type: media.mimeType,
+          });
+        } catch (fallbackError) {
+          logger.error('Failed to get media file from OPFS:', fallbackError);
+          return null;
+        }
       }
     }
 
@@ -945,7 +1008,11 @@ class MediaLibraryService {
     // Clean up orphaned metadata
     for (const id of orphanedMetadata) {
       try {
+        const media = await getMediaDB(id);
         await this.deleteThumbnailsSafely(id);
+        if (media) {
+          await deletePreviewAudioConform(media, { clearMetadata: false });
+        }
         await deleteMediaDB(id);
       } catch (error) {
         logger.error(`Failed to cleanup orphaned metadata ${id}:`, error);

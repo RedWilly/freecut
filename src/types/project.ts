@@ -38,6 +38,7 @@ export interface ProjectTimeline {
     kind?: 'video' | 'audio';
     height: number;
     locked: boolean;
+    syncLock?: boolean;
     visible: boolean;
     muted: boolean;
     solo: boolean;

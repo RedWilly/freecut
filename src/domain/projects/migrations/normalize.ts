@@ -36,6 +36,7 @@ function normalizeTrack(
     height: DEFAULT_TRACK_HEIGHT,
     // Ensure boolean fields have defaults
     locked: track.locked ?? false,
+    syncLock: track.syncLock ?? true,
     visible: track.visible ?? true,
     muted: track.muted ?? false,
     solo: track.solo ?? false,

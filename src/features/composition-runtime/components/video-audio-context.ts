@@ -9,50 +9,34 @@ import { getPropertyKeyframes, interpolatePropertyValue } from '@/features/compo
 import type { VideoItem } from '@/types/timeline';
 import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve } from '@/shared/utils/audio-fade-curve';
 import { useMixerLiveGain, clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
+import {
+  createPreviewClipAudioGraph,
+  getSharedPreviewAudioContext,
+  rampPreviewClipGain,
+  setPreviewClipGain,
+  type PreviewClipAudioGraph,
+} from '../utils/preview-audio-graph';
 
 // Track video elements that have been connected to Web Audio API
 // A video element can only be connected to ONE MediaElementSourceNode ever
 const connectedVideoElements = new WeakSet<HTMLVideoElement>();
-// Store gain nodes by video element for volume updates
-const videoGainNodes = new WeakMap<HTMLVideoElement, GainNode>();
+const videoAudioGraphs = new WeakMap<HTMLVideoElement, PreviewClipAudioGraph>();
 const videoAudioContexts = new WeakMap<HTMLVideoElement, AudioContext>();
-
-// Short ramp to prevent audio clicks/pops on gain changes (matches custom decoder)
-const GAIN_RAMP_SECONDS = 0.008;
-let sharedVideoAudioContext: AudioContext | null = null;
-
-function getSharedVideoAudioContext(): AudioContext | null {
-  if (typeof window === 'undefined') return null;
-
-  const webkitWindow = window as Window & {
-    webkitAudioContext?: typeof AudioContext;
-  };
-  const AudioContextCtor = window.AudioContext ?? webkitWindow.webkitAudioContext;
-  if (!AudioContextCtor) return null;
-
-  if (sharedVideoAudioContext === null || sharedVideoAudioContext.state === 'closed') {
-    sharedVideoAudioContext = new AudioContextCtor();
-  }
-
-  return sharedVideoAudioContext;
-}
 
 export function applyVideoElementAudioVolume(video: HTMLVideoElement, audioVolume: number): void {
   // Pool creates elements muted. Keep element unmuted and control via volume/gain.
   video.muted = false;
+  const safeVolume = Math.max(0, audioVolume);
 
   // Already connected to Web Audio API: ramp gain and resume context if needed.
   if (connectedVideoElements.has(video)) {
-    const gainNode = videoGainNodes.get(video);
+    const graph = videoAudioGraphs.get(video);
     const audioContext = videoAudioContexts.get(video);
-    if (gainNode && audioContext && audioContext.state === 'running') {
-      const now = audioContext.currentTime;
-      gainNode.gain.cancelScheduledValues(now);
-      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
-      gainNode.gain.linearRampToValueAtTime(Math.max(0, audioVolume), now + GAIN_RAMP_SECONDS);
-    } else if (gainNode) {
+    if (graph && audioContext?.state === 'running') {
+      rampPreviewClipGain(graph, safeVolume);
+    } else if (graph) {
       // Context not running yet — direct assignment is safe (no audio output)
-      gainNode.gain.value = audioVolume;
+      setPreviewClipGain(graph, safeVolume);
     }
     if (audioContext?.state === 'suspended') {
       audioContext.resume();
@@ -60,41 +44,30 @@ export function applyVideoElementAudioVolume(video: HTMLVideoElement, audioVolum
     return;
   }
 
-  // For <= 1, native volume is cheaper.
-  if (audioVolume <= 1) {
-    video.volume = Math.max(0, audioVolume);
-    return;
-  }
-
-  // For boost > 1, use shared Web Audio context.
+  // Always route preview video audio through the shared clip graph so future
+  // EQ/SFX can be inserted in one place for video and audio clips alike.
   try {
-    const audioContext = getSharedVideoAudioContext();
-    if (!audioContext) {
-      video.volume = Math.min(1, Math.max(0, audioVolume));
+    const graph = createPreviewClipAudioGraph();
+    if (!graph) {
+      video.volume = Math.min(1, safeVolume);
       return;
     }
 
-    const gainNode = audioContext.createGain();
-    // Start at 0 and ramp to target to prevent click on initial connection
-    gainNode.gain.value = 0;
-    const sourceNode = audioContext.createMediaElementSource(video);
-    sourceNode.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    video.volume = 1;
+    const sourceNode = graph.context.createMediaElementSource(video);
+    sourceNode.connect(graph.sourceInputNode);
 
     connectedVideoElements.add(video);
-    videoGainNodes.set(video, gainNode);
-    videoAudioContexts.set(video, audioContext);
+    videoAudioGraphs.set(video, graph);
+    videoAudioContexts.set(video, graph.context);
 
-    if (audioContext.state === 'suspended') {
-      audioContext.resume();
+    if (graph.context.state === 'suspended') {
+      graph.context.resume();
     }
-    // Ramp gain after connection is established and context is resuming
-    const now = audioContext.currentTime;
-    gainNode.gain.setValueAtTime(0, now);
-    gainNode.gain.linearRampToValueAtTime(Math.max(0, audioVolume), now + GAIN_RAMP_SECONDS);
+    rampPreviewClipGain(graph, safeVolume);
   } catch {
     // Fallback if Web Audio setup fails.
-    video.volume = Math.min(1, Math.max(0, audioVolume));
+    video.volume = Math.min(1, safeVolume);
   }
 }
 
@@ -105,8 +78,9 @@ export function applyVideoElementAudioVolume(video: HTMLVideoElement, audioVolum
  * lags behind video by 50-100ms on cold resume.
  */
 export function ensureAudioContextResumed(): void {
-  if (sharedVideoAudioContext?.state === 'suspended') {
-    sharedVideoAudioContext.resume();
+  const sharedPreviewContext = getSharedPreviewAudioContext();
+  if (sharedPreviewContext?.state === 'suspended') {
+    sharedPreviewContext.resume();
   }
 }
 
@@ -120,15 +94,12 @@ export { connectedVideoElements, videoAudioContexts };
  * Operates directly on the gain node, bypassing React state for zero latency.
  */
 export function muteTransitionElement(video: HTMLVideoElement): void {
-  const gainNode = videoGainNodes.get(video);
+  const graph = videoAudioGraphs.get(video);
   const audioContext = videoAudioContexts.get(video);
-  if (gainNode && audioContext && audioContext.state === 'running') {
-    const now = audioContext.currentTime;
-    gainNode.gain.cancelScheduledValues(now);
-    gainNode.gain.setValueAtTime(gainNode.gain.value, now);
-    gainNode.gain.linearRampToValueAtTime(0, now + GAIN_RAMP_SECONDS);
-  } else if (gainNode) {
-    gainNode.gain.value = 0;
+  if (graph && audioContext && audioContext.state === 'running') {
+    rampPreviewClipGain(graph, 0);
+  } else if (graph) {
+    setPreviewClipGain(graph, 0);
   } else {
     video.volume = 0;
   }
@@ -139,17 +110,15 @@ export function muteTransitionElement(video: HTMLVideoElement): void {
  * target volume over GAIN_RAMP_SECONDS to prevent a click.
  */
 export function unmuteTransitionElement(video: HTMLVideoElement, targetVolume: number): void {
-  const gainNode = videoGainNodes.get(video);
+  const graph = videoAudioGraphs.get(video);
   const audioContext = videoAudioContexts.get(video);
-  if (gainNode && audioContext && audioContext.state === 'running') {
-    const now = audioContext.currentTime;
-    gainNode.gain.cancelScheduledValues(now);
-    gainNode.gain.setValueAtTime(0, now);
-    gainNode.gain.linearRampToValueAtTime(Math.max(0, targetVolume), now + GAIN_RAMP_SECONDS);
-  } else if (gainNode) {
-    gainNode.gain.value = targetVolume;
+  const safeVolume = Math.max(0, targetVolume);
+  if (graph && audioContext && audioContext.state === 'running') {
+    rampPreviewClipGain(graph, safeVolume);
+  } else if (graph) {
+    setPreviewClipGain(graph, safeVolume);
   } else {
-    video.volume = Math.min(1, Math.max(0, targetVolume));
+    video.volume = Math.min(1, safeVolume);
   }
 }
 

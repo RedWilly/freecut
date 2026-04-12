@@ -8,10 +8,14 @@ import type { TimelineItem } from '@/types/timeline';
 import type { MediaMetadata } from '@/types/storage';
 import { mediaLibraryService } from '../services/media-library-service';
 import {
+  getSynchronizedLinkedItems,
+  useItemsStore,
+  useTimelineSettingsStore,
+} from '@/features/media-library/deps/timeline-stores';
+import {
   removeProjectItems,
   updateProjectItem,
 } from '@/features/media-library/deps/timeline-actions';
-import { useTimelineSettingsStore } from '@/features/media-library/deps/timeline-stores';
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { createLogger } from '@/shared/logging/logger';
 
@@ -40,6 +44,70 @@ function applySuccessfulRelink(
   blobUrlManager.invalidate(mediaId);
   replaceMediaItem(set, mediaId, updated);
   get().markMediaHealthy(mediaId);
+}
+
+function buildOrphanedClipRelinkUpdates(
+  newMedia: MediaMetadata,
+  fps: number,
+): Partial<TimelineItem> {
+  const updates: Record<string, unknown> = {
+    mediaId: newMedia.id,
+    label: newMedia.fileName,
+    // Clear cached URLs to force re-resolution
+    src: undefined,
+    thumbnailUrl: undefined,
+    // Clear waveform data for audio clips to force regeneration
+    waveformData: undefined,
+  };
+
+  if (newMedia.width > 0 && newMedia.height > 0) {
+    updates.sourceWidth = newMedia.width;
+    updates.sourceHeight = newMedia.height;
+  }
+
+  if (newMedia.duration > 0) {
+    const sourceFps = newMedia.fps > 0 ? newMedia.fps : fps;
+    updates.sourceFps = sourceFps;
+    updates.sourceDuration = Math.round(newMedia.duration * sourceFps);
+  }
+
+  return updates as Partial<TimelineItem>;
+}
+
+function getOrphanedRelinkTargetIds(itemId: string, replacementMediaId: string): string[] {
+  const { items, itemById } = useItemsStore.getState();
+  const anchor = itemById[itemId];
+  if (!anchor) {
+    return [itemId];
+  }
+
+  const synchronizedItems = getSynchronizedLinkedItems(items, itemId);
+  const targetMediaId = anchor.mediaId;
+
+  if (!targetMediaId || targetMediaId === replacementMediaId) {
+    const alreadyRelinkedIds = synchronizedItems
+      .filter((item) => item.mediaId === replacementMediaId)
+      .map((item) => item.id);
+    return alreadyRelinkedIds.length > 0 ? alreadyRelinkedIds : [itemId];
+  }
+
+  const targetIds = synchronizedItems
+    .filter((item) => item.mediaId === targetMediaId)
+    .map((item) => item.id);
+
+  return targetIds.length > 0 ? targetIds : [itemId];
+}
+
+function getOrphanedRemovalTargetIds(itemIds: string[]): string[] {
+  const expandedIds = new Set<string>();
+
+  for (const itemId of itemIds) {
+    const anchor = useItemsStore.getState().itemById[itemId];
+    const targetIds = getOrphanedRelinkTargetIds(itemId, anchor?.mediaId ?? '');
+    targetIds.forEach((targetId) => expandedIds.add(targetId));
+  }
+
+  return expandedIds.size > 0 ? Array.from(expandedIds) : itemIds;
 }
 
 export function createRelinkingActions(
@@ -174,50 +242,58 @@ export function createRelinkingActions(
           return false;
         }
 
-        // Build updates for the timeline item
+        const targetItemIds = getOrphanedRelinkTargetIds(itemId, newMediaId);
+        if (targetItemIds.length === 0) {
+          return false;
+        }
+
+        const alreadyRelinked = targetItemIds.every((targetItemId) => {
+          const item = useItemsStore.getState().itemById[targetItemId];
+          return item?.mediaId === newMediaId;
+        });
+
+        if (alreadyRelinked) {
+          set((state) => ({
+            orphanedClips: state.orphanedClips.filter(
+              (o) => !targetItemIds.includes(o.itemId)
+            ),
+          }));
+          return true;
+        }
+
         const fps = useTimelineSettingsStore.getState().fps;
-        const updates: Record<string, unknown> = {
-          mediaId: newMediaId,
-          label: newMedia.fileName,
-          // Clear cached URLs to force re-resolution
-          src: undefined,
-          thumbnailUrl: undefined,
-          // Clear waveform data for audio clips to force regeneration
-          waveformData: undefined,
-        };
+        const updates = buildOrphanedClipRelinkUpdates(newMedia, fps);
+        const relinkedItemIds = targetItemIds.filter((targetItemId) => (
+          updateProjectItem(targetItemId, updates)
+        ));
 
-        // Update source dimensions for video/image items
-        if (newMedia.width > 0 && newMedia.height > 0) {
-          updates.sourceWidth = newMedia.width;
-          updates.sourceHeight = newMedia.height;
+        if (relinkedItemIds.length === 0) {
+          get().showNotification({
+            type: 'error',
+            message: 'Clip not found',
+          });
+          return false;
         }
-
-        // Update source duration if available
-        if (newMedia.duration > 0) {
-          const sourceFps = newMedia.fps > 0 ? newMedia.fps : fps;
-          updates.sourceFps = sourceFps;
-          updates.sourceDuration = Math.round(newMedia.duration * sourceFps);
-        }
-
-        // Update the timeline item
-        updateProjectItem(itemId, updates as Partial<TimelineItem>);
 
         // Clear any cached blob URLs for the old media
         // The new media will be resolved on next render
         logger.debug(
-          `[relinkOrphanedClip] Relinked clip ${itemId} to media ${newMediaId}`
+          `[relinkOrphanedClip] Relinked clip ${itemId} to media ${newMediaId}`,
+          { relinkedItemIds }
         );
 
         // Remove from orphaned clips list
         set((state) => ({
           orphanedClips: state.orphanedClips.filter(
-            (o) => o.itemId !== itemId
+            (o) => !relinkedItemIds.includes(o.itemId)
           ),
         }));
 
         get().showNotification({
           type: 'success',
-          message: `Clip relinked to "${newMedia.fileName}"`,
+          message: relinkedItemIds.length > 1
+            ? `Linked clips relinked to "${newMedia.fileName}"`
+            : `Clip relinked to "${newMedia.fileName}"`,
         });
 
         return true;
@@ -236,7 +312,8 @@ export function createRelinkingActions(
 
     removeOrphanedClips: (itemIds: string[]) => {
       try {
-        removeProjectItems(itemIds);
+        const targetItemIds = getOrphanedRemovalTargetIds(itemIds);
+        removeProjectItems(targetItemIds);
 
         // Remove from orphaned clips list
         set((state) => ({
