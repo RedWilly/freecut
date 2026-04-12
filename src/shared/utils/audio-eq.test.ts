@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AUDIO_EQ_PRESETS,
   AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
   AUDIO_EQ_LOW_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
   AUDIO_EQ_MID_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_FREQUENCY_HZ,
   findAudioEqPresetId,
+  getAudioEqResponseGainDb,
   applyAudioEqStages,
   areAudioEqStagesEqual,
   clampAudioEqGainDb,
@@ -64,19 +66,27 @@ describe('audio-eq', () => {
 
   it('detects matching presets from resolved settings', () => {
     expect(findAudioEqPresetId({
-      lowGainDb: -4,
-      lowMidGainDb: -2,
-      midGainDb: 3,
-      highMidGainDb: 4,
+      lowGainDb: -6,
+      lowMidGainDb: -3,
+      midGainDb: 2,
+      highMidGainDb: 4.5,
       highGainDb: 2,
     })).toBe('voice-clarity');
 
     expect(findAudioEqPresetId({
-      audioEqLowGainDb: 6,
-      audioEqLowMidGainDb: 2,
+      lowGainDb: -5,
+      lowMidGainDb: -2,
+      midGainDb: 1.5,
+      highMidGainDb: 5.5,
+      highGainDb: 2.5,
+    })).toBe('podcast');
+
+    expect(findAudioEqPresetId({
+      audioEqLowGainDb: 7,
+      audioEqLowMidGainDb: 3,
       audioEqMidGainDb: -1,
-      audioEqHighMidGainDb: 0,
-      audioEqHighGainDb: 1,
+      audioEqHighMidGainDb: -1,
+      audioEqHighGainDb: 0.5,
     })).toBe('bass-boost');
 
     expect(findAudioEqPresetId({
@@ -86,6 +96,24 @@ describe('audio-eq', () => {
       highMidGainDb: 1,
       highGainDb: 1,
     })).toBeNull();
+  });
+
+  it('round-trips every preset and keeps preset settings unique', () => {
+    const uniqueSettings = new Set(
+      AUDIO_EQ_PRESETS.map((preset) => JSON.stringify(preset.settings)),
+    );
+
+    expect(uniqueSettings.size).toBe(AUDIO_EQ_PRESETS.length);
+    for (const preset of AUDIO_EQ_PRESETS) {
+      expect(findAudioEqPresetId(preset.settings)).toBe(preset.id);
+    }
+  });
+
+  it('reports frequency response gains for the curve UI', () => {
+    expect(Math.abs(getAudioEqResponseGainDb(undefined, AUDIO_EQ_MID_FREQUENCY_HZ))).toBeLessThan(0.001);
+    expect(getAudioEqResponseGainDb({ midGainDb: 8 }, AUDIO_EQ_MID_FREQUENCY_HZ)).toBeGreaterThan(6);
+    expect(getAudioEqResponseGainDb({ highMidGainDb: 8 }, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ)).toBeGreaterThan(6);
+    expect(getAudioEqResponseGainDb({ lowGainDb: -8 }, AUDIO_EQ_LOW_FREQUENCY_HZ)).toBeLessThan(-3.5);
   });
 
   it('boosts and cuts the expected frequency bands', () => {

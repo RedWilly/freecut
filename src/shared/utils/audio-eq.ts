@@ -11,15 +11,25 @@ export interface AudioEqFieldSource {
 export type AudioEqPresetId =
   | 'flat'
   | 'voice-clarity'
+  | 'podcast'
   | 'warmth'
   | 'bass-boost'
+  | 'de-mud'
+  | 'smile'
   | 'sparkle'
+  | 'air'
+  | 'soften'
   | 'radio';
 
 export interface AudioEqPresetDefinition {
   id: AudioEqPresetId;
   label: string;
   settings: ResolvedAudioEqSettings;
+}
+
+export interface AudioEqResponsePoint {
+  frequencyHz: number;
+  gainDb: number;
 }
 
 export const AUDIO_EQ_GAIN_DB_MIN = -18;
@@ -52,27 +62,52 @@ export const AUDIO_EQ_PRESETS: ReadonlyArray<AudioEqPresetDefinition> = Object.f
   {
     id: 'voice-clarity',
     label: 'Voice Clarity',
-    settings: Object.freeze({ lowGainDb: -4, lowMidGainDb: -2, midGainDb: 3, highMidGainDb: 4, highGainDb: 2 }),
+    settings: Object.freeze({ lowGainDb: -6, lowMidGainDb: -3, midGainDb: 2, highMidGainDb: 4.5, highGainDb: 2 }),
+  },
+  {
+    id: 'podcast',
+    label: 'Podcast',
+    settings: Object.freeze({ lowGainDb: -5, lowMidGainDb: -2, midGainDb: 1.5, highMidGainDb: 5.5, highGainDb: 2.5 }),
   },
   {
     id: 'warmth',
     label: 'Warmth',
-    settings: Object.freeze({ lowGainDb: 3, lowMidGainDb: 2, midGainDb: 1, highMidGainDb: -1, highGainDb: -2 }),
+    settings: Object.freeze({ lowGainDb: 4, lowMidGainDb: 2.5, midGainDb: 0.5, highMidGainDb: -1.5, highGainDb: -2.5 }),
   },
   {
     id: 'bass-boost',
     label: 'Bass Boost',
-    settings: Object.freeze({ lowGainDb: 6, lowMidGainDb: 2, midGainDb: -1, highMidGainDb: 0, highGainDb: 1 }),
+    settings: Object.freeze({ lowGainDb: 7, lowMidGainDb: 3, midGainDb: -1, highMidGainDb: -1, highGainDb: 0.5 }),
+  },
+  {
+    id: 'de-mud',
+    label: 'De-Mud',
+    settings: Object.freeze({ lowGainDb: -2, lowMidGainDb: -5, midGainDb: 0.5, highMidGainDb: 2, highGainDb: 1 }),
+  },
+  {
+    id: 'smile',
+    label: 'Smile',
+    settings: Object.freeze({ lowGainDb: 3.5, lowMidGainDb: -1.5, midGainDb: -2, highMidGainDb: 2.5, highGainDb: 4.5 }),
   },
   {
     id: 'sparkle',
     label: 'Sparkle',
-    settings: Object.freeze({ lowGainDb: -1, lowMidGainDb: 0, midGainDb: 1, highMidGainDb: 3, highGainDb: 5 }),
+    settings: Object.freeze({ lowGainDb: -2, lowMidGainDb: -1, midGainDb: 0.5, highMidGainDb: 4, highGainDb: 6 }),
+  },
+  {
+    id: 'air',
+    label: 'Air',
+    settings: Object.freeze({ lowGainDb: -3, lowMidGainDb: -1.5, midGainDb: 0, highMidGainDb: 2, highGainDb: 7 }),
+  },
+  {
+    id: 'soften',
+    label: 'Soften',
+    settings: Object.freeze({ lowGainDb: 1.5, lowMidGainDb: 1, midGainDb: -0.5, highMidGainDb: -2.5, highGainDb: -4.5 }),
   },
   {
     id: 'radio',
     label: 'Radio',
-    settings: Object.freeze({ lowGainDb: -6, lowMidGainDb: -2, midGainDb: 4, highMidGainDb: 5, highGainDb: -3 }),
+    settings: Object.freeze({ lowGainDb: -8, lowMidGainDb: -4, midGainDb: 3.5, highMidGainDb: 2, highGainDb: -6 }),
   },
 ]);
 
@@ -264,6 +299,110 @@ function buildShelfCoefficients(
     a1: a1 / a0,
     a2: a2 / a0,
   };
+}
+
+function evaluateBiquadMagnitudeDb(
+  coefficients: BiquadCoefficients,
+  frequencyHz: number,
+  sampleRate: number,
+): number {
+  const clampedFrequency = clampFrequency(frequencyHz, sampleRate);
+  const omega = 2 * Math.PI * (clampedFrequency / sampleRate);
+  const cosOmega = Math.cos(omega);
+  const sinOmega = Math.sin(omega);
+  const cosDoubleOmega = Math.cos(2 * omega);
+  const sinDoubleOmega = Math.sin(2 * omega);
+
+  const numeratorReal = coefficients.b0 + coefficients.b1 * cosOmega + coefficients.b2 * cosDoubleOmega;
+  const numeratorImag = -coefficients.b1 * sinOmega - coefficients.b2 * sinDoubleOmega;
+  const denominatorReal = 1 + coefficients.a1 * cosOmega + coefficients.a2 * cosDoubleOmega;
+  const denominatorImag = -coefficients.a1 * sinOmega - coefficients.a2 * sinDoubleOmega;
+
+  const numeratorMagnitudeSq = numeratorReal * numeratorReal + numeratorImag * numeratorImag;
+  const denominatorMagnitudeSq = denominatorReal * denominatorReal + denominatorImag * denominatorImag;
+  const magnitude = Math.sqrt(numeratorMagnitudeSq / Math.max(denominatorMagnitudeSq, 1e-12));
+
+  return 20 * Math.log10(Math.max(magnitude, 1e-6));
+}
+
+function getResolvedAudioEqResponseGainDb(
+  stage: ResolvedAudioEqSettings,
+  frequencyHz: number,
+  sampleRate: number,
+): number {
+  let gainDb = 0;
+
+  if (Math.abs(stage.lowGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    gainDb += evaluateBiquadMagnitudeDb(
+      buildShelfCoefficients('lowshelf', AUDIO_EQ_LOW_FREQUENCY_HZ, stage.lowGainDb, sampleRate),
+      frequencyHz,
+      sampleRate,
+    );
+  }
+  if (Math.abs(stage.lowMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    gainDb += evaluateBiquadMagnitudeDb(
+      buildPeakingCoefficients(AUDIO_EQ_LOW_MID_FREQUENCY_HZ, stage.lowMidGainDb, sampleRate, AUDIO_EQ_LOW_MID_Q),
+      frequencyHz,
+      sampleRate,
+    );
+  }
+  if (Math.abs(stage.midGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    gainDb += evaluateBiquadMagnitudeDb(
+      buildPeakingCoefficients(AUDIO_EQ_MID_FREQUENCY_HZ, stage.midGainDb, sampleRate, AUDIO_EQ_MID_Q),
+      frequencyHz,
+      sampleRate,
+    );
+  }
+  if (Math.abs(stage.highMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    gainDb += evaluateBiquadMagnitudeDb(
+      buildPeakingCoefficients(AUDIO_EQ_HIGH_MID_FREQUENCY_HZ, stage.highMidGainDb, sampleRate, AUDIO_EQ_HIGH_MID_Q),
+      frequencyHz,
+      sampleRate,
+    );
+  }
+  if (Math.abs(stage.highGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    gainDb += evaluateBiquadMagnitudeDb(
+      buildShelfCoefficients('highshelf', AUDIO_EQ_HIGH_FREQUENCY_HZ, stage.highGainDb, sampleRate),
+      frequencyHz,
+      sampleRate,
+    );
+  }
+
+  return gainDb;
+}
+
+export function getAudioEqResponseGainDb(
+  source?: AudioEqSettings | AudioEqFieldSource | null,
+  frequencyHz: number = AUDIO_EQ_MID_FREQUENCY_HZ,
+  sampleRate: number = 48000,
+): number {
+  return getResolvedAudioEqResponseGainDb(resolveAudioEqSettings(source), frequencyHz, sampleRate);
+}
+
+export function sampleAudioEqResponseCurve(
+  source?: AudioEqSettings | AudioEqFieldSource | null,
+  options?: {
+    sampleRate?: number;
+    sampleCount?: number;
+    minFrequencyHz?: number;
+    maxFrequencyHz?: number;
+  },
+): AudioEqResponsePoint[] {
+  const sampleRate = options?.sampleRate ?? 48000;
+  const sampleCount = Math.max(2, Math.round(options?.sampleCount ?? 96));
+  const minFrequencyHz = Math.max(20, options?.minFrequencyHz ?? 40);
+  const maxFrequencyHz = Math.max(minFrequencyHz + 1, options?.maxFrequencyHz ?? 16000);
+  const ratio = maxFrequencyHz / minFrequencyHz;
+  const stage = resolveAudioEqSettings(source);
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const frequencyHz = minFrequencyHz * Math.pow(ratio, t);
+    return {
+      frequencyHz,
+      gainDb: getResolvedAudioEqResponseGainDb(stage, frequencyHz, sampleRate),
+    };
+  });
 }
 
 function applyBiquad(samples: Float32Array, coefficients: BiquadCoefficients): Float32Array {

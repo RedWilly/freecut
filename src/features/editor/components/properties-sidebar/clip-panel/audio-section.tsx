@@ -26,6 +26,7 @@ import {
 } from '../components';
 import { getMixedValue } from '../utils';
 import { getAudioSectionItems } from './audio-section-utils';
+import { AudioEqCurveEditor, type AudioEqField } from './audio-eq-curve-editor';
 import {
   AUDIO_EQ_GAIN_DB_MAX,
   AUDIO_EQ_GAIN_DB_MIN,
@@ -38,6 +39,7 @@ import {
   type AudioEqPresetId,
   findAudioEqPresetId,
   getAudioEqPresetById,
+  resolveAudioEqSettings,
 } from '@/shared/utils/audio-eq';
 
 interface AudioSectionProps {
@@ -46,7 +48,6 @@ interface AudioSectionProps {
 
 const AUDIO_GAIN_DB_MIN = -60;
 const AUDIO_GAIN_DB_MAX = 12;
-type AudioEqField = 'audioEqLowGainDb' | 'audioEqLowMidGainDb' | 'audioEqMidGainDb' | 'audioEqHighMidGainDb' | 'audioEqHighGainDb';
 type AudioEqPreview = Partial<Record<AudioEqField, number>>;
 
 /**
@@ -138,6 +139,13 @@ export function AudioSection({ items }: AudioSectionProps) {
   const eqPresetPlaceholder = hasMixedEqSettings
     ? 'Mixed'
     : (selectedEqPresetId ? getAudioEqPresetById(selectedEqPresetId)?.label ?? 'Custom' : 'Custom');
+  const eqCurveSettings = useMemo(() => resolveAudioEqSettings({
+    lowGainDb: eqLow === 'mixed' ? 0 : eqLow,
+    lowMidGainDb: eqLowMid === 'mixed' ? 0 : eqLowMid,
+    midGainDb: eqMid === 'mixed' ? 0 : eqMid,
+    highMidGainDb: eqHighMid === 'mixed' ? 0 : eqHighMid,
+    highGainDb: eqHigh === 'mixed' ? 0 : eqHigh,
+  }), [eqHigh, eqHighMid, eqLow, eqLowMid, eqMid]);
 
   // Helper: auto-keyframe volume on value change
   const autoKeyframeVolume = useCallback(
@@ -362,6 +370,15 @@ export function AudioSection({ items }: AudioSectionProps) {
             ))}
           </SelectContent>
         </Select>
+      </PropertyRow>
+
+      <PropertyRow label="Curve" className="items-start">
+        <AudioEqCurveEditor
+          settings={eqCurveSettings}
+          disabled={hasMixedEqSettings}
+          onLiveChange={handleEqLiveChange}
+          onChange={handleEqChange}
+        />
       </PropertyRow>
 
       <PropertyRow label={`Low (${AUDIO_EQ_LOW_FREQUENCY_HZ} Hz)`}>
