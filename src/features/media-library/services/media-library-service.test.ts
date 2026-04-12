@@ -39,6 +39,7 @@ const mediaProcessorMocks = vi.hoisted(() => ({
 const compositionRuntimeMocks = vi.hoisted(() => ({
   needsCustomAudioDecoder: vi.fn(() => false),
   startPreviewAudioConform: vi.fn(async () => undefined),
+  startPreviewAudioStartupWarm: vi.fn(async () => undefined),
 }));
 
 const gifFrameCacheMocks = vi.hoisted(() => ({
@@ -66,6 +67,7 @@ vi.mock('@/features/composition-runtime/utils/audio-codec-detection', () => ({
 
 vi.mock('@/features/composition-runtime/utils/audio-decode-cache', () => ({
   startPreviewAudioConform: compositionRuntimeMocks.startPreviewAudioConform,
+  startPreviewAudioStartupWarm: compositionRuntimeMocks.startPreviewAudioStartupWarm,
 }));
 
 vi.mock('@/features/media-library/deps/timeline-services', () => ({
@@ -108,6 +110,7 @@ describe('MediaLibraryService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     compositionRuntimeMocks.needsCustomAudioDecoder.mockReturnValue(false);
+    compositionRuntimeMocks.startPreviewAudioStartupWarm.mockResolvedValue(undefined);
   });
 
   describe('getAllMedia', () => {
@@ -225,8 +228,10 @@ describe('MediaLibraryService', () => {
       compositionRuntimeMocks.needsCustomAudioDecoder.mockReturnValue(true);
 
       const result = await mediaLibraryService.importMediaWithHandle(mockHandle, 'project-1');
+      await Promise.resolve();
 
       expect(result.id).toBeTruthy();
+      expect(compositionRuntimeMocks.startPreviewAudioStartupWarm).toHaveBeenCalledWith(result.id, mockFile);
       expect(compositionRuntimeMocks.startPreviewAudioConform).toHaveBeenCalledWith(result.id, mockFile);
     });
 

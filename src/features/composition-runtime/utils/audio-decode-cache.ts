@@ -68,6 +68,7 @@ function evictIfNeeded(): void {
 const DEFAULT_PLAYABLE_PARTIAL_READY_SECONDS = 2;
 const PLAYABLE_PARTIAL_TIMEOUT_MS = 8000;
 const PLAYABLE_PARTIAL_PREROLL_SECONDS = 0.25;
+const STARTUP_PLAYABLE_PARTIAL_READY_SECONDS = 1;
 const PENDING_PLAYBACK_SLICE_REUSE_HEADROOM_SECONDS = 1;
 
 /** Sample rate for IndexedDB storage; 22050 Hz is sufficient for preview. */
@@ -269,6 +270,24 @@ export async function startPreviewAudioConform(
   src: PreviewAudioSource,
 ): Promise<void> {
   await ensureDecodeStarted(mediaId, src);
+}
+
+export async function startPreviewAudioStartupWarm(
+  mediaId: string,
+  src: PreviewAudioSource,
+  options?: {
+    targetTimeSeconds?: number;
+    minReadySeconds?: number;
+  },
+): Promise<void> {
+  await getOrDecodeAudioSliceForPlayback(mediaId, src, {
+    targetTimeSeconds: Math.max(0, options?.targetTimeSeconds ?? 0),
+    minReadySeconds: Math.max(
+      0.25,
+      options?.minReadySeconds ?? STARTUP_PLAYABLE_PARTIAL_READY_SECONDS,
+    ),
+    waitTimeoutMs: 0,
+  });
 }
 
 /** Returns true when a full decode/rebuild is currently in progress. */

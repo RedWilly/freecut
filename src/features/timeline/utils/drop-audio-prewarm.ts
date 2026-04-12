@@ -11,7 +11,7 @@ import { registerPreviewAudioStartupHold } from '../hooks/preview-work-budget';
 
 const log = createLogger('DropAudioPrewarm');
 
-const PARTIAL_AUDIO_READY_SECONDS = 2;
+const PARTIAL_AUDIO_READY_SECONDS = 1;
 const PARTIAL_AUDIO_WAIT_TIMEOUT_MS = 6000;
 const AUDIO_STARTUP_PREVIEW_MIN_HOLD_MS = 1200;
 
@@ -89,10 +89,12 @@ export function prewarmDroppedTimelineAudio(
         });
       });
       customWarmups.push(warmup);
-      void startPreviewAudioConform(item.mediaId, src).catch((error) => {
-        log.warn('Failed to start background conform for dropped custom audio', {
-          mediaId: item.mediaId,
-          error,
+      void warmup.finally(() => {
+        void startPreviewAudioConform(item.mediaId, src).catch((error) => {
+          log.warn('Failed to start background conform for dropped custom audio', {
+            mediaId: item.mediaId,
+            error,
+          });
         });
       });
       continue;

@@ -64,12 +64,12 @@ describe('prewarmDroppedTimelineAudio', () => {
       'media-1',
       'blob:audio',
       expect.objectContaining({
-        minReadySeconds: 2,
+        minReadySeconds: 1,
         waitTimeoutMs: 6000,
         targetTimeSeconds: 3,
       }),
     );
-    expect(compositionRuntimeMocks.startPreviewAudioConform).toHaveBeenCalledWith('media-1', 'blob:audio');
+    expect(compositionRuntimeMocks.startPreviewAudioConform).not.toHaveBeenCalled();
     expect(previewBudgetMocks.registerPreviewAudioStartupHold).toHaveBeenCalledTimes(1);
     expect(releaseHold).not.toHaveBeenCalled();
 
@@ -82,6 +82,7 @@ describe('prewarmDroppedTimelineAudio', () => {
       setTimeout(resolve, 0);
     });
 
+    expect(compositionRuntimeMocks.startPreviewAudioConform).toHaveBeenCalledWith('media-1', 'blob:audio');
     expect(releaseHold).toHaveBeenCalledTimes(1);
   });
 });

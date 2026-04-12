@@ -38,7 +38,10 @@ import { getSharedProxyKey } from '../utils/proxy-key';
 import { mediaProcessorService } from './media-processor-service';
 import { generateThumbnail } from '../utils/thumbnail-generator';
 import { needsCustomAudioDecoder } from '@/features/composition-runtime/utils/audio-codec-detection';
-import { startPreviewAudioConform } from '@/features/composition-runtime/utils/audio-decode-cache';
+import {
+  startPreviewAudioConform,
+  startPreviewAudioStartupWarm,
+} from '@/features/composition-runtime/utils/audio-decode-cache';
 export { FileAccessError } from './file-access';
 
 /**
@@ -285,8 +288,13 @@ class MediaLibraryService {
         ? metadata.audioCodec
         : undefined;
     if (needsCustomAudioDecoder(previewAudioCodec)) {
-      void startPreviewAudioConform(id, file).catch((error) => {
-        logger.warn('Failed to start preview audio conform after import:', error);
+      const startupWarmup = startPreviewAudioStartupWarm(id, file).catch((error) => {
+        logger.warn('Failed to warm preview startup audio after import:', error);
+      });
+      void startupWarmup.finally(() => {
+        void startPreviewAudioConform(id, file).catch((error) => {
+          logger.warn('Failed to start preview audio conform after import:', error);
+        });
       });
     }
 

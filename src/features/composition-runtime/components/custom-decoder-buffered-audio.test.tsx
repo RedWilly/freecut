@@ -129,8 +129,8 @@ describe('CustomDecoderBufferedAudio', () => {
         'media-1',
         'blob:audio',
         expect.objectContaining({
-          minReadySeconds: 2,
-          preRollSeconds: 1,
+          minReadySeconds: 1,
+          preRollSeconds: 0.25,
           waitTimeoutMs: 6000,
         }),
       );
@@ -152,7 +152,7 @@ describe('CustomDecoderBufferedAudio', () => {
   it('prefetches follow-up coverage after a short startup slice', async () => {
     audioDecodeMocks.getOrDecodeAudioSliceForPlayback
       .mockResolvedValueOnce({
-        buffer: makeAudioBuffer(2),
+        buffer: makeAudioBuffer(1),
         startTime: 0,
         isComplete: false,
       })
@@ -178,12 +178,12 @@ describe('CustomDecoderBufferedAudio', () => {
     expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]).toEqual(
       expect.objectContaining({
         minReadySeconds: 3,
-        preRollSeconds: 1,
+        preRollSeconds: 0.25,
         waitTimeoutMs: 6000,
       }),
     );
-    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]?.targetTimeSeconds).toBeGreaterThan(1.74);
-    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]?.targetTimeSeconds).toBeLessThan(1.76);
+    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]?.targetTimeSeconds).toBeGreaterThan(0.74);
+    expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]?.targetTimeSeconds).toBeLessThan(0.76);
   });
 
   it('requests another partial slice before the current slice runs out', async () => {
@@ -233,7 +233,7 @@ describe('CustomDecoderBufferedAudio', () => {
     expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]).toEqual(
       expect.objectContaining({
         minReadySeconds: 3,
-        preRollSeconds: 1,
+        preRollSeconds: 0.25,
         waitTimeoutMs: 6000,
       }),
     );
@@ -479,8 +479,8 @@ describe('CustomDecoderBufferedAudio', () => {
 
       expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[1]?.[2]).toEqual(
         expect.objectContaining({
-          minReadySeconds: 2,
-          preRollSeconds: 1,
+          minReadySeconds: 1,
+          preRollSeconds: 0.25,
           waitTimeoutMs: 6000,
         }),
       );
@@ -519,8 +519,8 @@ describe('CustomDecoderBufferedAudio', () => {
 
     expect(audioDecodeMocks.getOrDecodeAudioSliceForPlayback.mock.calls[0]?.[2]).toEqual(
       expect.objectContaining({
-        minReadySeconds: 2,
-        preRollSeconds: 1,
+        minReadySeconds: 1,
+        preRollSeconds: 0.25,
         waitTimeoutMs: 6000,
       }),
     );

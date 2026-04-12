@@ -8,6 +8,7 @@ import { useMediaBlobUrl } from '../../hooks/use-media-blob-url';
 import {
   needsCustomAudioDecoder,
   startPreviewAudioConform,
+  startPreviewAudioStartupWarm,
 } from '@/features/timeline/deps/composition-runtime';
 import { WAVEFORM_FILL_COLOR, WAVEFORM_STROKE_COLOR } from '../../constants';
 import { createLogger } from '@/shared/logging/logger';
@@ -155,8 +156,13 @@ export const ClipWaveform = memo(function ClipWaveform({
           setBlobUrl(url);
           if (requiresCustomDecode && !conformStartedRef.current) {
             conformStartedRef.current = true;
-            void startPreviewAudioConform(mediaId, url).catch((error) => {
-              logger.warn('Failed to start preview audio conform from waveform load:', error);
+            const startupWarmup = startPreviewAudioStartupWarm(mediaId, url).catch((error) => {
+              logger.warn('Failed to warm preview startup audio from waveform load:', error);
+            });
+            void startupWarmup.finally(() => {
+              void startPreviewAudioConform(mediaId, url).catch((error) => {
+                logger.warn('Failed to start preview audio conform from waveform load:', error);
+              });
             });
           }
         }
