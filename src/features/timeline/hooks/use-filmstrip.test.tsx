@@ -65,6 +65,10 @@ describe('useFilmstrip', () => {
         10,
         expect.any(Function),
         undefined,
+        {
+          targetFrameCount: undefined,
+          targetFrameIndices: undefined,
+        },
       );
     });
 

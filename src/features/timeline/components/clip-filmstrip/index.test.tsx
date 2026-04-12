@@ -90,6 +90,8 @@ describe('ClipFilmstrip', () => {
       mediaId: 'media-1',
       blobUrl: 'blob:proxy',
       enabled: true,
+      targetFrameCount: expect.any(Number),
+      targetFrameIndices: expect.any(Array),
     }));
   });
 
@@ -113,6 +115,35 @@ describe('ClipFilmstrip', () => {
       mediaId: 'media-1',
       blobUrl: 'blob:original',
       enabled: true,
+      targetFrameCount: expect.any(Number),
+      targetFrameIndices: expect.any(Array),
     }));
+  });
+
+  it('prioritizes the visible source slice instead of the clip start', () => {
+    render(
+      <ClipFilmstrip
+        mediaId="media-1"
+        clipWidth={2000}
+        sourceStart={0}
+        sourceDuration={120}
+        trimStart={0}
+        speed={1}
+        fps={30}
+        isVisible
+        visibleStartRatio={0.5}
+        visibleEndRatio={0.75}
+        pixelsPerSecond={100}
+      />,
+    );
+
+    const latestCall = useFilmstripMock.mock.calls.at(-1)?.[0];
+    expect(latestCall?.priorityWindow).toEqual(expect.objectContaining({
+      startTime: expect.any(Number),
+      endTime: expect.any(Number),
+    }));
+    expect(latestCall?.priorityWindow.startTime).toBeGreaterThan(0);
+    expect(latestCall?.priorityWindow.endTime).toBeGreaterThan(latestCall?.priorityWindow.startTime);
+    expect(latestCall?.targetFrameIndices).toEqual(expect.arrayContaining([expect.any(Number)]));
   });
 });

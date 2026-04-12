@@ -17,6 +17,10 @@ interface UseFilmstripOptions {
   enabled?: boolean;
   /** Source window to prioritize for extraction (seconds) */
   priorityWindow?: { startTime: number; endTime: number } | null;
+  /** Approximate number of frames needed for the current viewport */
+  targetFrameCount?: number;
+  /** Exact 1fps frame indices needed for the current viewport */
+  targetFrameIndices?: number[];
 }
 
 interface UseFilmstripResult {
@@ -46,6 +50,8 @@ export function useFilmstrip({
   isVisible,
   enabled = true,
   priorityWindow = null,
+  targetFrameCount,
+  targetFrameIndices,
 }: UseFilmstripOptions): UseFilmstripResult {
   // Initialize from cache to avoid flash on remount
   const [filmstrip, setFilmstrip] = useState<Filmstrip | null>(() => {
@@ -97,6 +103,34 @@ export function useFilmstrip({
     return { startIndex, endIndex };
   }, [priorityWindow]);
 
+  const normalizedTargetFrameCount = useMemo(() => {
+    if (
+      typeof targetFrameCount !== 'number'
+      || !Number.isFinite(targetFrameCount)
+      || targetFrameCount <= 0
+    ) {
+      return undefined;
+    }
+    return Math.max(1, Math.ceil(targetFrameCount));
+  }, [targetFrameCount]);
+
+  const normalizedTargetFrameIndices = useMemo(() => {
+    if (!Array.isArray(targetFrameIndices) || targetFrameIndices.length === 0) {
+      return undefined;
+    }
+
+    const indices = new Set<number>();
+    for (const index of targetFrameIndices) {
+      if (typeof index !== 'number' || !Number.isFinite(index)) {
+        continue;
+      }
+      indices.add(Math.max(0, Math.round(index)));
+    }
+
+    const normalized = Array.from(indices).sort((a, b) => a - b);
+    return normalized.length > 0 ? normalized : undefined;
+  }, [targetFrameIndices]);
+
   // Subscribe to progressive updates
   useEffect(() => {
     if (!enabled || !blobUrl || !duration || duration <= 0) {
@@ -138,6 +172,8 @@ export function useFilmstrip({
       mediaId,
       duration,
       priorityRange,
+      normalizedTargetFrameCount,
+      normalizedTargetFrameIndices,
     );
 
     if (filmstrip?.isComplete && !needsPriorityRefinement) {
@@ -165,7 +201,17 @@ export function useFilmstrip({
       isGeneratingRef.current = true;
 
       filmstripCache
-        .getFilmstrip(mediaId, blobUrl, duration, onProgress, priorityRange ?? undefined)
+        .getFilmstrip(
+          mediaId,
+          blobUrl,
+          duration,
+          onProgress,
+          priorityRange ?? undefined,
+          {
+            targetFrameCount: normalizedTargetFrameCount,
+            targetFrameIndices: normalizedTargetFrameIndices,
+          },
+        )
         .then((result) => {
           if (cancelled || lastMediaIdRef.current !== requestMediaId) {
             return;
@@ -201,7 +247,18 @@ export function useFilmstrip({
       }
       cancelScheduledStart();
     };
-  }, [mediaId, blobUrl, duration, isVisible, enabled, filmstrip?.frames?.length, filmstrip?.isComplete, priorityRange]);
+  }, [
+    mediaId,
+    blobUrl,
+    duration,
+    isVisible,
+    enabled,
+    filmstrip?.frames?.length,
+    filmstrip?.isComplete,
+    priorityRange,
+    normalizedTargetFrameCount,
+    normalizedTargetFrameIndices,
+  ]);
 
   return {
     frames: filmstrip?.frames || null,
