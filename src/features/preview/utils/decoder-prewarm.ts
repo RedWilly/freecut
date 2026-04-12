@@ -20,7 +20,9 @@ import {
   getObjectUrlBlob,
   getObjectUrlDirectFileMetadata,
 } from '@/infrastructure/browser/object-url-registry';
-import { getKeyframeTimestamps } from '@/shared/utils/keyframe-index-registry';
+import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
+import { updateMedia } from '@/infrastructure/storage/indexeddb/media';
+import { getKeyframeTimestamps, registerKeyframeIndex } from '@/shared/utils/keyframe-index-registry';
 
 const log = createLogger('DecoderPrewarm');
 const MAX_CACHED_BITMAPS_PER_SOURCE = 6;
@@ -96,6 +98,21 @@ if (import.meta.env.DEV) {
 
 function handleWorkerMessage(event: MessageEvent): void {
   const msg = event.data;
+  if (msg.type === 'debug') {
+    return;
+  }
+  if (msg.type === 'keyframes_extracted') {
+    // Worker extracted keyframes for a source that had none.
+    // Register in main-thread registry for the export/edit overlay path.
+    registerKeyframeIndex(msg.src, msg.keyframeTimestamps);
+    keyframesSentForSrc.add(msg.src);
+    // Persist to IndexedDB so future sessions don't need re-extraction
+    const mediaId = blobUrlManager.getMediaIdByUrl(msg.src);
+    if (mediaId) {
+      void updateMedia(mediaId, { keyframeTimestamps: msg.keyframeTimestamps });
+    }
+    return;
+  }
   if (msg.type === 'preseek_done') {
     const pending = pendingRequests.get(msg.id);
     if (pending) {

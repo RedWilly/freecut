@@ -112,6 +112,33 @@ async function getExtractor(src: string, options?: WorkerSourceOptions): Promise
         return null;
       }
 
+      // Lazy-extract keyframe index for sources that arrive without one.
+      // Uses metadata-only key-packet chain: O(K) — typically < 10ms.
+      // Ensures adaptive seek is available from the very first decode.
+      if (!keyframeIndexBySrc.has(src)) {
+        try {
+          const eps = new mediabunny.EncodedPacketSink(videoTrack);
+          const kfTimestamps: number[] = [];
+          const metadataOpts = { metadataOnly: true } as const;
+          let pkt = await eps.getFirstKeyPacket(metadataOpts);
+          while (pkt) {
+            kfTimestamps.push(pkt.timestamp);
+            pkt = await eps.getNextKeyPacket(pkt, metadataOpts);
+          }
+          eps.dispose?.();
+          if (kfTimestamps.length > 0) {
+            keyframeIndexBySrc.set(src, kfTimestamps);
+            self.postMessage({
+              type: 'keyframes_extracted',
+              src,
+              keyframeTimestamps: kfTimestamps,
+            });
+          }
+        } catch {
+          // Non-fatal — falls back to fixed 1s backtrack
+        }
+      }
+
       const sink = new mediabunny.VideoSampleSink(videoTrack);
       const canvas = new OffscreenCanvas(1, 1);
       const ctx = canvas.getContext('2d');

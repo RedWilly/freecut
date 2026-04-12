@@ -1,5 +1,5 @@
-﻿import React, { useMemo, useCallback } from 'react';
-import { AbsoluteFill, Sequence } from '@/features/composition-runtime/deps/player';
+﻿import React, { useEffect, useMemo, useCallback } from 'react';
+import { AbsoluteFill, Sequence, useClock } from '@/features/composition-runtime/deps/player';
 import { timelineToSourceFrames } from '@/features/composition-runtime/deps/timeline';
 import { useCurrentFrame, useVideoConfig } from '../hooks/use-player-compat';
 import type { CompositionInputProps } from '@/types/export';
@@ -8,6 +8,7 @@ import { Item, type MaskInfo } from '../components/item';
 import { CompositionContent } from '../components/composition-content';
 import { PitchCorrectedAudio } from '../components/pitch-corrected-audio';
 import { CustomDecoderAudio } from '../components/custom-decoder-audio';
+import { getSharedPreviewAudioContext } from '../utils/preview-audio-graph';
 import { useMediaLibraryStore } from '@/features/composition-runtime/deps/stores';
 import { needsCustomAudioDecoder } from '../utils/audio-codec-detection';
 import { StableVideoSequence, type StableVideoSequenceItem } from '../components/stable-video-sequence';
@@ -135,6 +136,17 @@ export const MainComposition: React.FC<MainCompositionProps> = ({
   useProxyMedia = false,
 }) => {
   const { fps, width: renderWidth, height: renderHeight } = useVideoConfig();
+
+  // Wire AudioContext as the Clock's timing ground truth.
+  // When running, the Clock derives time from the hardware audio clock
+  // instead of performance.now(), eliminating audio-video drift.
+  const clock = useClock();
+  useEffect(() => {
+    const ctx = getSharedPreviewAudioContext();
+    clock.setAudioContext(ctx);
+    return () => clock.setAudioContext(null);
+  }, [clock]);
+
   const projectWidth = compositionWidth ?? renderWidth;
   const projectHeight = compositionHeight ?? renderHeight;
   const canvasWidth = renderWidth;

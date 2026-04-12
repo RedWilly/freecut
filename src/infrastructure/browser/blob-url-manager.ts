@@ -84,6 +84,17 @@ class BlobUrlManager {
   }
 
   /**
+   * Reverse-lookup: find the mediaId that owns a given blob URL.
+   * Returns null if the URL is not tracked.
+   */
+  getMediaIdByUrl(url: string): string | null {
+    for (const [mediaId, entry] of this.entries) {
+      if (entry.url === url) return mediaId;
+    }
+    return null;
+  }
+
+  /**
    * Forcibly remove and revoke a blob URL regardless of reference count.
    * Used when the underlying media file has changed (e.g., after relinking).
    */
