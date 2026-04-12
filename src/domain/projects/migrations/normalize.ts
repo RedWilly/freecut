@@ -18,7 +18,32 @@
 
 import type { Project, ProjectTimeline } from '@/types/project';
 import { DEFAULT_TRACK_HEIGHT, DEFAULT_FPS } from '@/domain/timeline/defaults';
-import { clampAudioEqGainDb } from '@/shared/utils/audio-eq';
+import {
+  AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_CUT_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_CUT_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_MID_Q,
+  AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_CUT_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_CUT_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_MID_Q,
+  AUDIO_EQ_LOW_MIN_FREQUENCY_HZ,
+  clampAudioEqCutSlopeDbPerOct,
+  clampAudioEqFrequencyHz,
+  clampAudioEqGainDb,
+  clampAudioEqQ,
+} from '@/shared/utils/audio-eq';
 
 /**
  * Normalize a track to ensure all fields have valid values.
@@ -103,11 +128,44 @@ function normalizeItem(
   if (normalized.audioFadeOut !== undefined) {
     normalized.audioFadeOut = Math.max(0, normalized.audioFadeOut);
   }
+  if (normalized.audioEqLowCutEnabled !== undefined) {
+    normalized.audioEqLowCutEnabled = !!normalized.audioEqLowCutEnabled;
+  }
+  if (normalized.audioEqLowCutFrequencyHz !== undefined) {
+    normalized.audioEqLowCutFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqLowCutFrequencyHz,
+      AUDIO_EQ_LOW_CUT_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_CUT_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
+    );
+  }
+  if (normalized.audioEqLowCutSlopeDbPerOct !== undefined) {
+    normalized.audioEqLowCutSlopeDbPerOct = clampAudioEqCutSlopeDbPerOct(normalized.audioEqLowCutSlopeDbPerOct);
+  }
   if (normalized.audioEqLowGainDb !== undefined) {
     normalized.audioEqLowGainDb = clampAudioEqGainDb(normalized.audioEqLowGainDb);
   }
+  if (normalized.audioEqLowFrequencyHz !== undefined) {
+    normalized.audioEqLowFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqLowFrequencyHz,
+      AUDIO_EQ_LOW_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_FREQUENCY_HZ,
+    );
+  }
   if (normalized.audioEqLowMidGainDb !== undefined) {
     normalized.audioEqLowMidGainDb = clampAudioEqGainDb(normalized.audioEqLowMidGainDb);
+  }
+  if (normalized.audioEqLowMidFrequencyHz !== undefined) {
+    normalized.audioEqLowMidFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqLowMidFrequencyHz,
+      AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
+    );
+  }
+  if (normalized.audioEqLowMidQ !== undefined) {
+    normalized.audioEqLowMidQ = clampAudioEqQ(normalized.audioEqLowMidQ, AUDIO_EQ_LOW_MID_Q);
   }
   if (normalized.audioEqMidGainDb !== undefined) {
     normalized.audioEqMidGainDb = clampAudioEqGainDb(normalized.audioEqMidGainDb);
@@ -115,8 +173,41 @@ function normalizeItem(
   if (normalized.audioEqHighMidGainDb !== undefined) {
     normalized.audioEqHighMidGainDb = clampAudioEqGainDb(normalized.audioEqHighMidGainDb);
   }
+  if (normalized.audioEqHighMidFrequencyHz !== undefined) {
+    normalized.audioEqHighMidFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqHighMidFrequencyHz,
+      AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
+    );
+  }
+  if (normalized.audioEqHighMidQ !== undefined) {
+    normalized.audioEqHighMidQ = clampAudioEqQ(normalized.audioEqHighMidQ, AUDIO_EQ_HIGH_MID_Q);
+  }
   if (normalized.audioEqHighGainDb !== undefined) {
     normalized.audioEqHighGainDb = clampAudioEqGainDb(normalized.audioEqHighGainDb);
+  }
+  if (normalized.audioEqHighFrequencyHz !== undefined) {
+    normalized.audioEqHighFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqHighFrequencyHz,
+      AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_FREQUENCY_HZ,
+    );
+  }
+  if (normalized.audioEqHighCutEnabled !== undefined) {
+    normalized.audioEqHighCutEnabled = !!normalized.audioEqHighCutEnabled;
+  }
+  if (normalized.audioEqHighCutFrequencyHz !== undefined) {
+    normalized.audioEqHighCutFrequencyHz = clampAudioEqFrequencyHz(
+      normalized.audioEqHighCutFrequencyHz,
+      AUDIO_EQ_HIGH_CUT_MIN_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_CUT_MAX_FREQUENCY_HZ,
+      AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ,
+    );
+  }
+  if (normalized.audioEqHighCutSlopeDbPerOct !== undefined) {
+    normalized.audioEqHighCutSlopeDbPerOct = clampAudioEqCutSlopeDbPerOct(normalized.audioEqHighCutSlopeDbPerOct);
   }
 
   // Normalize transform if present

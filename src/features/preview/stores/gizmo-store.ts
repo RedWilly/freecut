@@ -18,11 +18,23 @@ export interface ItemPropertiesPreview {
   audioFadeOutCurve?: number;
   audioFadeInCurveX?: number;
   audioFadeOutCurveX?: number;
+  audioEqLowCutEnabled?: boolean;
+  audioEqLowCutFrequencyHz?: number;
+  audioEqLowCutSlopeDbPerOct?: 6 | 12 | 18 | 24;
   audioEqLowGainDb?: number;
+  audioEqLowFrequencyHz?: number;
   audioEqLowMidGainDb?: number;
+  audioEqLowMidFrequencyHz?: number;
+  audioEqLowMidQ?: number;
   audioEqMidGainDb?: number;
   audioEqHighMidGainDb?: number;
+  audioEqHighMidFrequencyHz?: number;
+  audioEqHighMidQ?: number;
   audioEqHighGainDb?: number;
+  audioEqHighFrequencyHz?: number;
+  audioEqHighCutEnabled?: boolean;
+  audioEqHighCutFrequencyHz?: number;
+  audioEqHighCutSlopeDbPerOct?: 6 | 12 | 18 | 24;
   // Text properties
   fontSize?: number;
   letterSpacing?: number;

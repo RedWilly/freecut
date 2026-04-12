@@ -42,6 +42,13 @@ const easingConfigSchema = z.object({
   spring: springParametersSchema.optional(),
 });
 
+const audioEqCutSlopeSchema = z.union([
+  z.literal(6),
+  z.literal(12),
+  z.literal(18),
+  z.literal(24),
+]);
+
 const keyframeSchema = z.object({
   id: z.string().min(1),
   frame: z.number().int().min(0),
@@ -343,11 +350,23 @@ const timelineItemSchema = z.object({
   audioFadeOutCurve: z.number().min(-1).max(1).optional(),
   audioFadeInCurveX: z.number().min(0).max(1).optional(),
   audioFadeOutCurveX: z.number().min(0).max(1).optional(),
+  audioEqLowCutEnabled: z.boolean().optional(),
+  audioEqLowCutFrequencyHz: z.number().min(30).max(399).optional(),
+  audioEqLowCutSlopeDbPerOct: audioEqCutSlopeSchema.optional(),
   audioEqLowGainDb: z.number().min(-18).max(18).optional(),
+  audioEqLowFrequencyHz: z.number().min(30).max(399).optional(),
   audioEqLowMidGainDb: z.number().min(-18).max(18).optional(),
+  audioEqLowMidFrequencyHz: z.number().min(100).max(1500).optional(),
+  audioEqLowMidQ: z.number().min(0.3).max(8).optional(),
   audioEqMidGainDb: z.number().min(-18).max(18).optional(),
   audioEqHighMidGainDb: z.number().min(-18).max(18).optional(),
+  audioEqHighMidFrequencyHz: z.number().min(450).max(8000).optional(),
+  audioEqHighMidQ: z.number().min(0.3).max(8).optional(),
   audioEqHighGainDb: z.number().min(-18).max(18).optional(),
+  audioEqHighFrequencyHz: z.number().min(1400).max(22000).optional(),
+  audioEqHighCutEnabled: z.boolean().optional(),
+  audioEqHighCutFrequencyHz: z.number().min(1400).max(22000).optional(),
+  audioEqHighCutSlopeDbPerOct: audioEqCutSlopeSchema.optional(),
   // Video properties
   fadeIn: z.number().min(0).optional(),
   fadeOut: z.number().min(0).optional(),

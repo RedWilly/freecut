@@ -33,11 +33,23 @@ type BaseTimelineItem = {
   audioFadeOutCurve?: number; // Audio fade out curve shape (-1..1, default: 0 linear)
   audioFadeInCurveX?: number; // Audio fade in curve horizontal bias (0..1, default: ~0.52)
   audioFadeOutCurveX?: number; // Audio fade out curve horizontal bias (0..1, default: ~0.52)
+  audioEqLowCutEnabled?: boolean; // Enable low cut / high-pass filter
+  audioEqLowCutFrequencyHz?: number; // Low cut frequency in Hz
+  audioEqLowCutSlopeDbPerOct?: 6 | 12 | 18 | 24; // Low cut slope
   audioEqLowGainDb?: number; // Low shelf EQ gain in dB (default: 0)
+  audioEqLowFrequencyHz?: number; // Low shelf center frequency in Hz
   audioEqLowMidGainDb?: number; // Low-mid peaking EQ gain in dB (default: 0)
-  audioEqMidGainDb?: number; // Mid peaking EQ gain in dB (default: 0)
+  audioEqLowMidFrequencyHz?: number; // Low-mid center frequency in Hz
+  audioEqLowMidQ?: number; // Low-mid bandwidth/Q
+  audioEqMidGainDb?: number; // Legacy center band gain in dB (default: 0)
   audioEqHighMidGainDb?: number; // High-mid peaking EQ gain in dB (default: 0)
+  audioEqHighMidFrequencyHz?: number; // High-mid center frequency in Hz
+  audioEqHighMidQ?: number; // High-mid bandwidth/Q
   audioEqHighGainDb?: number; // High shelf EQ gain in dB (default: 0)
+  audioEqHighFrequencyHz?: number; // High shelf center frequency in Hz
+  audioEqHighCutEnabled?: boolean; // Enable high cut / low-pass filter
+  audioEqHighCutFrequencyHz?: number; // High cut frequency in Hz
+  audioEqHighCutSlopeDbPerOct?: 6 | 12 | 18 | 24; // High cut slope
   // Video properties (for video items)
   fadeIn?: number; // Video fade in duration in seconds (default: 0)
   fadeOut?: number; // Video fade out duration in seconds (default: 0)

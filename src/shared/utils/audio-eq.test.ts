@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUDIO_EQ_PRESETS,
+  AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ,
+  AUDIO_EQ_HIGH_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
+  AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
   AUDIO_EQ_LOW_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
   AUDIO_EQ_MID_FREQUENCY_HZ,
-  AUDIO_EQ_HIGH_FREQUENCY_HZ,
-  findAudioEqPresetId,
-  getAudioEqResponseGainDb,
+  AUDIO_EQ_PRESETS,
   applyAudioEqStages,
   areAudioEqStagesEqual,
   clampAudioEqGainDb,
+  findAudioEqPresetId,
+  getAudioEqPresetById,
+  getAudioEqResponseGainDb,
+  resolveAudioEqSettings,
   resolvePreviewAudioEqStages,
 } from './audio-eq';
 
@@ -39,60 +43,65 @@ describe('audio-eq', () => {
   });
 
   it('applies preview overrides only to the last EQ stage', () => {
+    const first = resolveAudioEqSettings({
+      lowGainDb: 1,
+      lowMidGainDb: 1.5,
+      highMidGainDb: 2,
+      highGainDb: 2.5,
+    });
+    const second = resolveAudioEqSettings({
+      lowCutEnabled: true,
+      lowCutFrequencyHz: 60,
+      lowGainDb: 4,
+      highMidGainDb: 5.5,
+      highGainDb: 6,
+    });
+
     const resolved = resolvePreviewAudioEqStages(
-      [
-        { lowGainDb: 1, lowMidGainDb: 1.5, midGainDb: 2, highMidGainDb: 2.5, highGainDb: 3 },
-        { lowGainDb: 4, lowMidGainDb: 4.5, midGainDb: 5, highMidGainDb: 5.5, highGainDb: 6 },
-      ],
-      { audioEqMidGainDb: 8 },
+      [first, second],
+      {
+        audioEqLowCutFrequencyHz: 80,
+        audioEqHighMidGainDb: 8,
+      },
     );
 
-    expect(resolved).toEqual([
-      { lowGainDb: 1, lowMidGainDb: 1.5, midGainDb: 2, highMidGainDb: 2.5, highGainDb: 3 },
-      { lowGainDb: 4, lowMidGainDb: 4.5, midGainDb: 8, highMidGainDb: 5.5, highGainDb: 6 },
-    ]);
+    expect(resolved[0]).toEqual(first);
+    expect(resolved[1]).toEqual(expect.objectContaining({
+      lowCutEnabled: true,
+      lowCutFrequencyHz: 80,
+      highMidGainDb: 8,
+      highGainDb: 6,
+    }));
   });
 
   it('compares stage arrays structurally', () => {
     expect(areAudioEqStagesEqual(
-      [{ lowGainDb: 1, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 }],
-      [{ lowGainDb: 1, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 }],
+      [resolveAudioEqSettings({ lowCutEnabled: true, lowCutFrequencyHz: 70, lowGainDb: 1 })],
+      [resolveAudioEqSettings({ lowCutEnabled: true, lowCutFrequencyHz: 70, lowGainDb: 1 })],
     )).toBe(true);
+
     expect(areAudioEqStagesEqual(
-      [{ lowGainDb: 1, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 }],
-      [{ lowGainDb: 0, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 }],
+      [resolveAudioEqSettings({ lowCutEnabled: true, lowCutFrequencyHz: 70, lowGainDb: 1 })],
+      [resolveAudioEqSettings({ lowCutEnabled: true, lowCutFrequencyHz: 90, lowGainDb: 1 })],
     )).toBe(false);
   });
 
   it('detects matching presets from resolved settings', () => {
+    expect(findAudioEqPresetId(getAudioEqPresetById('voice-clarity')?.settings)).toBe('voice-clarity');
+    expect(findAudioEqPresetId(getAudioEqPresetById('telephone')?.settings)).toBe('telephone');
     expect(findAudioEqPresetId({
-      lowGainDb: -6,
-      lowMidGainDb: -3,
-      midGainDb: 2,
-      highMidGainDb: 4.5,
-      highGainDb: 2,
-    })).toBe('voice-clarity');
-
-    expect(findAudioEqPresetId({
-      lowGainDb: -5,
-      lowMidGainDb: -2,
-      midGainDb: 1.5,
-      highMidGainDb: 5.5,
-      highGainDb: 2.5,
-    })).toBe('podcast');
-
-    expect(findAudioEqPresetId({
-      audioEqLowGainDb: 7,
-      audioEqLowMidGainDb: 3,
-      audioEqMidGainDb: -1,
-      audioEqHighMidGainDb: -1,
-      audioEqHighGainDb: 0.5,
-    })).toBe('bass-boost');
-
+      audioEqLowCutEnabled: true,
+      audioEqLowCutFrequencyHz: 100,
+      audioEqLowCutSlopeDbPerOct: 18,
+      audioEqLowGainDb: -3,
+      audioEqLowFrequencyHz: 110,
+      audioEqLowMidGainDb: -1,
+      audioEqLowMidFrequencyHz: 250,
+      audioEqLowMidQ: 1,
+    })).toBe('rumble-cut');
     expect(findAudioEqPresetId({
       lowGainDb: 1,
       lowMidGainDb: 1,
-      midGainDb: 1,
       highMidGainDb: 1,
       highGainDb: 1,
     })).toBeNull();
@@ -111,42 +120,57 @@ describe('audio-eq', () => {
 
   it('reports frequency response gains for the curve UI', () => {
     expect(Math.abs(getAudioEqResponseGainDb(undefined, AUDIO_EQ_MID_FREQUENCY_HZ))).toBeLessThan(0.001);
-    expect(getAudioEqResponseGainDb({ midGainDb: 8 }, AUDIO_EQ_MID_FREQUENCY_HZ)).toBeGreaterThan(6);
     expect(getAudioEqResponseGainDb({ highMidGainDb: 8 }, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ)).toBeGreaterThan(6);
     expect(getAudioEqResponseGainDb({ lowGainDb: -8 }, AUDIO_EQ_LOW_FREQUENCY_HZ)).toBeLessThan(-3.5);
+    expect(getAudioEqResponseGainDb({
+      lowCutEnabled: true,
+      lowCutFrequencyHz: 100,
+      lowCutSlopeDbPerOct: 24,
+    }, 40)).toBeLessThan(-10);
+    expect(getAudioEqResponseGainDb({
+      highCutEnabled: true,
+      highCutFrequencyHz: 4000,
+      highCutSlopeDbPerOct: 24,
+    }, 12000)).toBeLessThan(-10);
   });
 
-  it('boosts and cuts the expected frequency bands', () => {
+  it('boosts shelf and bell bands and attenuates low/high cuts', () => {
     const lowTone = makeSineWave(AUDIO_EQ_LOW_FREQUENCY_HZ);
     const lowMidTone = makeSineWave(AUDIO_EQ_LOW_MID_FREQUENCY_HZ);
     const midTone = makeSineWave(AUDIO_EQ_MID_FREQUENCY_HZ);
     const highMidTone = makeSineWave(AUDIO_EQ_HIGH_MID_FREQUENCY_HZ);
     const highTone = makeSineWave(AUDIO_EQ_HIGH_FREQUENCY_HZ);
+    const rumbleTone = makeSineWave(AUDIO_EQ_LOW_CUT_FREQUENCY_HZ + 10);
+    const airTone = makeSineWave(Math.max(6000, AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ / 2));
 
     const lowBoosted = applyAudioEqStages([lowTone], 48000, [
-      { lowGainDb: 9, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 },
-    ])[0]!;
-    const lowCut = applyAudioEqStages([lowTone], 48000, [
-      { lowGainDb: -9, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 },
+      resolveAudioEqSettings({ lowGainDb: 9 }),
     ])[0]!;
     const lowMidBoosted = applyAudioEqStages([lowMidTone], 48000, [
-      { lowGainDb: 0, lowMidGainDb: 9, midGainDb: 0, highMidGainDb: 0, highGainDb: 0 },
+      resolveAudioEqSettings({ lowMidGainDb: 9 }),
     ])[0]!;
     const midBoosted = applyAudioEqStages([midTone], 48000, [
-      { lowGainDb: 0, lowMidGainDb: 0, midGainDb: 9, highMidGainDb: 0, highGainDb: 0 },
+      resolveAudioEqSettings({ midGainDb: 9 }),
     ])[0]!;
     const highMidBoosted = applyAudioEqStages([highMidTone], 48000, [
-      { lowGainDb: 0, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 9, highGainDb: 0 },
+      resolveAudioEqSettings({ highMidGainDb: 9 }),
     ])[0]!;
     const highBoosted = applyAudioEqStages([highTone], 48000, [
-      { lowGainDb: 0, lowMidGainDb: 0, midGainDb: 0, highMidGainDb: 0, highGainDb: 9 },
+      resolveAudioEqSettings({ highGainDb: 9 }),
+    ])[0]!;
+    const rumbleCut = applyAudioEqStages([rumbleTone], 48000, [
+      resolveAudioEqSettings({ lowCutEnabled: true, lowCutFrequencyHz: 120, lowCutSlopeDbPerOct: 24 }),
+    ])[0]!;
+    const airCut = applyAudioEqStages([airTone], 48000, [
+      resolveAudioEqSettings({ highCutEnabled: true, highCutFrequencyHz: 3000, highCutSlopeDbPerOct: 24 }),
     ])[0]!;
 
     expect(rms(lowBoosted) / rms(lowTone)).toBeGreaterThan(1.5);
-    expect(rms(lowCut) / rms(lowTone)).toBeLessThan(0.75);
     expect(rms(lowMidBoosted) / rms(lowMidTone)).toBeGreaterThan(1.5);
     expect(rms(midBoosted) / rms(midTone)).toBeGreaterThan(1.5);
     expect(rms(highMidBoosted) / rms(highMidTone)).toBeGreaterThan(1.5);
     expect(rms(highBoosted) / rms(highTone)).toBeGreaterThan(1.5);
+    expect(rms(rumbleCut) / rms(rumbleTone)).toBeLessThan(0.5);
+    expect(rms(airCut) / rms(airTone)).toBeLessThan(0.5);
   });
 });
