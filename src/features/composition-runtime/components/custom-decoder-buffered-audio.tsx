@@ -569,7 +569,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
       graph.dispose();
       graphRef.current = null;
     };
-  }, []);
+  }, [resolvedAudioEqStages.length]);
 
   useEffect(() => {
     const resume = () => {
@@ -662,7 +662,7 @@ export const CustomDecoderBufferedAudio: React.FC<CustomDecoderBufferedAudioProp
     queuedSourceRef.current = null;
     try { queuedSource.node.stop(); } catch { /* already stopped */ }
     queuedSource.node.disconnect();
-  }, [resolvedAudioEqStages.length]);
+  }, []);
 
   const stopSource = useCallback((fadeOut: boolean = true) => {
     startRequestIdRef.current += 1;

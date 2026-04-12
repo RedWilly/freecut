@@ -21,6 +21,7 @@ import {
   AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MIN_FREQUENCY_HZ,
+  AUDIO_EQ_MID_FREQUENCY_HZ,
   clampAudioEqFrequencyHz,
   clampAudioEqGainDb,
   getAudioEqSettings,
@@ -41,10 +42,10 @@ interface AudioEqCurveEditorProps {
 }
 
 interface GainHandleDefinition {
-  id: 'low' | 'low-mid' | 'high-mid' | 'high';
+  id: 'low' | 'low-mid' | 'mid' | 'high-mid' | 'high';
   kind: 'gain';
   label: string;
-  frequencyField:
+  frequencyField?:
     | 'audioEqLowFrequencyHz'
     | 'audioEqLowMidFrequencyHz'
     | 'audioEqHighMidFrequencyHz'
@@ -52,8 +53,10 @@ interface GainHandleDefinition {
   gainField:
     | 'audioEqLowGainDb'
     | 'audioEqLowMidGainDb'
+    | 'audioEqMidGainDb'
     | 'audioEqHighMidGainDb'
     | 'audioEqHighGainDb';
+  fixedFrequency?: boolean;
   minFrequencyHz: number;
   maxFrequencyHz: number;
   defaultFrequencyHz: number;
@@ -125,6 +128,18 @@ const AUDIO_EQ_HANDLES: ReadonlyArray<AudioEqHandleDefinition> = Object.freeze([
     defaultFrequencyHz: AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
     getFrequencyHz: (settings) => settings.lowMidFrequencyHz,
     getGainDb: (settings) => settings.lowMidGainDb,
+  },
+  {
+    id: 'mid',
+    kind: 'gain',
+    label: 'Mid',
+    gainField: 'audioEqMidGainDb',
+    fixedFrequency: true,
+    minFrequencyHz: AUDIO_EQ_MID_FREQUENCY_HZ,
+    maxFrequencyHz: AUDIO_EQ_MID_FREQUENCY_HZ,
+    defaultFrequencyHz: AUDIO_EQ_MID_FREQUENCY_HZ,
+    getFrequencyHz: () => AUDIO_EQ_MID_FREQUENCY_HZ,
+    getGainDb: (settings) => settings.midGainDb,
   },
   {
     id: 'high-mid',
@@ -228,10 +243,14 @@ function mergeDisplayedSettings(
   patch?: AudioEqPatch | null,
 ): ResolvedAudioEqSettings {
   if (!patch) return settings;
-  return resolveAudioEqSettings({
-    ...settings,
-    ...getAudioEqSettings(patch),
-  });
+  const patchSettings = getAudioEqSettings(patch);
+  const merged: Record<string, unknown> = { ...settings };
+  for (const [key, value] of Object.entries(patchSettings)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return resolveAudioEqSettings(merged as unknown as ResolvedAudioEqSettings);
 }
 
 function getCutHandleY(enabled: boolean): number {
@@ -257,10 +276,13 @@ function createPatchForPointer(
     };
   }
 
-  return {
-    [handle.frequencyField]: frequencyHz,
+  const patch: AudioEqPatch = {
     [handle.gainField]: yToGain(localY),
   };
+  if (handle.frequencyField) {
+    patch[handle.frequencyField] = frequencyHz;
+  }
+  return patch;
 }
 
 function getResetPatch(handle: AudioEqHandleDefinition): AudioEqPatch {
@@ -271,10 +293,13 @@ function getResetPatch(handle: AudioEqHandleDefinition): AudioEqPatch {
     };
   }
 
-  return {
-    [handle.frequencyField]: handle.defaultFrequencyHz,
+  const patch: AudioEqPatch = {
     [handle.gainField]: 0,
   };
+  if (handle.frequencyField) {
+    patch[handle.frequencyField] = handle.defaultFrequencyHz;
+  }
+  return patch;
 }
 
 export function AudioEqCurveEditor({
@@ -374,6 +399,7 @@ export function AudioEqCurveEditor({
     if (handle.kind === 'cut') {
       if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return;
       event.preventDefault();
+      event.stopPropagation();
 
       const patch = event.key === 'Home'
         ? getResetPatch(handle)
@@ -394,25 +420,30 @@ export function AudioEqCurveEditor({
 
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
     event.preventDefault();
+    event.stopPropagation();
 
     const currentFrequencyHz = handle.getFrequencyHz(displayedSettings);
     const currentGainDb = handle.getGainDb(displayedSettings);
-    const patch = event.key === 'Home'
+
+    const patch: AudioEqPatch = event.key === 'Home'
       ? getResetPatch(handle)
       : {
-        [handle.frequencyField]: event.key === 'ArrowLeft' || event.key === 'ArrowRight'
-          ? nudgeFrequency(
-            currentFrequencyHz,
-            event.key === 'ArrowLeft' ? -1 : 1,
-            event.shiftKey,
-            handle.minFrequencyHz,
-            handle.maxFrequencyHz,
-          )
-          : currentFrequencyHz,
         [handle.gainField]: event.key === 'ArrowUp' || event.key === 'ArrowDown'
           ? clampEqGainDb(currentGainDb + (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 1 : KEYBOARD_GAIN_STEP_DB))
           : currentGainDb,
       };
+
+    if (!handle.fixedFrequency && handle.frequencyField && event.key !== 'Home') {
+      patch[handle.frequencyField] = event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+        ? nudgeFrequency(
+          currentFrequencyHz,
+          event.key === 'ArrowLeft' ? -1 : 1,
+          event.shiftKey,
+          handle.minFrequencyHz,
+          handle.maxFrequencyHz,
+        )
+        : currentFrequencyHz;
+    }
 
     onLiveChange(patch);
     onChange(patch);

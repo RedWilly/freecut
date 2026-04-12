@@ -33,6 +33,8 @@ import {
 import { getLinkedVideoIdsWithAudio, hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
 import { resolveProxyUrl } from '@/features/composition-runtime/deps/media-library';
 
+const EMPTY_AUDIO_EQ_STAGES: ResolvedAudioEqSettings[] = [];
+
 type CompositionWrapperItem = CompositionItemType | (AudioItem & { compositionId: string });
 
 interface CompositionWindow {
@@ -153,7 +155,7 @@ function mapSubCompItemToWrapperWindow(params: {
  * then CSS-scaled to fit the parent container dimensions. This ensures sub-items
  * use the correct coordinate space (sub-comp dimensions, not main canvas).
  */
-export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, parentVisible = true, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds, audioEqStages = [], crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
+export const CompositionContent = React.memo<CompositionContentProps>(({ item, parentMuted = false, parentVisible = true, renderDepth = 0, renderMode = 'full', audioGainMultiplier = 1, audioGainLiveItemIds, audioEqStages = EMPTY_AUDIO_EQ_STAGES, crossfadeFadeInFrames, crossfadeFadeOutFrames }) => {
   const subComp = useCompositionsStore((s) => s.compositions.find((c) => c.id === item.compositionId));
   const { width: renderWidth, height: renderHeight, fps: mainFps } = useVideoConfig();
   const nestedMediaResolutionMode = useNestedMediaResolutionMode();

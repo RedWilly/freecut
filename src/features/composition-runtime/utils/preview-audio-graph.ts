@@ -322,7 +322,9 @@ export function rampPreviewClipEq(
   startAt: number = graph.context.currentTime,
   rampSeconds: number = PREVIEW_AUDIO_EQ_RAMP_SECONDS,
 ): void {
-  for (let i = 0; i < graph.eqStageNodes.length; i++) {
+  const targetCount = targetStages?.length ?? 0;
+  const iterCount = Math.max(graph.eqStageNodes.length, targetCount);
+  for (let i = 0; i < iterCount; i++) {
     const targetStage = targetStages?.[i] ?? DEFAULT_AUDIO_EQ_SETTINGS;
     const stageNodes = ensurePreviewClipEqStage(graph, i, targetStage);
     applyStageParams(stageNodes, targetStage, startAt, rampSeconds);
@@ -333,7 +335,9 @@ export function setPreviewClipEq(
   graph: PreviewClipAudioGraph,
   targetStages: ReadonlyArray<ResolvedAudioEqSettings> | undefined,
 ): void {
-  for (let i = 0; i < graph.eqStageNodes.length; i++) {
+  const targetCount = targetStages?.length ?? 0;
+  const iterCount = Math.max(graph.eqStageNodes.length, targetCount);
+  for (let i = 0; i < iterCount; i++) {
     const targetStage = targetStages?.[i] ?? DEFAULT_AUDIO_EQ_SETTINGS;
     const stageNodes = ensurePreviewClipEqStage(graph, i, targetStage);
     applyStageParams(stageNodes, targetStage);

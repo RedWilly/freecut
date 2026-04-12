@@ -164,6 +164,11 @@ export const SoundTouchWorkletAudio: React.FC<SoundTouchWorkletAudioProps> = Rea
 
         node.connect(graph.sourceInputNode);
         nodeRef.current = node;
+
+        // Reapply current gain so the rebuilt graph doesn't start silent
+        const clampedVolume = muted ? 0 : Math.max(0, finalVolume);
+        graph.outputGainNode.gain.value = clampedVolume;
+
         setFallbackRequested(false);
         setNodeReady(true);
       })
