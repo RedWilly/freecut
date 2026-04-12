@@ -29,7 +29,7 @@ export const HOTKEY_EDITOR_SECTIONS: readonly HotkeyEditorSection[] = [
     title: 'Editing',
     blurb: 'Clip edits, delete flows, and precise canvas nudging.',
     items: [
-      { label: 'Split at playhead', keys: ['SPLIT_AT_PLAYHEAD'] },
+      { label: 'Split at playhead', keys: ['SPLIT_AT_PLAYHEAD', 'SPLIT_AT_PLAYHEAD_ALT'] },
       { label: 'Join selected clips', keys: ['JOIN_ITEMS'] },
       { label: 'Delete selected items', keys: ['DELETE_SELECTED', 'DELETE_SELECTED_ALT'] },
       { label: 'Ripple delete selected items', keys: ['RIPPLE_DELETE', 'RIPPLE_DELETE_ALT'] },

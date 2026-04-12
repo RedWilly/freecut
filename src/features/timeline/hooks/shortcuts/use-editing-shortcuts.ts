@@ -10,8 +10,8 @@ import { useTimelineStore } from '../../stores/timeline-store';
 import { useSelectionStore } from '@/shared/state/selection';
 import { HOTKEY_OPTIONS } from '@/config/hotkeys';
 import { canJoinMultipleItems } from '@/features/timeline/utils/clip-utils';
-import { canLinkSelection, getUniqueLinkedItemAnchorIds, hasLinkedItems } from '@/features/timeline/utils/linked-items';
-import { insertFreezeFrame, linkItems, unlinkItems } from '../../stores/actions/item-actions';
+import { canLinkSelection, hasLinkedItems } from '@/features/timeline/utils/linked-items';
+import { insertFreezeFrame, linkItems, splitAllItemsAtFrame, unlinkItems } from '../../stores/actions/item-actions';
 import type { TransformProperties } from '@/types/transform';
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts';
 import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog';
@@ -31,7 +31,6 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const rippleDeleteItems = useTimelineStore((s) => s.rippleDeleteItems);
   const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap);
   const joinItems = useTimelineStore((s) => s.joinItems);
-  const splitItem = useTimelineStore((s) => s.splitItem);
   const items = useTimelineStore((s) => s.items);
   const keyframeEditorOpen = useEditorStore((s) => s.keyframeEditorOpen);
   const keyframeEditorShortcutScopeActive = useEditorStore((s) => s.keyframeEditorShortcutScopeActive);
@@ -311,28 +310,26 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     [toggleLinkedSelectionEnabled]
   );
 
+  const splitAtPlayhead = useCallback((event: KeyboardEvent) => {
+    event.preventDefault();
+    const { previewFrame, currentFrame } = usePlaybackStore.getState();
+    const splitFrame = previewFrame ?? currentFrame;
+    splitAllItemsAtFrame(splitFrame);
+  }, []);
+
   // Editing: Cmd/Ctrl+K - Split all items at gray playhead (or main playhead)
   useHotkeys(
     hotkeys.SPLIT_AT_PLAYHEAD,
-    (event) => {
-      event.preventDefault();
-      const { previewFrame, currentFrame } = usePlaybackStore.getState();
-      const splitFrame = previewFrame ?? currentFrame;
-
-      const overlappingItemIds = items.filter((item) => {
-        const itemStart = item.from;
-        const itemEnd = item.from + item.durationInFrames;
-        return splitFrame > itemStart && splitFrame < itemEnd;
-      }).map((item) => item.id);
-
-      const itemsToSplit = getUniqueLinkedItemAnchorIds(items, overlappingItemIds);
-
-      for (const itemId of itemsToSplit) {
-        splitItem(itemId, splitFrame);
-      }
-    },
+    splitAtPlayhead,
     { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
-    [items, splitItem]
+    [splitAtPlayhead]
+  );
+
+  useHotkeys(
+    hotkeys.SPLIT_AT_PLAYHEAD_ALT,
+    splitAtPlayhead,
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
+    [splitAtPlayhead]
   );
 
   // Editing: Shift+F - Insert freeze frame at playhead

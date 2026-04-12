@@ -2,8 +2,10 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HOTKEYS } from '@/config/hotkeys';
 import { useEditorStore } from '@/shared/state/editor';
+import { usePlaybackStore } from '@/shared/state/playback';
 import { useSelectionStore } from '@/shared/state/selection';
 import { useTimelineStore } from '../../stores/timeline-store';
+import { useTimelineCommandStore } from '../../stores/timeline-command-store';
 import { useKeyframeSelectionStore } from '../../stores/keyframe-selection-store';
 import { useEditingShortcuts } from './use-editing-shortcuts';
 import type { TimelineTrack, VideoItem } from '@/types/timeline';
@@ -41,6 +43,19 @@ const TRACK: TimelineTrack = {
   items: [],
 };
 
+const TRACK_2: TimelineTrack = {
+  id: 'track-2',
+  name: 'V2',
+  kind: 'video',
+  order: 1,
+  height: 80,
+  locked: false,
+  visible: true,
+  muted: false,
+  solo: false,
+  items: [],
+};
+
 const ITEM: VideoItem = {
   id: 'clip-1',
   type: 'video',
@@ -68,6 +83,7 @@ function createHotkeyEvent(): HotkeyEvent {
 describe('useEditingShortcuts delete ownership', () => {
   beforeEach(() => {
     useHotkeysMock.mockClear();
+    useTimelineCommandStore.getState().clearHistory();
     useSelectionStore.setState({
       selectedItemIds: [],
       selectedMarkerId: null,
@@ -82,6 +98,11 @@ describe('useEditingShortcuts delete ownership', () => {
     useEditorStore.setState({
       keyframeEditorOpen: false,
       keyframeEditorShortcutScopeActive: false,
+    });
+    usePlaybackStore.setState({
+      currentFrame: 0,
+      previewFrame: null,
+      previewItemId: null,
     });
     useTimelineStore.setState({
       tracks: [TRACK],
@@ -197,5 +218,54 @@ describe('useEditingShortcuts delete ownership', () => {
     expect(useTimelineStore.getState().items).toHaveLength(0);
     expect(deleteEvent.preventDefault).toHaveBeenCalled();
     expect(deleteEvent.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('registers Alt+C as an alternate split-at-playhead shortcut and undoes in one step', () => {
+    const clip1 = {
+      ...ITEM,
+      from: 20,
+      durationInFrames: 40,
+    };
+    const clip2 = {
+      ...ITEM,
+      id: 'clip-2',
+      trackId: 'track-2',
+      from: 40,
+      durationInFrames: 30,
+    };
+
+    useTimelineStore.setState({
+      tracks: [TRACK, TRACK_2],
+      items: [clip1, clip2],
+    });
+    usePlaybackStore.setState({
+      currentFrame: 50,
+      previewFrame: null,
+      previewItemId: null,
+    });
+
+    render(<ShortcutHarness />);
+
+    const [, splitCallback] = getHotkeyRegistration(HOTKEYS.SPLIT_AT_PLAYHEAD_ALT);
+    const splitEvent = createHotkeyEvent();
+
+    act(() => {
+      splitCallback(splitEvent);
+    });
+
+    const items = useTimelineStore.getState().items.toSorted((left, right) => left.from - right.from);
+    expect(items).toHaveLength(4);
+    expect(useTimelineCommandStore.getState().undoStack).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: 'clip-1', from: 20, durationInFrames: 30 });
+    expect(items[1]).toMatchObject({ id: 'clip-2', from: 40, durationInFrames: 10 });
+    expect(items[2]).toMatchObject({ from: 50, durationInFrames: 10 });
+    expect(items[3]).toMatchObject({ from: 50, durationInFrames: 20 });
+    expect(splitEvent.preventDefault).toHaveBeenCalled();
+
+    act(() => {
+      useTimelineCommandStore.getState().undo();
+    });
+
+    expect(useTimelineStore.getState().items).toEqual([clip1, clip2]);
   });
 });

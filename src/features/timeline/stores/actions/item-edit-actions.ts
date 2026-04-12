@@ -29,7 +29,7 @@ import { computeClampedSlipDelta } from '../../utils/slip-utils';
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
 import { clampSlideDeltaToPreserveTransitions } from '../../utils/transition-utils';
 import { calculateTransitionPortions } from '@/domain/timeline/transitions/transition-planner';
-import { getLinkedItemIds } from '../../utils/linked-items';
+import { getLinkedItemIds, getUniqueLinkedItemAnchorIds } from '../../utils/linked-items';
 import {
   propagateInsertedGapToSyncLockedTracks,
   propagateRemovedIntervalsToSyncLockedTracks,
@@ -164,6 +164,73 @@ export function splitItem(
     useTimelineSettingsStore.getState().markDirty();
     return anchorResult;
   }, { id, splitFrame });
+}
+
+/**
+ * Split every item crossing a timeline frame in a single undo operation.
+ * Used by playhead-based "split across all tracks" shortcuts.
+ */
+export function splitAllItemsAtFrame(splitFrame: number): number {
+  const items = useItemsStore.getState().items;
+  const overlappingItemIds = items
+    .filter((item) => splitFrame > item.from && splitFrame < item.from + item.durationInFrames)
+    .map((item) => item.id);
+  const anchorIds = getUniqueLinkedItemAnchorIds(items, overlappingItemIds);
+
+  if (anchorIds.length === 0) return 0;
+
+  let splitCount = 0;
+
+  execute('SPLIT_ALL_ITEMS_AT_FRAME', () => {
+    for (const anchorId of anchorIds) {
+      const currentItems = useItemsStore.getState().items;
+      const itemsToSplit = getLinkedItemsForEdit(currentItems, anchorId, isLinkedSelectionEnabled());
+      if (itemsToSplit.length === 0) continue;
+
+      let blockedByTransition = false;
+      const canSplitGroup = itemsToSplit.every((item) => {
+        if (splitFrame <= item.from || splitFrame >= item.from + item.durationInFrames) {
+          return false;
+        }
+
+        const relativeFrame = splitFrame - item.from;
+        if (isInTransitionOverlap(item.id, relativeFrame, item.durationInFrames)) {
+          blockedByTransition = true;
+          return false;
+        }
+
+        return true;
+      });
+
+      if (!canSplitGroup) {
+        if (blockedByTransition) {
+          toast.warning('Cannot split inside a transition zone');
+        }
+        continue;
+      }
+
+      const splitResults = itemsToSplit
+        .map((item) => ({
+          originalId: item.id,
+          originalLinkedGroupId: item.linkedGroupId,
+          result: useItemsStore.getState()._splitItem(item.id, splitFrame),
+        }))
+        .filter((entry): entry is SplitResultEntry => entry.result !== null);
+
+      const anchorResult = splitResults.find((entry) => entry.originalId === anchorId)?.result ?? null;
+      if (!anchorResult) continue;
+
+      applySplitBookkeeping(splitResults);
+      useSelectionStore.getState().selectItems(splitResults.map((entry) => entry.result.leftItem.id));
+      splitCount += 1;
+    }
+
+    if (splitCount > 0) {
+      useTimelineSettingsStore.getState().markDirty();
+    }
+  }, { ids: anchorIds, splitFrame });
+
+  return splitCount;
 }
 
 /**

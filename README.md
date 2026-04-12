@@ -141,7 +141,7 @@ Brave disables the File System Access API by default. To enable it:
 | Previous / Next frame | `Left` / `Right` |
 | Previous / Next snap point | `Up` / `Down` |
 | Go to start / end | `Home` / `End` |
-| Split at playhead | `Ctrl+K` |
+| Split at playhead | `Ctrl+K` / `Alt+C` |
 | Split at cursor | `Shift+C` |
 | Join clips | `Shift+J` |
 | Delete selected | `Delete` |

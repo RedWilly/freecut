@@ -17,6 +17,7 @@ export const HOTKEYS = {
 
   // Timeline editing
   SPLIT_AT_PLAYHEAD: 'mod+k',
+  SPLIT_AT_PLAYHEAD_ALT: 'alt+c',
   JOIN_ITEMS: 'shift+j',
   DELETE_SELECTED: 'delete',
   DELETE_SELECTED_ALT: 'backspace',
@@ -274,6 +275,7 @@ export const HOTKEY_DESCRIPTIONS: Record<HotkeyKey, string> = {
 
   // Timeline editing
   SPLIT_AT_PLAYHEAD: 'Split at playhead',
+  SPLIT_AT_PLAYHEAD_ALT: 'Split at playhead (alternative)',
   JOIN_ITEMS: 'Join selected clips',
   DELETE_SELECTED: 'Delete selected items',
   DELETE_SELECTED_ALT: 'Delete selected items (alternative)',
