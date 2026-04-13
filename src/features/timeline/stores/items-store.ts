@@ -90,6 +90,7 @@ function normalizeFrameFields<T extends TimelineItem>(item: T): T {
     audioFadeOutCurveX: item.audioFadeOutCurveX === undefined ? undefined : clampAudioFadeCurveX(item.audioFadeOutCurveX),
     audioPitchSemitones: item.audioPitchSemitones === undefined ? undefined : clampAudioPitchSemitones(item.audioPitchSemitones),
     audioPitchCents: item.audioPitchCents === undefined ? undefined : clampAudioPitchCents(item.audioPitchCents),
+    audioEqOutputGainDb: item.audioEqOutputGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqOutputGainDb),
     audioEqBand1Enabled: item.audioEqBand1Enabled === undefined ? undefined : !!item.audioEqBand1Enabled,
     audioEqBand1Type: item.audioEqBand1Type,
     audioEqBand1FrequencyHz: item.audioEqBand1FrequencyHz === undefined
@@ -203,6 +204,9 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   }
   if (normalized.audioPitchCents !== undefined) {
     normalized.audioPitchCents = clampAudioPitchCents(normalized.audioPitchCents);
+  }
+  if (normalized.audioEqOutputGainDb !== undefined) {
+    normalized.audioEqOutputGainDb = clampAudioEqGainDb(normalized.audioEqOutputGainDb);
   }
   if (normalized.audioEqBand1Enabled !== undefined) {
     normalized.audioEqBand1Enabled = !!normalized.audioEqBand1Enabled;

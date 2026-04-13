@@ -20,6 +20,7 @@ export interface ItemPropertiesPreview {
   audioFadeOutCurveX?: number;
   audioPitchSemitones?: number;
   audioPitchCents?: number;
+  audioEqOutputGainDb?: number;
   audioEqBand1Enabled?: boolean;
   audioEqBand1Type?: import('@/types/audio').AudioEqBand1Type;
   audioEqBand1FrequencyHz?: number;

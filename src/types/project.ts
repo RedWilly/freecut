@@ -118,6 +118,7 @@ export interface ProjectTimeline {
     audioFadeOutCurveX?: number;
     audioPitchSemitones?: number;
     audioPitchCents?: number;
+    audioEqOutputGainDb?: number;
     audioEqBand1Enabled?: boolean;
     audioEqBand1Type?: import('./audio').AudioEqBand1Type;
     audioEqBand1FrequencyHz?: number;

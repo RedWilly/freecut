@@ -5,6 +5,7 @@ export type AudioEqBand6Type = 'low-pass' | 'low-shelf' | 'peaking' | 'high-shel
 
 export interface AudioEqSettings {
   enabled?: boolean;
+  outputGainDb?: number;
   band1Enabled?: boolean;
   band1Type?: AudioEqBand1Type;
   band1FrequencyHz?: number;
@@ -47,6 +48,7 @@ export interface AudioEqSettings {
 }
 
 export interface ResolvedAudioEqSettings {
+  outputGainDb: number;
   band1Enabled: boolean;
   band1Type: AudioEqBand1Type;
   band1FrequencyHz: number;

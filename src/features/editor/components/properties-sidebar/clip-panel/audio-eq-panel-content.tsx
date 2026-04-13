@@ -232,6 +232,120 @@ function getEffectiveGainBandControlRangeId(
   return inferAudioEqControlRangeId(frequencyHz, preferredRangeId);
 }
 
+function clampOutputGainDb(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(AUDIO_EQ_GAIN_DB_MIN, Math.min(AUDIO_EQ_GAIN_DB_MAX, value));
+}
+
+function roundOutputGainDb(value: number): number {
+  return Math.round(clampOutputGainDb(value) * 10) / 10;
+}
+
+function formatOutputGainDb(value: number | 'mixed'): string {
+  if (value === 'mixed') return 'Mixed';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
+}
+
+interface EqOutputGainControlProps {
+  value: number | 'mixed';
+  onChange: (value: number) => void;
+  onLiveChange: (value: number) => void;
+  disabled?: boolean;
+}
+
+function EqOutputGainControl({
+  value,
+  onChange,
+  onLiveChange,
+  disabled = false,
+}: EqOutputGainControlProps) {
+  const [draftValue, setDraftValue] = useState<number | null>(null);
+  const resolvedValue = value === 'mixed' ? 0 : value;
+  const displayValue = draftValue ?? resolvedValue;
+  const range = AUDIO_EQ_GAIN_DB_MAX - AUDIO_EQ_GAIN_DB_MIN;
+  const thumbPercent = ((displayValue - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1)) * 100;
+
+  const valueFromClientY = useCallback((clientY: number, rect: DOMRect) => {
+    const normalized = 1 - ((clientY - rect.top) / Math.max(rect.height, 1));
+    return roundOutputGainDb(AUDIO_EQ_GAIN_DB_MIN + Math.max(0, Math.min(1, normalized)) * range);
+  }, [range]);
+
+  const commitValue = useCallback((nextValue: number) => {
+    setDraftValue(null);
+    onChange(roundOutputGainDb(nextValue));
+  }, [onChange]);
+
+  return (
+    <div className={cn('flex h-[clamp(288px,33vh,344px)] w-[60px] shrink-0 flex-col items-center px-1 pb-1 pt-1', disabled && 'opacity-50')}>
+      <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+        Gain
+      </div>
+      <div
+        className={cn('relative mt-1 min-h-0 flex-1 w-full touch-none select-none', disabled ? 'pointer-events-none' : 'cursor-ns-resize')}
+        onDoubleClick={() => {
+          if (disabled) return;
+          setDraftValue(null);
+          onLiveChange(0);
+          onChange(0);
+        }}
+        onPointerDown={(event) => {
+          if (disabled) return;
+          event.preventDefault();
+          const target = event.currentTarget;
+          const rect = target.getBoundingClientRect();
+          const startValue = valueFromClientY(event.clientY, rect);
+          target.setPointerCapture?.(event.pointerId);
+          setDraftValue(startValue);
+          onLiveChange(startValue);
+
+          const handlePointerMove = (moveEvent: PointerEvent) => {
+            const nextValue = valueFromClientY(moveEvent.clientY, rect);
+            setDraftValue(nextValue);
+            onLiveChange(nextValue);
+          };
+
+          const handlePointerEnd = (endEvent: PointerEvent) => {
+            target.releasePointerCapture?.(event.pointerId);
+            const nextValue = valueFromClientY(endEvent.clientY, rect);
+            target.removeEventListener('pointermove', handlePointerMove);
+            target.removeEventListener('pointerup', handlePointerEnd);
+            target.removeEventListener('pointercancel', handlePointerEnd);
+            commitValue(nextValue);
+          };
+
+          target.addEventListener('pointermove', handlePointerMove);
+          target.addEventListener('pointerup', handlePointerEnd);
+          target.addEventListener('pointercancel', handlePointerEnd);
+        }}
+      >
+        {[20, 10, 0, -10, -20].map((tick) => {
+          const tickPercent = ((tick - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1)) * 100;
+          return (
+            <div
+              key={tick}
+              className="pointer-events-none absolute inset-x-0"
+              style={{ bottom: `${tickPercent}%` }}
+            >
+              <div className="absolute left-2 right-5 h-px bg-[#34363d]" />
+              <span className="absolute right-0 -translate-y-1/2 text-[9px] font-mono text-zinc-500">
+                {tick > 0 ? `+${tick}` : tick}
+              </span>
+            </div>
+          );
+        })}
+        <div className="absolute bottom-0 left-[18px] top-0 w-px bg-[#2f3138]" />
+        <div
+          className="absolute left-[9px] h-7 w-[18px] -translate-y-1/2 rounded-[2px] border border-[#666a73] bg-[#b9bbc2] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+          style={{ top: `${100 - thumbPercent}%` }}
+        />
+      </div>
+      <div className="mt-1 text-sm font-medium tabular-nums text-[#16d9ff]">
+        {formatOutputGainDb(displayValue)}
+      </div>
+    </div>
+  );
+}
+
 interface BandCardProps {
   title: string;
   filterType: FilterType;
@@ -346,6 +460,7 @@ export function AudioEqPanelContent({
     setGainBandControlRanges(DEFAULT_GAIN_BAND_CONTROL_RANGES);
   }, [targetLabel]);
 
+  const eqOutputGainDb = livePatch?.audioEqOutputGainDb ?? (resolvedTrackEq ? resolvedTrackEq.outputGainDb : getMixedValue(resolvedItemEqSettings, (item) => item.outputGainDb, 0));
   const eqBand1Enabled = livePatch?.audioEqBand1Enabled ?? (resolvedTrackEq ? resolvedTrackEq.band1Enabled : getMixedValue(resolvedItemEqSettings, (item) => item.band1Enabled, false));
   const eqBand1Type = livePatch?.audioEqBand1Type ?? (resolvedTrackEq ? resolvedTrackEq.band1Type : getMixedValue(resolvedItemEqSettings, (item) => item.band1Type, 'high-pass'));
   const eqBand1FrequencyHz = livePatch?.audioEqBand1FrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.band1FrequencyHz : getMixedValue(resolvedItemEqSettings, (item) => item.band1FrequencyHz, AUDIO_EQ_LOW_CUT_FREQUENCY_HZ));
@@ -406,6 +521,7 @@ export function AudioEqPanelContent({
   const highRange = getAudioEqControlRangeById(highRangeId);
 
   const hasMixedEqSettings = [
+    eqOutputGainDb,
     eqBand1Enabled,
     eqBand1Type,
     eqBand1FrequencyHz,
@@ -442,6 +558,7 @@ export function AudioEqPanelContent({
 
   const eqCurveSettings = useMemo(
     () => resolveAudioEqSettings({
+      outputGainDb: eqOutputGainDb === 'mixed' ? 0 : eqOutputGainDb,
       band1Enabled: eqBand1Enabled === 'mixed' ? false : eqBand1Enabled,
       band1Type: eqBand1Type === 'mixed' ? 'high-pass' : eqBand1Type,
       band1FrequencyHz: eqBand1FrequencyHz === 'mixed' ? AUDIO_EQ_LOW_CUT_FREQUENCY_HZ : eqBand1FrequencyHz,
@@ -477,6 +594,7 @@ export function AudioEqPanelContent({
       band6SlopeDbPerOct: eqBand6SlopeDbPerOct === 'mixed' ? 12 : eqBand6SlopeDbPerOct,
     }),
     [
+      eqOutputGainDb,
       eqBand1Enabled,
       eqBand1Type,
       eqBand1FrequencyHz,
@@ -618,24 +736,42 @@ export function AudioEqPanelContent({
               ))}
             </SelectContent>
           </Select>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 px-3 text-zinc-400 hover:text-zinc-100"
+            onClick={() => handleEqPresetChange('flat')}
+          >
+            Reset EQ
+          </Button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto">
         <div className="relative border-b border-[#2e2e31]">
-          <div className="pointer-events-none absolute left-3 right-3 top-2 z-10 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-            <span>{targetLabel}</span>
-            {!isTrackMode && <span>{audioItems.length} {audioItems.length === 1 ? 'clip' : 'clips'}</span>}
-            {isTrackMode && <span>Track EQ</span>}
+          {!isTrackMode ? (
+            <div className="pointer-events-none absolute right-3 top-1 z-10 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+              {audioItems.length} {audioItems.length === 1 ? 'clip' : 'clips'}
+            </div>
+          ) : null}
+          <div className="flex items-stretch gap-3 px-3 pb-3 pt-2">
+            <div className="min-w-0 flex-1">
+              <AudioEqCurveEditor
+                settings={eqCurveSettings}
+                disabled={hasMixedEqSettings}
+                className="text-zinc-300"
+                graphClassName="h-[clamp(288px,33vh,344px)] bg-[#141416]"
+                onLiveChange={handleEqPatchLiveChange}
+                onChange={handleEqPatchChange}
+              />
+            </div>
+            <EqOutputGainControl
+              value={eqOutputGainDb}
+              disabled={hasMixedEqSettings}
+              onLiveChange={(value) => handleEqPatchLiveChange({ audioEqOutputGainDb: value })}
+              onChange={(value) => handleEqFieldChange('audioEqOutputGainDb', value)}
+            />
           </div>
-          <AudioEqCurveEditor
-            settings={eqCurveSettings}
-            disabled={hasMixedEqSettings}
-            className="text-zinc-300"
-            graphClassName="h-[228px] bg-[#141416]"
-            onLiveChange={handleEqPatchLiveChange}
-            onChange={handleEqPatchChange}
-          />
         </div>
 
         <div className="space-y-3 p-3">
@@ -883,17 +1019,6 @@ export function AudioEqPanelContent({
                 </>
               )}
             </BandCard>
-          </div>
-
-          <div className="flex justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-zinc-400 hover:text-zinc-100"
-              onClick={() => handleEqPresetChange('flat')}
-            >
-              Reset EQ
-            </Button>
           </div>
         </div>
       </div>

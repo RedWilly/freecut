@@ -352,6 +352,7 @@ const timelineItemSchema = z.object({
   audioFadeOutCurveX: z.number().min(0).max(1).optional(),
   audioPitchSemitones: z.number().int().min(-12).max(12).optional(),
   audioPitchCents: z.number().int().min(-100).max(100).optional(),
+  audioEqOutputGainDb: z.number().min(-20).max(20).optional(),
   audioEqBand1Enabled: z.boolean().optional(),
   audioEqBand1Type: z.enum(['low-shelf', 'peaking', 'high-shelf', 'high-pass']).optional(),
   audioEqBand1FrequencyHz: z.number().min(20).max(399).optional(),

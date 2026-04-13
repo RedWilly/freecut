@@ -8,6 +8,7 @@ import type {
 } from '@/types/audio';
 
 export interface AudioEqFieldSource {
+  audioEqOutputGainDb?: number;
   audioEqBand1Enabled?: boolean;
   audioEqBand1Type?: AudioEqBand1Type;
   audioEqBand1FrequencyHz?: number;
@@ -135,6 +136,7 @@ const AUDIO_EQ_HIGH_Q = 2.3;
 const AUDIO_EQ_BAND6_Q = 1.1;
 
 export const DEFAULT_AUDIO_EQ_SETTINGS: Readonly<ResolvedAudioEqSettings> = Object.freeze({
+  outputGainDb: 0,
   band1Enabled: false,
   band1Type: 'high-pass',
   band1FrequencyHz: AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
@@ -260,6 +262,7 @@ function getSettingsValue<
 
 export function getAudioEqSettings(source?: AudioEqFieldSource | null): AudioEqSettings {
   return {
+    outputGainDb: source?.audioEqOutputGainDb,
     band1Enabled: source?.audioEqBand1Enabled,
     band1Type: source?.audioEqBand1Type,
     band1FrequencyHz: source?.audioEqBand1FrequencyHz,
@@ -454,6 +457,9 @@ export function resolveAudioEqSettings(
   );
 
   return {
+    outputGainDb: clampAudioEqGainDb(
+      Number(getSettingsValue(settings, fields, 'outputGainDb', 'audioEqOutputGainDb')),
+    ),
     band1Enabled,
     band1Type,
     band1FrequencyHz,
@@ -643,6 +649,8 @@ export function resolvePreviewAudioEqStages(
 export function isAudioEqStageActive(stage?: AudioEqSettings | ResolvedAudioEqSettings | null): boolean {
   if (!stage) return false;
   return (
+    Math.abs(stage.outputGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
+    ||
     (!!stage.band1Enabled && stage.band1Type === 'high-pass')
     || (!!stage.band1Enabled && stage.band1Type !== 'high-pass' && Math.abs(stage.band1GainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
     || (!!stage.lowEnabled && stage.lowType === 'notch')
@@ -672,6 +680,8 @@ export function areAudioEqStagesEqual(
     const rightStage = right[i];
     if (!leftStage || !rightStage) return false;
     if (
+      leftStage.outputGainDb !== rightStage.outputGainDb
+      ||
       leftStage.band1Enabled !== rightStage.band1Enabled
       || leftStage.band1Type !== rightStage.band1Type
       || leftStage.band1FrequencyHz !== rightStage.band1FrequencyHz
@@ -1360,6 +1370,18 @@ function applyOnePole(samples: Float32Array, coefficients: OnePoleCoefficients):
   return output;
 }
 
+function applyLinearGain(samples: Float32Array, gain: number): Float32Array {
+  if (Math.abs(gain - 1) <= AUDIO_EQ_ACTIVE_EPSILON) {
+    return samples;
+  }
+
+  const output = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    output[i] = (samples[i] ?? 0) * gain;
+  }
+  return output;
+}
+
 function applyCutFilter(
   samples: Float32Array,
   type: 'highpass' | 'lowpass',
@@ -1441,6 +1463,10 @@ function applyAudioEqStage(
         buildEqBiquadCoefficients(biquadType, stage.band6FrequencyHz, stage.band6GainDb, sampleRate, stage.band6Q),
       );
     }
+  }
+
+  if (Math.abs(stage.outputGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+    output = applyLinearGain(output, Math.pow(10, stage.outputGainDb / 20));
   }
 
   return output;

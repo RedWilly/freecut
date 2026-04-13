@@ -26,6 +26,7 @@ interface PreviewClipAudioEqStageNodes {
   band6BypassNode: GainNode;
   band6BiquadNode: BiquadFilterNode;
   band6PassNodes: IIRFilterNode[];
+  outputGainNode: GainNode;
   highCutNodes: IIRFilterNode[];
   resolvedStage: ResolvedAudioEqSettings;
 }
@@ -173,6 +174,14 @@ function configureStageBiquads(
   );
 }
 
+function configureStageOutputGain(
+  stageNodes: PreviewClipAudioEqStageNodes,
+  targetStage: ResolvedAudioEqSettings,
+  write: (param: AudioParam, value: number) => void,
+): void {
+  write(stageNodes.outputGainNode.gain, Math.pow(10, targetStage.outputGainDb / 20));
+}
+
 function getBand1EntryNode(stageNodes: PreviewClipAudioEqStageNodes, stage = stageNodes.resolvedStage): AudioNode {
   if (!stage.band1Enabled) return stageNodes.band1BypassNode;
   return isPreviewPassBand1(stage)
@@ -230,6 +239,7 @@ function disconnectStageInternals(stageNodes: PreviewClipAudioEqStageNodes): voi
   for (const node of stageNodes.band6PassNodes) {
     node.disconnect();
   }
+  stageNodes.outputGainNode.disconnect();
 }
 
 function createPreviewClipAudioEqStage(
@@ -270,6 +280,7 @@ function createPreviewClipAudioEqStage(
       resolvedStage.band6FrequencyHz,
       resolvedStage.band6SlopeDbPerOct,
     ),
+    outputGainNode: context.createGain(),
     highCutNodes: [],
     resolvedStage,
   };
@@ -277,6 +288,9 @@ function createPreviewClipAudioEqStage(
   stageNodes.highCutNodes = stageNodes.band6PassNodes;
 
   configureStageBiquads(stageNodes, resolvedStage, (param, value) => {
+    param.value = value;
+  });
+  configureStageOutputGain(stageNodes, resolvedStage, (param, value) => {
     param.value = value;
   });
   connectStageInternals(stageNodes);
@@ -299,7 +313,8 @@ function reconnectPreviewClipAudioGraph(graph: PreviewClipAudioGraph): void {
     previousNode.connect(band1Entry);
     band1Exit.connect(stageNodes.lowNode);
     stageNodes.highNode.connect(band6Entry);
-    previousNode = band6Exit;
+    band6Exit.connect(stageNodes.outputGainNode);
+    previousNode = stageNodes.outputGainNode;
   }
 
   previousNode.connect(graph.outputGainNode);
@@ -353,6 +368,7 @@ function applyStageParams(
     };
 
   configureStageBiquads(stageNodes, targetStage, write);
+  configureStageOutputGain(stageNodes, targetStage, write);
   stageNodes.resolvedStage = targetStage;
 }
 

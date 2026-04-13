@@ -57,6 +57,7 @@ export function clampFrequencyToAudioEqControlRange(
 
 export function buildTimelineEqPatchFromResolvedSettings(settings: ResolvedAudioEqSettings): Partial<TimelineItem> {
   return {
+    audioEqOutputGainDb: settings.outputGainDb,
     audioEqBand1Enabled: settings.band1Enabled,
     audioEqBand1Type: settings.band1Type,
     audioEqBand1FrequencyHz: settings.band1FrequencyHz,

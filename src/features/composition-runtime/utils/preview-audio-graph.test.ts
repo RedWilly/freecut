@@ -134,10 +134,12 @@ describe('preview-audio-graph', () => {
     expect(getConnections(firstStage.midPeakingNode)).toEqual([firstStage.highMidPeakingNode]);
     expect(getConnections(firstStage.highMidPeakingNode)).toEqual([firstStage.highShelfNode]);
     expect(getConnections(firstStage.highShelfNode)).toEqual([firstStage.band6BypassNode]);
-    expect(getConnections(firstStage.band6BypassNode)).toEqual([secondStage.band1BypassNode]);
+    expect(getConnections(firstStage.band6BypassNode)).toEqual([firstStage.outputGainNode]);
+    expect(getConnections(firstStage.outputGainNode)).toEqual([secondStage.band1BypassNode]);
     expect(getConnections(secondStage.band1BypassNode)).toEqual([secondStage.lowShelfNode]);
     expect(getConnections(secondStage.highShelfNode)).toEqual([secondStage.band6BypassNode]);
-    expect(getConnections(secondStage.band6BypassNode)).toEqual([graph!.outputGainNode]);
+    expect(getConnections(secondStage.band6BypassNode)).toEqual([secondStage.outputGainNode]);
+    expect(getConnections(secondStage.outputGainNode)).toEqual([graph!.outputGainNode]);
   });
 
   it('creates cut nodes when needed and ramps frequency, gain, and Q parameters', () => {
@@ -159,6 +161,7 @@ describe('preview-audio-graph', () => {
       highMidQ: 1.3,
       highGainDb: 5,
       highFrequencyHz: 7000,
+      outputGainDb: 6,
       highCutEnabled: true,
       highCutFrequencyHz: 6000,
       highCutSlopeDbPerOct: 24,
@@ -170,7 +173,8 @@ describe('preview-audio-graph', () => {
     expect(getConnections(graph!.sourceInputNode)[0]).toBe(stage.lowCutNodes[0]);
     expect(getConnections(stage.lowCutNodes.at(-1)!)[0]).toBe(stage.lowShelfNode);
     expect(getConnections(stage.highShelfNode)[0]).toBe(stage.highCutNodes[0]);
-    expect(getConnections(stage.highCutNodes.at(-1)!)[0]).toBe(graph!.outputGainNode);
+    expect(getConnections(stage.highCutNodes.at(-1)!)[0]).toBe(stage.outputGainNode);
+    expect(getConnections(stage.outputGainNode)[0]).toBe(graph!.outputGainNode);
 
     expect(stage.lowShelfNode.frequency.value).toBe(150);
     expect(stage.lowShelfNode.gain.value).toBe(1);
@@ -183,6 +187,7 @@ describe('preview-audio-graph', () => {
     expect(stage.highMidPeakingNode.gain.value).toBe(4);
     expect(stage.highShelfNode.frequency.value).toBe(7000);
     expect(stage.highShelfNode.gain.value).toBe(5);
+    expect(stage.outputGainNode.gain.value).toBeCloseTo(Math.pow(10, 6 / 20), 5);
 
     rampPreviewClipEq(graph!, [resolveAudioEqSettings({
       lowCutEnabled: true,
@@ -199,6 +204,7 @@ describe('preview-audio-graph', () => {
       highMidQ: 1.05,
       highGainDb: -5,
       highFrequencyHz: 6500,
+      outputGainDb: -3,
       highCutEnabled: true,
       highCutFrequencyHz: 6000,
       highCutSlopeDbPerOct: 24,
@@ -215,5 +221,6 @@ describe('preview-audio-graph', () => {
     expect(getRampCalls(stage.highMidPeakingNode.gain).at(-1)).toEqual({ value: -4, time: 2.25 });
     expect(getRampCalls(stage.highShelfNode.frequency).at(-1)).toEqual({ value: 6500, time: 2.25 });
     expect(getRampCalls(stage.highShelfNode.gain).at(-1)).toEqual({ value: -5, time: 2.25 });
+    expect(getRampCalls(stage.outputGainNode.gain).at(-1)).toEqual({ value: Math.pow(10, -3 / 20), time: 2.25 });
   });
 });

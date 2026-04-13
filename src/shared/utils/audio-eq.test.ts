@@ -46,9 +46,11 @@ describe('audio-eq', () => {
 
   it('keeps sparse EQ patches from blanking untouched fields', () => {
     expect(getSparseAudioEqSettings({
+      audioEqOutputGainDb: 3.5,
       audioEqHighMidGainDb: 4.5,
       audioEqHighMidFrequencyHz: 2800,
     })).toEqual({
+      outputGainDb: 3.5,
       highMidGainDb: 4.5,
       highMidFrequencyHz: 2800,
     });
@@ -158,6 +160,7 @@ describe('audio-eq', () => {
 
   it('reports frequency response gains for the curve UI', () => {
     expect(Math.abs(getAudioEqResponseGainDb(undefined, AUDIO_EQ_MID_FREQUENCY_HZ))).toBeLessThan(0.001);
+    expect(Math.abs(getAudioEqResponseGainDb({ outputGainDb: 8 }, AUDIO_EQ_MID_FREQUENCY_HZ))).toBeLessThan(0.001);
     expect(getAudioEqResponseGainDb({ highMidGainDb: 8 }, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ)).toBeGreaterThan(6);
     expect(getAudioEqResponseGainDb({ lowGainDb: -8 }, AUDIO_EQ_LOW_FREQUENCY_HZ)).toBeLessThan(-3.5);
     expect(getAudioEqResponseGainDb({
@@ -202,6 +205,9 @@ describe('audio-eq', () => {
     const airCut = applyAudioEqStages([airTone], 48000, [
       resolveAudioEqSettings({ highCutEnabled: true, highCutFrequencyHz: 3000, highCutSlopeDbPerOct: 24 }),
     ])[0]!;
+    const outputBoosted = applyAudioEqStages([midTone], 48000, [
+      resolveAudioEqSettings({ outputGainDb: 6 }),
+    ])[0]!;
 
     expect(rms(lowBoosted) / rms(lowTone)).toBeGreaterThan(1.5);
     expect(rms(lowMidBoosted) / rms(lowMidTone)).toBeGreaterThan(1.5);
@@ -210,5 +216,6 @@ describe('audio-eq', () => {
     expect(rms(highBoosted) / rms(highTone)).toBeGreaterThan(1.5);
     expect(rms(rumbleCut) / rms(rumbleTone)).toBeLessThan(0.5);
     expect(rms(airCut) / rms(airTone)).toBeLessThan(0.5);
+    expect(rms(outputBoosted) / rms(midTone)).toBeGreaterThan(1.9);
   });
 });

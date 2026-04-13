@@ -729,6 +729,7 @@ describe('extractAudioSegments', () => {
   it('includes bus, track, and clip EQ stages in exported audio segments', () => {
     const clip = makeAudioItem({
       audioEqHighGainDb: 3,
+      audioEqOutputGainDb: 2,
     });
     const track = makeTrack({
       id: 'track-a1',
@@ -760,7 +761,7 @@ describe('extractAudioSegments', () => {
         highCutFrequencyHz: 8000,
       }),
       expect.objectContaining({ lowGainDb: 4 }),
-      expect.objectContaining({ highGainDb: 3 }),
+      expect.objectContaining({ highGainDb: 3, outputGainDb: 2 }),
     ]);
   });
 });
