@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { FloatingPanel } from '@/components/ui/floating-panel';
+import { WindowPortal } from '@/components/ui/window-portal';
 import { MoreHorizontal } from 'lucide-react';
 import {
   AUDIO_METER_SCALE_MARKS,
@@ -43,6 +44,7 @@ import { AudioEqPanelContent } from './properties-sidebar/clip-panel/audio-eq-pa
 import { type AudioEqPatch } from './properties-sidebar/clip-panel/audio-eq-curve-editor';
 import { getSparseAudioEqSettings } from '@/shared/utils/audio-eq';
 import { clearMixerLiveGainLayer, setMixerLiveGainLayer } from '@/shared/state/mixer-live-gain';
+import { type AudioEqSettings } from '@/types/audio';
 
 type PanelMode = 'meter' | 'mixer';
 type EqPanelTarget =
@@ -91,15 +93,129 @@ const EMPTY_PER_TRACK_LEVELS = new Map<string, AudioMeterEstimate>();
 
 const FLOATING_MIXER_STORAGE_KEY = 'editor:floatingMixerBounds';
 const FLOATING_MIXER_DEFAULT_BOUNDS = { x: -1, y: -1, width: 420, height: 500 };
-const FLOATING_EQ_STORAGE_KEY = 'editor:floatingEqBounds';
-const FLOATING_EQ_DEFAULT_BOUNDS = { x: -1, y: -1, width: 980, height: 620 };
+const FLOATING_EQ_STORAGE_KEY = 'editor:floatingEqBounds:v5';
+const FLOATING_EQ_DEFAULT_BOUNDS = { x: -1, y: -1, width: 780, height: 810 };
+const DETACHED_EQ_STORAGE_KEY = 'editor:detachedEqBounds:v4';
+const DETACHED_EQ_DEFAULT_BOUNDS = {
+  width: 1280,
+  height: 780,
+};
+
+interface DetachedWindowBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function loadDetachedWindowBounds(storageKey: string, fallback: DetachedWindowBounds): DetachedWindowBounds {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<DetachedWindowBounds>;
+    if (
+      typeof parsed.left === 'number' &&
+      typeof parsed.top === 'number' &&
+      typeof parsed.width === 'number' &&
+      typeof parsed.height === 'number'
+    ) {
+      return {
+        left: parsed.left,
+        top: parsed.top,
+        width: parsed.width,
+        height: parsed.height,
+      };
+    }
+  } catch {
+    // Ignore invalid persisted window bounds.
+  }
+
+  return fallback;
+}
+
+interface AudioEqPanelSurfaceProps {
+  title?: string;
+  targetLabel: string;
+  trackEq?: AudioEqSettings;
+  enabled: boolean;
+  onTrackEqChange?: (patch: AudioEqPatch) => void;
+  onEnabledChange?: (enabled: boolean) => void;
+  layoutMode?: 'floating' | 'detached';
+  showWindowChrome?: boolean;
+  onDock?: () => void;
+  onClose?: () => void;
+}
+
+const AudioEqPanelSurface = memo(function AudioEqPanelSurface({
+  title,
+  targetLabel,
+  trackEq,
+  enabled,
+  onTrackEqChange,
+  onEnabledChange,
+  layoutMode = 'floating',
+  showWindowChrome = false,
+  onDock,
+  onClose,
+}: AudioEqPanelSurfaceProps) {
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+
+  const handleRootRef = useCallback((node: HTMLDivElement | null) => {
+    setPortalContainer(node?.ownerDocument.body ?? null);
+  }, []);
+
+  return (
+    <div ref={handleRootRef} className="flex h-full min-h-0 flex-col bg-[#1c1f25] text-zinc-100">
+      {showWindowChrome ? (
+        <div className="flex items-center justify-between gap-2 border-b border-[#3a3d45] bg-[#20242a] px-2 py-1.5">
+          <span className="min-w-0 text-xs font-mono uppercase tracking-[0.12em] text-zinc-400">
+            {title}
+          </span>
+          <div className="flex items-center gap-1">
+            {onDock ? (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-100"
+                onClick={onDock}
+              >
+                Dock
+              </button>
+            ) : null}
+            {onClose ? (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-100"
+                onClick={onClose}
+              >
+                Close
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <AudioEqPanelContent
+          targetLabel={targetLabel}
+          trackEq={trackEq}
+          enabled={enabled}
+          onTrackEqChange={onTrackEqChange}
+          onEnabledChange={onEnabledChange}
+          portalContainer={portalContainer}
+          layoutMode={layoutMode}
+        />
+      </div>
+    </div>
+  );
+});
 
 export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const [panelMode, setPanelMode] = useState<PanelMode>('meter');
   const [eqPanelTarget, setEqPanelTarget] = useState<EqPanelTarget | null>(null);
+  const [eqPanelDetached, setEqPanelDetached] = useState(false);
   const mixerFloating = useEditorStore((s) => s.mixerFloating);
   const setMixerFloating = useEditorStore((s) => s.setMixerFloating);
   const [trackSnapshotVersion, setTrackSnapshotVersion] = useState(0);
+  const eqDetachedWindowRef = useRef<Window | null>(null);
 
   const tracks = useTimelineStore((s) => s.tracks);
   const transitions = useTimelineStore((s) => s.transitions);
@@ -558,6 +674,54 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     );
   }, [busAudioEq, setBusAudioEq]);
 
+  const ensureDetachedEqWindow = useCallback(() => {
+    const existingWindow = eqDetachedWindowRef.current;
+    if (existingWindow && !existingWindow.closed) {
+      existingWindow.focus();
+      return true;
+    }
+
+    const fallbackBounds: DetachedWindowBounds = {
+      left: window.screenX + 120,
+      top: window.screenY + 80,
+      width: DETACHED_EQ_DEFAULT_BOUNDS.width,
+      height: DETACHED_EQ_DEFAULT_BOUNDS.height,
+    };
+    const bounds = loadDetachedWindowBounds(DETACHED_EQ_STORAGE_KEY, fallbackBounds);
+    const nextWindow = window.open(
+      '',
+      '',
+      [
+        `width=${bounds.width}`,
+        `height=${bounds.height}`,
+        `left=${bounds.left}`,
+        `top=${bounds.top}`,
+        'menubar=no',
+        'toolbar=no',
+        'location=no',
+        'status=no',
+      ].join(','),
+    );
+
+    if (!nextWindow) {
+      setEqPanelDetached(false);
+      return false;
+    }
+
+    eqDetachedWindowRef.current = nextWindow;
+    return true;
+  }, []);
+
+  const handleEqPopOut = useCallback(() => {
+    if (!ensureDetachedEqWindow()) return;
+    setEqPanelDetached(true);
+  }, [ensureDetachedEqWindow]);
+
+  const handleEqDock = useCallback(() => {
+    eqDetachedWindowRef.current = null;
+    setEqPanelDetached(false);
+  }, []);
+
   // Collect all item IDs for a track (needed for live gain bridging)
   const getTrackItemIds = useCallback((trackId: string): string[] => {
     const items = useItemsStore.getState().itemsByTrackId[trackId];
@@ -642,17 +806,25 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       return;
     }
 
+    if (eqPanelDetached && !ensureDetachedEqWindow()) {
+      return;
+    }
+
     const targetTrack = useItemsStore.getState().tracks.find((track) => track.id === trackId);
     if (targetTrack && !targetTrack.audioEq) {
       handleTrackEqEnabledChange(trackId, true);
     }
 
     setEqPanelTarget({ kind: 'track', trackId });
-  }, [eqPanelTarget, handleTrackEqEnabledChange]);
+  }, [ensureDetachedEqWindow, eqPanelDetached, eqPanelTarget, handleTrackEqEnabledChange]);
 
   const handleBusEqToggle = useCallback(() => {
     if (eqPanelTarget?.kind === 'bus') {
       setEqPanelTarget(null);
+      return;
+    }
+
+    if (eqPanelDetached && !ensureDetachedEqWindow()) {
       return;
     }
 
@@ -661,7 +833,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     }
 
     setEqPanelTarget({ kind: 'bus' });
-  }, [eqPanelTarget, handleBusEqEnabledChange]);
+  }, [ensureDetachedEqWindow, eqPanelDetached, eqPanelTarget, handleBusEqEnabledChange]);
 
   // ---------------------------------------------------------------------------
   // Master volume (dB <-> linear gain for bus fader)
@@ -715,6 +887,30 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     </DropdownMenu>
   );
 
+  const eqPanelContentProps = useMemo(() => {
+    if (!eqPanelDescriptor) return null;
+
+    return {
+      targetLabel: eqPanelDescriptor.targetLabel,
+      trackEq: 'trackEq' in eqPanelDescriptor
+        ? eqPanelDescriptor.trackEq
+        : ('busEq' in eqPanelDescriptor ? eqPanelDescriptor.busEq : undefined),
+      enabled: eqPanelDescriptor.eqEnabled,
+      onTrackEqChange: 'trackId' in eqPanelDescriptor
+        ? (patch: AudioEqPatch) => handleTrackEqChange(eqPanelDescriptor.trackId, patch)
+        : ('busEq' in eqPanelDescriptor ? handleBusEqChange : undefined),
+      onEnabledChange: 'trackId' in eqPanelDescriptor
+        ? (enabled: boolean) => handleTrackEqEnabledChange(eqPanelDescriptor.trackId, enabled)
+        : ('busEq' in eqPanelDescriptor ? handleBusEqEnabledChange : undefined),
+    };
+  }, [
+    eqPanelDescriptor,
+    handleBusEqChange,
+    handleBusEqEnabledChange,
+    handleTrackEqChange,
+    handleTrackEqEnabledChange,
+  ]);
+
   // ---------------------------------------------------------------------------
   // Floating mixer (rendered via portal, independent of panel mode)
   // ---------------------------------------------------------------------------
@@ -749,28 +945,59 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     </FloatingPanel>
   ) : null;
 
-  const floatingEqPanel = eqPanelDescriptor ? (
+  const floatingEqPanel = eqPanelDescriptor && eqPanelContentProps && !eqPanelDetached ? (
     <FloatingPanel
       title={`Equalizer - ${eqPanelDescriptor.title}`}
       defaultBounds={FLOATING_EQ_DEFAULT_BOUNDS}
-      minWidth={760}
-      minHeight={460}
+      minWidth={FLOATING_EQ_DEFAULT_BOUNDS.width}
       storageKey={FLOATING_EQ_STORAGE_KEY}
+      resizable={false}
+      autoHeight
       onClose={() => setEqPanelTarget(null)}
+      headerExtra={(
+        <button
+          type="button"
+          className="rounded px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-100"
+          onClick={handleEqPopOut}
+        >
+          Pop Out
+        </button>
+      )}
       className="rounded-[6px] border-[#3a3d45] bg-[#1c1f25]"
     >
-      <AudioEqPanelContent
-        targetLabel={eqPanelDescriptor.targetLabel}
-        trackEq={'trackEq' in eqPanelDescriptor ? eqPanelDescriptor.trackEq : ('busEq' in eqPanelDescriptor ? eqPanelDescriptor.busEq : undefined)}
-        enabled={eqPanelDescriptor.eqEnabled}
-        onTrackEqChange={'trackId' in eqPanelDescriptor
-          ? (patch) => handleTrackEqChange((eqPanelDescriptor as { trackId: string }).trackId, patch)
-          : ('busEq' in eqPanelDescriptor ? handleBusEqChange : undefined)}
-        onEnabledChange={'trackId' in eqPanelDescriptor
-          ? (enabled) => handleTrackEqEnabledChange((eqPanelDescriptor as { trackId: string }).trackId, enabled)
-          : ('busEq' in eqPanelDescriptor ? handleBusEqEnabledChange : undefined)}
+      <AudioEqPanelSurface
+        title={`Equalizer - ${eqPanelDescriptor.title}`}
+        layoutMode="floating"
+        {...eqPanelContentProps}
       />
     </FloatingPanel>
+  ) : null;
+
+  const detachedEqPanel = eqPanelDescriptor && eqPanelContentProps && eqPanelDetached ? (
+    <WindowPortal
+      title={`Equalizer - ${eqPanelDescriptor.title}`}
+      width={DETACHED_EQ_DEFAULT_BOUNDS.width}
+      height={DETACHED_EQ_DEFAULT_BOUNDS.height}
+      storageKey={DETACHED_EQ_STORAGE_KEY}
+      externalWindow={eqDetachedWindowRef.current}
+      onBlocked={() => {
+        eqDetachedWindowRef.current = null;
+        setEqPanelDetached(false);
+      }}
+      onClose={() => {
+        eqDetachedWindowRef.current = null;
+        setEqPanelTarget(null);
+      }}
+    >
+      <AudioEqPanelSurface
+        title={`Equalizer - ${eqPanelDescriptor.title}`}
+        layoutMode="detached"
+        showWindowChrome
+        onDock={handleEqDock}
+        onClose={() => setEqPanelTarget(null)}
+        {...eqPanelContentProps}
+      />
+    </WindowPortal>
   ) : null;
 
   // ---------------------------------------------------------------------------
@@ -781,6 +1008,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     return (
       <>
         {floatingEqPanel}
+        {detachedEqPanel}
         <AudioMixerView
           tracks={mixerTracks}
           perTrackLevels={perTrackLevels}
@@ -814,6 +1042,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   return (
     <>
     {floatingEqPanel}
+    {detachedEqPanel}
     {floatingMixer}
     <aside
       className="panel-bg border-l border-border flex h-full flex-col overflow-hidden"

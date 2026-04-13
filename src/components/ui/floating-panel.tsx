@@ -34,6 +34,10 @@ export interface FloatingPanelProps {
   minHeight?: number;
   /** localStorage key for persisting position & size */
   storageKey?: string;
+  /** Whether the panel can be resized */
+  resizable?: boolean;
+  /** When true, panel height fits content instead of using a fixed value */
+  autoHeight?: boolean;
   /** Called when the panel requests to close / dock */
   onClose?: () => void;
   /** Additional className on the outer container */
@@ -109,26 +113,32 @@ export const FloatingPanel = memo(function FloatingPanel({
   minWidth = 160,
   minHeight = 200,
   storageKey,
+  resizable = true,
+  autoHeight = false,
   onClose,
   className = '',
 }: FloatingPanelProps) {
   const [bounds, setBounds] = useState<FloatingPanelBounds>(() => {
     const initial = storageKey ? loadBounds(storageKey, defaultBounds) : defaultBounds;
-    // Auto-position: x/y of -1 means "place at bottom-right"
+    // When autoHeight, use a small placeholder height for initial Y positioning
+    // so the panel isn't clamped too far up. Actual height comes from content.
+    const heightForLayout = autoHeight ? 100 : initial.height;
     const resolved = {
       ...initial,
       x: initial.x < 0 ? window.innerWidth - initial.width - EDGE_MARGIN * 4 : initial.x,
-      y: initial.y < 0 ? window.innerHeight - initial.height - EDGE_MARGIN * 4 : initial.y,
+      y: initial.y < 0 ? window.innerHeight - heightForLayout - EDGE_MARGIN * 4 : initial.y,
     };
     return clampToViewport({
       ...resolved,
       width: Math.max(minWidth, resolved.width),
-      height: Math.max(minHeight, initial.height),
+      height: autoHeight ? heightForLayout : Math.max(minHeight, initial.height),
     });
   });
 
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
+
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const dragRef = useRef<{
     type: 'move' | 'resize';
@@ -138,21 +148,23 @@ export const FloatingPanel = memo(function FloatingPanel({
     startBounds: FloatingPanelBounds;
   } | null>(null);
 
-  // Persist on change
   useEffect(() => {
     if (storageKey) saveBounds(storageKey, bounds);
   }, [bounds, storageKey]);
 
-  // Viewport resize clamp
   useEffect(() => {
     const handleResize = () => {
-      setBounds((prev) => clampToViewport(prev));
+      setBounds((prev) => {
+        const effectiveHeight = autoHeight && panelRef.current
+          ? panelRef.current.offsetHeight
+          : prev.height;
+        return clampToViewport({ ...prev, height: effectiveHeight });
+      });
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [autoHeight]);
 
-  // Global pointer handlers for drag/resize
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       const drag = dragRef.current;
@@ -164,11 +176,13 @@ export const FloatingPanel = memo(function FloatingPanel({
       const s = drag.startBounds;
 
       if (drag.type === 'move') {
-        setBounds(clampToViewport({ x: s.x + dx, y: s.y + dy, width: s.width, height: s.height }));
+        const effectiveHeight = autoHeight && panelRef.current
+          ? panelRef.current.offsetHeight
+          : s.height;
+        setBounds(clampToViewport({ x: s.x + dx, y: s.y + dy, width: s.width, height: effectiveHeight }));
         return;
       }
 
-      // Resize
       let { x, y, width, height } = s;
       const edge = drag.edge!;
 
@@ -198,9 +212,8 @@ export const FloatingPanel = memo(function FloatingPanel({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [minWidth, minHeight]);
+  }, [minHeight, minWidth]);
 
-  // Drag start on title bar
   const handleTitlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     dragRef.current = {
@@ -211,8 +224,8 @@ export const FloatingPanel = memo(function FloatingPanel({
     };
   }, []);
 
-  // Resize start on edges
   const handleResizePointerDown = useCallback((edge: ResizeEdge, e: React.PointerEvent) => {
+    if (!resizable) return;
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = {
@@ -222,7 +235,7 @@ export const FloatingPanel = memo(function FloatingPanel({
       startY: e.clientY,
       startBounds: { ...boundsRef.current },
     };
-  }, []);
+  }, [resizable]);
 
   const resizeHandle = (edge: ResizeEdge, positionClass: string) => (
     <div
@@ -234,26 +247,28 @@ export const FloatingPanel = memo(function FloatingPanel({
 
   const panel = (
     <div
+      ref={panelRef}
       className={`fixed z-40 flex flex-col rounded-lg border border-border bg-background shadow-2xl shadow-black/50 overflow-hidden ${className}`}
       style={{
         left: bounds.x,
         top: bounds.y,
         width: bounds.width,
-        height: bounds.height,
+        ...(autoHeight ? {} : { height: bounds.height }),
       }}
     >
-      {/* Resize handles — edges */}
-      {resizeHandle('n', 'top-0 left-2 right-2 h-[4px]')}
-      {resizeHandle('s', 'bottom-0 left-2 right-2 h-[4px]')}
-      {resizeHandle('e', 'right-0 top-2 bottom-2 w-[4px]')}
-      {resizeHandle('w', 'left-0 top-2 bottom-2 w-[4px]')}
-      {/* Resize handles — corners */}
-      {resizeHandle('nw', 'top-0 left-0 w-[8px] h-[8px]')}
-      {resizeHandle('ne', 'top-0 right-0 w-[8px] h-[8px]')}
-      {resizeHandle('sw', 'bottom-0 left-0 w-[8px] h-[8px]')}
-      {resizeHandle('se', 'bottom-0 right-0 w-[8px] h-[8px]')}
+      {resizable ? (
+        <>
+          {resizeHandle('n', 'top-0 left-2 right-2 h-[4px]')}
+          {resizeHandle('s', 'bottom-0 left-2 right-2 h-[4px]')}
+          {resizeHandle('e', 'right-0 top-2 bottom-2 w-[4px]')}
+          {resizeHandle('w', 'left-0 top-2 bottom-2 w-[4px]')}
+          {resizeHandle('nw', 'top-0 left-0 w-[8px] h-[8px]')}
+          {resizeHandle('ne', 'top-0 right-0 w-[8px] h-[8px]')}
+          {resizeHandle('sw', 'bottom-0 left-0 w-[8px] h-[8px]')}
+          {resizeHandle('se', 'bottom-0 right-0 w-[8px] h-[8px]')}
+        </>
+      ) : null}
 
-      {/* Title bar — drag handle */}
       <div
         className="flex items-center justify-between gap-2 border-b border-border bg-secondary/30 px-2 py-1.5 cursor-grab active:cursor-grabbing select-none shrink-0"
         onPointerDown={handleTitlePointerDown}
@@ -276,8 +291,7 @@ export const FloatingPanel = memo(function FloatingPanel({
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className={autoHeight ? 'overflow-hidden' : 'flex-1 min-h-0 overflow-hidden'}>
         {children}
       </div>
     </div>

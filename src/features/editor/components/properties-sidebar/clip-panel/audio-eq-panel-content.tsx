@@ -76,6 +76,8 @@ interface AudioEqPanelContentProps {
   enabled?: boolean;
   onTrackEqChange?: (patch: AudioEqPatch) => void;
   onEnabledChange?: (enabled: boolean) => void;
+  portalContainer?: HTMLElement | null;
+  layoutMode?: 'floating' | 'detached';
 }
 
 type FilterType = 'low-shelf' | 'peaking' | 'high-shelf' | 'high-pass' | 'low-pass' | 'notch';
@@ -120,10 +122,12 @@ function FilterTypeSelect({
   value,
   options,
   onChange,
+  portalContainer,
 }: {
   value: FilterType;
   options: ReadonlyArray<FilterType>;
   onChange: (value: FilterType) => void;
+  portalContainer?: HTMLElement | null;
 }) {
   return (
     <DropdownMenu modal={false}>
@@ -137,7 +141,13 @@ function FilterTypeSelect({
           <ChevronDown className="h-3 w-3 opacity-60" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="bottom" sideOffset={4} className="z-[80] w-14 min-w-14 rounded-[4px] border-[#2e2e31] bg-[#151517] p-1">
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        sideOffset={4}
+        container={portalContainer ?? undefined}
+        className="z-[80] w-14 min-w-14 rounded-[4px] border-[#2e2e31] bg-[#151517] p-1"
+      >
         {options.map((option) => (
           <DropdownMenuItem
             key={option}
@@ -251,6 +261,7 @@ interface EqOutputGainControlProps {
   onChange: (value: number) => void;
   onLiveChange: (value: number) => void;
   disabled?: boolean;
+  compact?: boolean;
 }
 
 function EqOutputGainControl({
@@ -258,12 +269,13 @@ function EqOutputGainControl({
   onChange,
   onLiveChange,
   disabled = false,
+  compact = false,
 }: EqOutputGainControlProps) {
   const [draftValue, setDraftValue] = useState<number | null>(null);
   const resolvedValue = value === 'mixed' ? 0 : value;
   const displayValue = draftValue ?? resolvedValue;
   const range = AUDIO_EQ_GAIN_DB_MAX - AUDIO_EQ_GAIN_DB_MIN;
-  const thumbPercent = ((displayValue - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1)) * 100;
+  const thumbPercent = (1 - ((displayValue - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1))) * 100;
 
   const valueFromClientY = useCallback((clientY: number, rect: DOMRect) => {
     const normalized = 1 - ((clientY - rect.top) / Math.max(rect.height, 1));
@@ -276,8 +288,14 @@ function EqOutputGainControl({
   }, [onChange]);
 
   return (
-    <div className={cn('flex h-[clamp(288px,33vh,344px)] w-[60px] shrink-0 flex-col items-center px-1 pb-1 pt-1', disabled && 'opacity-50')}>
-      <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+    <div
+      className={cn(
+        'flex shrink-0 flex-col px-1 pb-1 pt-1',
+        compact ? 'w-[68px] h-[220px]' : 'w-[76px] h-[clamp(288px,33vh,344px)]',
+        disabled && 'opacity-50',
+      )}
+    >
+      <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500 text-center">
         Gain
       </div>
       <div
@@ -318,28 +336,30 @@ function EqOutputGainControl({
           target.addEventListener('pointercancel', handlePointerEnd);
         }}
       >
-        {[20, 10, 0, -10, -20].map((tick) => {
-          const tickPercent = ((tick - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1)) * 100;
-          return (
-            <div
-              key={tick}
-              className="pointer-events-none absolute inset-x-0"
-              style={{ bottom: `${tickPercent}%` }}
-            >
-              <div className="absolute left-2 right-5 h-px bg-[#34363d]" />
-              <span className="absolute right-0 -translate-y-1/2 text-[9px] font-mono text-zinc-500">
-                {tick > 0 ? `+${tick}` : tick}
-              </span>
-            </div>
-          );
-        })}
-        <div className="absolute bottom-0 left-[18px] top-0 w-px bg-[#2f3138]" />
-        <div
-          className="absolute left-[9px] h-7 w-[18px] -translate-y-1/2 rounded-[2px] border border-[#666a73] bg-[#b9bbc2] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-          style={{ top: `${100 - thumbPercent}%` }}
-        />
+        <div className="absolute inset-x-0 top-0 bottom-7">
+          {[20, 10, 0, -10, -20].map((tick) => {
+            const tickPercent = (1 - ((tick - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1))) * 100;
+            return (
+              <div
+                key={tick}
+                className="pointer-events-none absolute inset-x-0"
+                style={{ top: `${tickPercent}%` }}
+              >
+                <div className="absolute left-2 right-7 h-px -translate-y-1/2 bg-[#34363d]" />
+                <span className="absolute right-1 -translate-y-1/2 text-[9px] font-mono text-zinc-500 text-right">
+                  {tick > 0 ? `+${tick}` : tick}
+                </span>
+              </div>
+            );
+          })}
+          <div className="absolute bottom-0 left-[16px] top-0 w-px bg-[#2f3138]" />
+          <div
+            className="absolute left-[7px] h-7 w-[18px] -translate-y-1/2 rounded-[2px] border border-[#666a73] bg-[#b9bbc2] shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+            style={{ top: `${thumbPercent}%` }}
+          />
+        </div>
       </div>
-      <div className="mt-1 text-sm font-medium tabular-nums text-[#16d9ff]">
+      <div className="mt-0.5 min-h-[18px] w-full text-center text-sm font-medium tabular-nums text-[#16d9ff]">
         {formatOutputGainDb(displayValue)}
       </div>
     </div>
@@ -351,6 +371,8 @@ interface BandCardProps {
   filterType: FilterType;
   filterOptions?: ReadonlyArray<FilterType>;
   onFilterTypeChange?: (value: FilterType) => void;
+  portalContainer?: HTMLElement | null;
+  compact?: boolean;
   active?: boolean;
   onToggle?: () => void;
   onReset: () => void;
@@ -362,6 +384,8 @@ function BandCard({
   filterType,
   filterOptions,
   onFilterTypeChange,
+  portalContainer,
+  compact = false,
   active = true,
   onToggle,
   onReset,
@@ -374,14 +398,18 @@ function BandCard({
         !active && onToggle && 'opacity-50',
       )}
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 border-b border-[#28282b] px-2 py-2">
-        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+      <div className={cn(
+        'grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-[#28282b]',
+        compact ? 'gap-1 px-1.5 py-1.5' : 'gap-1.5 px-2 py-2',
+      )}>
+        <div className={cn('flex min-w-0 items-center overflow-hidden', compact ? 'gap-1' : 'gap-1.5')}>
           {onToggle ? (
             <button
               type="button"
               onClick={onToggle}
               className={cn(
-                'inline-flex h-5 min-w-[3.55rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors',
+                'inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full py-0.5 text-[9px] font-semibold leading-none transition-colors',
+                compact ? 'min-w-[3.05rem] px-1' : 'min-w-[3.55rem] px-1.5',
                 active
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
@@ -390,13 +418,21 @@ function BandCard({
               {title}
             </button>
           ) : (
-            <span className="inline-flex h-5 min-w-[3.55rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
+            <span className={cn(
+              'inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-primary py-0.5 text-[9px] font-semibold leading-none text-primary-foreground',
+              compact ? 'min-w-[3.05rem] px-1' : 'min-w-[3.55rem] px-1.5',
+            )}>
               {title}
             </span>
           )}
           <div className="shrink-0">
             {filterOptions && onFilterTypeChange ? (
-              <FilterTypeSelect value={filterType} options={filterOptions} onChange={onFilterTypeChange} />
+              <FilterTypeSelect
+                value={filterType}
+                options={filterOptions}
+                onChange={onFilterTypeChange}
+                portalContainer={portalContainer}
+              />
             ) : (
               <div className="flex h-6 items-center rounded-[4px] border border-[#2e2e31] bg-[#151517] px-1.5 text-zinc-400">
                 <FilterTypeGlyph type={filterType} />
@@ -406,15 +442,18 @@ function BandCard({
         </div>
         <button
           type="button"
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] text-zinc-600 transition-colors hover:bg-white/5 hover:text-zinc-300"
+          className={cn(
+            'inline-flex shrink-0 items-center justify-center rounded-[3px] text-zinc-600 transition-colors hover:bg-white/5 hover:text-zinc-300',
+            compact ? 'h-4 w-4' : 'h-5 w-5',
+          )}
           onClick={onReset}
           aria-label={`Reset ${title}`}
           title={`Reset ${title}`}
         >
-          <RotateCcw className="h-3 w-3" />
+          <RotateCcw className={cn(compact ? 'h-2.5 w-2.5' : 'h-3 w-3')} />
         </button>
       </div>
-      <div className="flex flex-1 flex-col gap-2 p-2">
+      <div className={cn('flex flex-1 flex-col', compact ? 'gap-1.5 p-1.5' : 'gap-2 p-2')}>
         {children}
       </div>
     </section>
@@ -428,8 +467,11 @@ export function AudioEqPanelContent({
   enabled = true,
   onTrackEqChange,
   onEnabledChange,
+  portalContainer,
+  layoutMode = 'floating',
 }: AudioEqPanelContentProps) {
   const isTrackMode = onTrackEqChange !== undefined;
+  const isDetachedLayout = layoutMode === 'detached';
   const eqEnabled = enabled !== false;
   const updateItem = useTimelineStore((s) => s.updateItem);
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew);
@@ -728,7 +770,7 @@ export function AudioEqPanelContent({
             <SelectTrigger className="h-8 w-[220px] border-[#2e2e31] bg-[#1e1e21] text-xs text-zinc-100">
               <SelectValue placeholder={eqPresetPlaceholder} />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent container={portalContainer ?? undefined}>
               {AUDIO_EQ_PRESETS.map((preset) => (
                 <SelectItem key={preset.id} value={preset.id} className="text-xs">
                   {preset.label}
@@ -760,7 +802,10 @@ export function AudioEqPanelContent({
                 settings={eqCurveSettings}
                 disabled={hasMixedEqSettings}
                 className="text-zinc-300"
-                graphClassName="h-[clamp(288px,33vh,344px)] bg-[#141416]"
+                graphClassName={cn(
+                  'bg-[#141416]',
+                  isDetachedLayout ? 'h-[clamp(288px,33vh,344px)]' : 'h-[220px]',
+                )}
                 onLiveChange={handleEqPatchLiveChange}
                 onChange={handleEqPatchChange}
               />
@@ -768,19 +813,30 @@ export function AudioEqPanelContent({
             <EqOutputGainControl
               value={eqOutputGainDb}
               disabled={hasMixedEqSettings}
+              compact={!isDetachedLayout}
               onLiveChange={(value) => handleEqPatchLiveChange({ audioEqOutputGainDb: value })}
               onChange={(value) => handleEqFieldChange('audioEqOutputGainDb', value)}
             />
           </div>
         </div>
 
-        <div className="space-y-3 p-3">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+        <div className={cn(isDetachedLayout ? 'space-y-3 p-3' : 'space-y-2 p-2')}>
+          <div className={cn(isDetachedLayout && 'overflow-x-auto pb-1')}>
+            <div
+              className={cn(
+                'grid',
+                isDetachedLayout
+                  ? 'min-w-[1120px] grid-cols-6 gap-2'
+                  : 'grid-cols-6 gap-1',
+              )}
+            >
             <BandCard
               title="Band 1"
               filterType={eqBand1Type === 'mixed' ? 'high-pass' : eqBand1Type}
               filterOptions={BAND1_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqBand1Type', value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqBand1Enabled === 'mixed' ? false : eqBand1Enabled}
               onToggle={() => handleEqFieldChange('audioEqBand1Enabled', eqBand1Enabled === 'mixed' ? true : !eqBand1Enabled)}
               onReset={() => handleEqPatchChange({
@@ -827,6 +883,8 @@ export function AudioEqPanelContent({
               filterType={eqLowType === 'mixed' ? 'low-shelf' : eqLowType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqLowType', value === 'low-pass' || value === 'high-pass' ? 'low-shelf' : value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqLowEnabled === 'mixed' ? false : eqLowEnabled}
               onToggle={() => handleEqFieldChange('audioEqLowEnabled', eqLowEnabled === 'mixed' ? true : !eqLowEnabled)}
               onReset={() => handleEqPatchChange({ audioEqLowEnabled: true, audioEqLowType: 'low-shelf', audioEqLowFrequencyHz: AUDIO_EQ_LOW_FREQUENCY_HZ, audioEqLowGainDb: 0, audioEqLowQ: AUDIO_EQ_LOW_MID_Q })}
@@ -865,6 +923,8 @@ export function AudioEqPanelContent({
               filterType={eqLowMidType === 'mixed' ? 'peaking' : eqLowMidType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqLowMidType', value === 'low-pass' || value === 'high-pass' ? 'peaking' : value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqLowMidEnabled === 'mixed' ? false : eqLowMidEnabled}
               onToggle={() => handleEqFieldChange('audioEqLowMidEnabled', eqLowMidEnabled === 'mixed' ? true : !eqLowMidEnabled)}
               onReset={() => handleEqPatchChange({ audioEqLowMidEnabled: true, audioEqLowMidType: 'peaking', audioEqLowMidFrequencyHz: AUDIO_EQ_LOW_MID_FREQUENCY_HZ, audioEqLowMidGainDb: 0, audioEqLowMidQ: AUDIO_EQ_LOW_MID_Q })}
@@ -903,6 +963,8 @@ export function AudioEqPanelContent({
               filterType={eqHighMidType === 'mixed' ? 'peaking' : eqHighMidType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqHighMidType', value === 'low-pass' || value === 'high-pass' ? 'peaking' : value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqHighMidEnabled === 'mixed' ? false : eqHighMidEnabled}
               onToggle={() => handleEqFieldChange('audioEqHighMidEnabled', eqHighMidEnabled === 'mixed' ? true : !eqHighMidEnabled)}
               onReset={() => handleEqPatchChange({ audioEqHighMidEnabled: true, audioEqHighMidType: 'peaking', audioEqHighMidFrequencyHz: AUDIO_EQ_HIGH_MID_FREQUENCY_HZ, audioEqHighMidGainDb: 0, audioEqHighMidQ: AUDIO_EQ_HIGH_MID_Q })}
@@ -941,6 +1003,8 @@ export function AudioEqPanelContent({
               filterType={eqHighType === 'mixed' ? 'high-shelf' : eqHighType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqHighType', value === 'low-pass' || value === 'high-pass' ? 'high-shelf' : value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqHighEnabled === 'mixed' ? false : eqHighEnabled}
               onToggle={() => handleEqFieldChange('audioEqHighEnabled', eqHighEnabled === 'mixed' ? true : !eqHighEnabled)}
               onReset={() => handleEqPatchChange({ audioEqHighEnabled: true, audioEqHighType: 'high-shelf', audioEqHighFrequencyHz: AUDIO_EQ_HIGH_FREQUENCY_HZ, audioEqHighGainDb: 0, audioEqHighQ: AUDIO_EQ_HIGH_MID_Q })}
@@ -979,6 +1043,8 @@ export function AudioEqPanelContent({
               filterType={eqBand6Type === 'mixed' ? 'low-pass' : eqBand6Type}
               filterOptions={BAND6_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqBand6Type', value === 'high-pass' || value === 'notch' ? 'low-pass' : value)}
+              portalContainer={portalContainer}
+              compact={!isDetachedLayout}
               active={eqBand6Enabled === 'mixed' ? false : eqBand6Enabled}
               onToggle={() => handleEqFieldChange('audioEqBand6Enabled', eqBand6Enabled === 'mixed' ? true : !eqBand6Enabled)}
               onReset={() => handleEqPatchChange({
@@ -1019,11 +1085,10 @@ export function AudioEqPanelContent({
                 </>
               )}
             </BandCard>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
-
-

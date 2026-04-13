@@ -16,6 +16,10 @@ export interface WindowPortalProps {
   height?: number;
   /** localStorage key for persisting window position/size */
   storageKey?: string;
+  /** Reuse an already-opened window (useful for pop-out actions initiated by a click) */
+  externalWindow?: Window | null;
+  /** Called when opening a fresh external window is blocked */
+  onBlocked?: () => void;
   /** Called when the external window is closed by the user */
   onClose: () => void;
 }
@@ -107,12 +111,16 @@ export function WindowPortal({
   width = 400,
   height = 500,
   storageKey,
+  externalWindow: providedExternalWindow = null,
+  onBlocked,
   onClose,
 }: WindowPortalProps) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const externalWindowRef = useRef<Window | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onBlockedRef = useRef(onBlocked);
+  onBlockedRef.current = onBlocked;
   // Track whether the component is mounted. Used to distinguish real unmount
   // from StrictMode cleanup — we only close the window on real unmount.
   const mountedRef = useRef(true);
@@ -126,14 +134,9 @@ export function WindowPortal({
   useEffect(() => {
     mountedRef.current = true;
 
-    // Reuse window from previous mount (survives StrictMode double-mount)
-    let externalWindow = externalWindowRef.current;
-    if (externalWindow && !externalWindow.closed) {
-      const existingDiv = externalWindow.document.getElementById('window-portal-root');
-      if (existingDiv) {
-        setContainer(existingDiv as HTMLDivElement);
-      }
-    } else {
+    // Reuse a provided window or one from a previous mount (survives StrictMode double-mount)
+    let externalWindow = providedExternalWindow ?? externalWindowRef.current;
+    if (!(externalWindow && !externalWindow.closed)) {
       // Open fresh window
       const defaultBounds: WindowBounds = {
         left: window.screenX + 100,
@@ -156,31 +159,34 @@ export function WindowPortal({
 
       externalWindow = window.open('', '', features);
       if (!externalWindow) {
-        onCloseRef.current();
+        onBlockedRef.current?.();
         return;
       }
-
-      externalWindowRef.current = externalWindow;
-      externalWindow.document.title = title;
-
-      // Set up the document body
-      externalWindow.document.body.style.margin = '0';
-      externalWindow.document.body.style.padding = '0';
-      externalWindow.document.body.style.overflow = 'hidden';
-
-      // Copy all styles from parent
-      copyStyles(document, externalWindow.document);
-
-      // Create container for React portal
-      const div = externalWindow.document.createElement('div');
-      div.id = 'window-portal-root';
-      div.style.width = '100vw';
-      div.style.height = '100vh';
-      div.style.overflow = 'hidden';
-      externalWindow.document.body.appendChild(div);
-
-      setContainer(div);
     }
+
+    externalWindowRef.current = externalWindow;
+    externalWindow.document.title = title;
+    externalWindow.document.body.style.margin = '0';
+    externalWindow.document.body.style.padding = '0';
+    externalWindow.document.body.style.overflow = 'hidden';
+
+    if (!externalWindow.document.getElementById('window-portal-style-marker')) {
+      copyStyles(document, externalWindow.document);
+      const styleMarker = externalWindow.document.createElement('meta');
+      styleMarker.id = 'window-portal-style-marker';
+      externalWindow.document.head.appendChild(styleMarker);
+    }
+
+    let root = externalWindow.document.getElementById('window-portal-root') as HTMLDivElement | null;
+    if (!root) {
+      root = externalWindow.document.createElement('div');
+      root.id = 'window-portal-root';
+      root.style.width = '100vw';
+      root.style.height = '100vh';
+      root.style.overflow = 'hidden';
+      externalWindow.document.body.appendChild(root);
+    }
+    setContainer(root);
 
     // Save bounds on close & resize
     const win = externalWindow;
@@ -221,7 +227,7 @@ export function WindowPortal({
         }
       }, 50);
     };
-  }, []);
+  }, [height, providedExternalWindow, storageKey, width]);
 
   if (!container) return null;
   return createPortal(children, container);
