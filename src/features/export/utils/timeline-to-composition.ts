@@ -1,5 +1,6 @@
 ﻿import type { TimelineTrack, TimelineItem } from '@/types/timeline';
 import type { Transition } from '@/types/transition';
+import type { AudioEqSettings } from '@/types/audio';
 import type { CompositionInputProps } from '@/types/export';
 import type { ItemKeyframes, Keyframe, PropertyKeyframes } from '@/types/keyframe';
 import {
@@ -34,7 +35,8 @@ export function convertTimelineToComposition(
   inPoint?: number | null,
   outPoint?: number | null,
   keyframes?: ItemKeyframes[],
-  backgroundColor?: string
+  backgroundColor?: string,
+  busAudioEq?: AudioEqSettings,
 ): CompositionInputProps {
   // Resolve group gate behavior: parent group mute/hide propagates to children.
   // Also filters out group container tracks (which hold no items).
@@ -195,6 +197,7 @@ export function convertTimelineToComposition(
     transitions: processedTransitions,
     keyframes: processedKeyframes,
     backgroundColor,
+    busAudioEq,
   };
 }
 

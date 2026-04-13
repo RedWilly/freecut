@@ -548,8 +548,9 @@ export async function saveTimeline(projectId: string): Promise<void> {
   const transitionsState = useTransitionsStore.getState();
   const keyframesState = useKeyframesStore.getState();
   const markersState = useMarkersStore.getState();
-  const currentFrame = usePlaybackStore.getState().currentFrame;
-  const zoomLevel = useZoomStore.getState().level;
+    const currentFrame = usePlaybackStore.getState().currentFrame;
+    const busAudioEq = usePlaybackStore.getState().busAudioEq;
+    const zoomLevel = useZoomStore.getState().level;
 
   event.merge({
     itemCount: itemsState.items.length,
@@ -577,6 +578,7 @@ export async function saveTimeline(projectId: string): Promise<void> {
     const timeline: ProjectTimeline = {
       tracks: itemsState.tracks as ProjectTimeline['tracks'],
       items: itemsState.items as ProjectTimeline['items'],
+      ...(busAudioEq && { busAudioEq }),
       currentFrame,
       zoomLevel,
       scrollPosition: settingsState.scrollPosition,
@@ -627,6 +629,7 @@ export async function saveTimeline(projectId: string): Promise<void> {
             height: c.height,
             durationInFrames: c.durationInFrames,
             ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
+            ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
           })),
         };
       })(),
@@ -838,6 +841,7 @@ export async function loadTimeline(
       useMarkersStore.getState().setInPoint(sanitizedInOutPoints.inPoint);
       useMarkersStore.getState().setOutPoint(sanitizedInOutPoints.outPoint);
       useTimelineSettingsStore.getState().setScrollPosition(t.scrollPosition || 0);
+      usePlaybackStore.getState().setBusAudioEq(t.busAudioEq);
 
       // Restore sub-compositions
       if (t.compositions && t.compositions.length > 0) {
@@ -854,6 +858,7 @@ export async function loadTimeline(
             height: c.height,
             durationInFrames: c.durationInFrames,
             ...(c.backgroundColor && { backgroundColor: c.backgroundColor }),
+            ...(c.busAudioEq && { busAudioEq: c.busAudioEq }),
           }))
         );
       } else {
@@ -890,6 +895,7 @@ export async function loadTimeline(
       useTimelineSettingsStore.getState().setScrollPosition(0);
       useZoomStore.getState().setZoomLevel(1);
       usePlaybackStore.getState().setCurrentFrame(0);
+      usePlaybackStore.getState().setBusAudioEq(undefined);
     }
 
     // Common setup for both cases

@@ -68,6 +68,7 @@ export function usePreviewViewModel({
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const zoom = usePlaybackStore((s) => s.zoom);
   const useProxy = usePlaybackStore((s) => s.useProxy);
+  const busAudioEq = usePlaybackStore((s) => s.busAudioEq);
   const blobUrlVersion = useBlobUrlVersion();
   const proxyReadyCount = useMediaLibraryStore((s) => {
     let count = 0;
@@ -194,6 +195,7 @@ export function usePreviewViewModel({
     isPlaying,
     zoom,
     useProxy,
+    busAudioEq,
     blobUrlVersion,
     proxyReadyCount,
     playerSize,

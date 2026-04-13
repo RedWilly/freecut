@@ -14,6 +14,7 @@ import {
   findAudioEqPresetId,
   getAudioEqPresetById,
   getAudioEqResponseGainDb,
+  prependResolvedAudioEqSources,
   resolveAudioEqSettings,
   resolvePreviewAudioEqStages,
 } from './audio-eq';
@@ -72,6 +73,17 @@ describe('audio-eq', () => {
       highMidGainDb: 8,
       highGainDb: 6,
     }));
+  });
+
+  it('prepends stage sources without disturbing the clip-owned stage order', () => {
+    const clipStage = resolveAudioEqSettings({ highMidGainDb: 3, highMidFrequencyHz: 2400 });
+    const prepended = prependResolvedAudioEqSources([clipStage], { lowGainDb: 2 }, { lowMidGainDb: -1.5 });
+
+    expect(prepended).toEqual([
+      resolveAudioEqSettings({ lowGainDb: 2 }),
+      resolveAudioEqSettings({ lowMidGainDb: -1.5 }),
+      clipStage,
+    ]);
   });
 
   it('compares stage arrays structurally', () => {

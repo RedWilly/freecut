@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
+import type { AudioEqSettings } from '@/types/audio';
 import type { Transition } from '@/types/transition';
 import type { ItemKeyframes } from '@/types/keyframe';
 import { normalizeSubComposition } from '../utils/sub-composition-normalizer';
@@ -21,6 +22,7 @@ export interface SubComposition {
   height: number;
   durationInFrames: number;
   backgroundColor?: string;
+  busAudioEq?: AudioEqSettings;
 }
 
 function buildCompositionsMediaDependencyIds(compositions: SubComposition[]): string[] {

@@ -9,6 +9,7 @@ import type {
   TimelineTrack,
   VideoItem,
 } from '@/types/timeline';
+import type { AudioEqSettings } from '@/types/audio';
 import type { Transition } from '@/types/transition';
 import {
   resolveTransitionWindows,
@@ -40,6 +41,7 @@ export type VisualTrackItem = (VideoItem | ImageItem) & {
   zIndex: number;
   muted: boolean;
   trackVolumeDb: number;
+  trackAudioEq?: AudioEqSettings;
   trackOrder: number;
   trackVisible: boolean;
 };
@@ -49,6 +51,7 @@ export type VideoTrackItem = Extract<VisualTrackItem, { type: 'video' }>;
 export type AudioTrackItem = AudioItem & {
   muted: boolean;
   trackVolumeDb: number;
+  trackAudioEq?: AudioEqSettings;
   trackVisible: boolean;
 };
 
@@ -216,6 +219,7 @@ export function collectVisualTrackItems({
         zIndex: (maxOrder - (track.order ?? 0)) * 1000,
         muted: track.muted ?? false,
         trackVolumeDb: track.volume ?? 0,
+        trackAudioEq: track.audioEq,
         trackOrder: track.order ?? 0,
         trackVisible: visibleTrackIds.has(track.id),
       }))
@@ -236,6 +240,7 @@ export function collectAudioTrackItems({
         ...item,
         muted: track.muted,
         trackVolumeDb: track.volume ?? 0,
+        trackAudioEq: track.audioEq,
         trackVisible: visibleTrackIds.has(track.id),
       }))
   );

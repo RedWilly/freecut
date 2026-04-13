@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
 import type { CompositionInputProps } from '@/types/export';
+import type { AudioEqSettings } from '@/types/audio';
 import type { ItemEffect } from '@/types/effects';
 import type { ItemKeyframes } from '@/types/keyframe';
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
@@ -29,6 +30,7 @@ interface BuildPreviewCompositionDataParams {
   items: TimelineItem[];
   keyframes: ItemKeyframes[];
   transitions: CompositionInputProps['transitions'];
+  busAudioEq?: AudioEqSettings;
   resolvedUrls: ReadonlyMap<string, string>;
   useProxy: boolean;
   blobUrlVersion: number;
@@ -43,6 +45,7 @@ interface UsePreviewCompositionModelParams {
   items: TimelineItem[];
   keyframes: ItemKeyframes[];
   transitions: CompositionInputProps['transitions'];
+  busAudioEq?: AudioEqSettings;
   resolvedUrls: ReadonlyMap<string, string>;
   useProxy: boolean;
   proxyReadyCount: number;
@@ -91,6 +94,7 @@ export function usePreviewCompositionModel({
   items,
   keyframes,
   transitions,
+  busAudioEq,
   resolvedUrls,
   useProxy,
   proxyReadyCount,
@@ -118,12 +122,13 @@ export function usePreviewCompositionModel({
       items,
       keyframes,
       transitions,
+      busAudioEq,
       resolvedUrls,
       useProxy,
       blobUrlVersion,
       project,
     });
-  }, [blobUrlVersion, combinedTracks, fps, items, keyframes, project, proxyReadyCount, resolvedUrls, transitions, useProxy]);
+  }, [blobUrlVersion, busAudioEq, combinedTracks, fps, items, keyframes, project, proxyReadyCount, resolvedUrls, transitions, useProxy]);
 
   const getPreviewTransformOverride = useCallback((itemId: string): Partial<ResolvedTransform> | undefined => {
     const gizmoState = useGizmoStore.getState();
@@ -212,6 +217,7 @@ export function buildPreviewCompositionData({
   items,
   keyframes,
   transitions,
+  busAudioEq,
   resolvedUrls,
   useProxy,
   blobUrlVersion,
@@ -315,6 +321,7 @@ export function buildPreviewCompositionData({
     transitions,
     backgroundColor: project.backgroundColor,
     keyframes,
+    busAudioEq,
   };
   const playerRenderSize = {
     width: Math.max(2, project.width),
@@ -334,6 +341,7 @@ export function buildPreviewCompositionData({
     transitions,
     backgroundColor: project.backgroundColor,
     keyframes: fastScrubScaledKeyframes,
+    busAudioEq,
   };
   const fastScrubPreviewItems = fastScrubScaledTracks.flatMap((track) => track.items as TimelineItem[]);
 

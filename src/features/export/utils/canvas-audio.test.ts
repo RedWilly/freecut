@@ -725,4 +725,42 @@ describe('extractAudioSegments', () => {
     expect(mixed[steadyStateIndex]!).toBeCloseTo(0.1, 2);
     expect(mixed[overlapMidIndex]!).toBeLessThan(0.15);
   });
+
+  it('includes bus, track, and clip EQ stages in exported audio segments', () => {
+    const clip = makeAudioItem({
+      audioEqHighGainDb: 3,
+    });
+    const track = makeTrack({
+      id: 'track-a1',
+      order: 0,
+      kind: 'audio',
+      items: [clip],
+    });
+    track.audioEq = { lowGainDb: 4 };
+
+    const composition: CompositionInputProps = {
+      fps: 30,
+      durationInFrames: 90,
+      width: 1920,
+      height: 1080,
+      busAudioEq: {
+        highCutEnabled: true,
+        highCutFrequencyHz: 8000,
+      },
+      tracks: [track],
+      transitions: [],
+      keyframes: [],
+    };
+
+    const segments = extractAudioSegments(composition, composition.fps);
+
+    expect(segments[0]?.audioEqStages).toEqual([
+      expect.objectContaining({
+        highCutEnabled: true,
+        highCutFrequencyHz: 8000,
+      }),
+      expect.objectContaining({ lowGainDb: 4 }),
+      expect.objectContaining({ highGainDb: 3 }),
+    ]);
+  });
 });

@@ -1,4 +1,5 @@
 import type { AnimatableProperty, EasingType, EasingConfig } from './keyframe';
+import type { AudioEqSettings } from './audio';
 import type { Transition } from './transition';
 import type { CropSettings } from './transform';
 
@@ -43,12 +44,14 @@ export interface ProjectTimeline {
     muted: boolean;
     solo: boolean;
     volume?: number;
+    audioEq?: AudioEqSettings;
     color?: string;
     order: number;
     parentTrackId?: string;
     isGroup?: boolean;
     isCollapsed?: boolean;
   }>;
+  busAudioEq?: AudioEqSettings;
   items: Array<{
     id: string;
     trackId: string;
@@ -165,6 +168,7 @@ export interface ProjectTimeline {
     height: number;
     durationInFrames: number;
     backgroundColor?: string;
+    busAudioEq?: AudioEqSettings;
   }>;
   // Keyframe animations
   keyframes?: Array<{

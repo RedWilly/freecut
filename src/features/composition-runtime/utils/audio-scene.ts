@@ -4,7 +4,7 @@ import type { Transition } from '@/types/transition';
 import { timelineToSourceFrames, sourceToTimelineFrames } from '@/features/composition-runtime/deps/timeline';
 import { resolveTransitionWindowsForItems } from './scene-assembly';
 import type { AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
-import { appendResolvedAudioEqStage, areAudioEqStagesEqual, getAudioEqSettings } from '@/shared/utils/audio-eq';
+import { appendResolvedAudioEqSources, areAudioEqStagesEqual, getAudioEqSettings } from '@/shared/utils/audio-eq';
 import { clampAudioPitchCents, clampAudioPitchSemitones, getAudioPitchShiftSemitones } from '@/shared/utils/audio-pitch';
 
 type ContinuousAudioItem = {
@@ -26,12 +26,14 @@ type ContinuousAudioItem = {
 type StandaloneAudioItem = AudioItem & {
   muted: boolean;
   trackVolumeDb: number;
+  trackAudioEq?: import('@/types/audio').AudioEqSettings;
   trackVisible: boolean;
 };
 
 type TransitionAudioItem = (VideoItem | AudioItem) & {
   muted: boolean;
   trackVolumeDb: number;
+  trackAudioEq?: import('@/types/audio').AudioEqSettings;
   trackVisible: boolean;
 };
 
@@ -244,7 +246,7 @@ export function buildStandaloneAudioSegments(
       audioFadeOutCurveX: item.audioFadeOutCurveX ?? 0.52,
       audioPitchSemitones: clampAudioPitchSemitones(item.audioPitchSemitones ?? 0),
       audioPitchCents: clampAudioPitchCents(item.audioPitchCents ?? 0),
-      audioEqStages: appendResolvedAudioEqStage(undefined, getAudioEqSettings(item)),
+      audioEqStages: appendResolvedAudioEqSources(undefined, item.trackAudioEq, getAudioEqSettings(item)),
       clipFadeSpans: [buildClipFadeSpan({
         startFrame: 0,
         durationInFrames: item.durationInFrames,
@@ -445,7 +447,7 @@ export function buildTransitionVideoAudioSegments(
       audioFadeOutCurveX: item.audioFadeOutCurveX ?? 0.52,
       audioPitchSemitones: clampAudioPitchSemitones(item.audioPitchSemitones ?? 0),
       audioPitchCents: clampAudioPitchCents(item.audioPitchCents ?? 0),
-      audioEqStages: appendResolvedAudioEqStage(undefined, getAudioEqSettings(item)),
+      audioEqStages: appendResolvedAudioEqSources(undefined, item.trackAudioEq, getAudioEqSettings(item)),
       clipFadeSpans: [buildClipFadeSpan({
         startFrame: before,
         durationInFrames: item.durationInFrames,
@@ -580,6 +582,7 @@ type CompoundTransitionAudioItem = AudioItem & {
   compositionId: string;
   muted: boolean;
   trackVolumeDb: number;
+  trackAudioEq?: import('@/types/audio').AudioEqSettings;
   trackVisible: boolean;
 };
 

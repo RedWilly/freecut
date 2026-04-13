@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
+import type { AudioEqSettings } from '@/types/audio';
 import type { Transition } from '@/types/transition';
 import type { ItemKeyframes } from '@/types/keyframe';
 
@@ -28,6 +29,7 @@ interface StashedTimeline {
   keyframes: ItemKeyframes[];
   /** Playhead frame at the time of stashing, so we can restore it on exit */
   currentFrame: number;
+  busAudioEq?: AudioEqSettings;
 }
 
 interface CompositionNavigationState {
@@ -66,6 +68,7 @@ function captureCurrentTimeline(compositionId: string | null): StashedTimeline {
     transitions: useTransitionsStore.getState().transitions,
     keyframes: useKeyframesStore.getState().keyframes,
     currentFrame: usePlaybackStore.getState().currentFrame,
+    busAudioEq: usePlaybackStore.getState().busAudioEq,
   };
 }
 
@@ -77,6 +80,7 @@ function restoreTimeline(stash: StashedTimeline) {
   useKeyframesStore.getState().setKeyframes(stash.keyframes);
   useSelectionStore.getState().clearSelection();
   usePlaybackStore.getState().setCurrentFrame(stash.currentFrame);
+  usePlaybackStore.getState().setBusAudioEq(stash.busAudioEq);
 }
 
 /** Save current timeline data back to the compositions store (for sub-comps only). */
@@ -93,6 +97,7 @@ function saveCurrentToComposition(compositionId: string) {
     transitions: useTransitionsStore.getState().transitions,
     keyframes: useKeyframesStore.getState().keyframes,
     durationInFrames,
+    busAudioEq: usePlaybackStore.getState().busAudioEq,
   });
 }
 
@@ -106,6 +111,7 @@ function loadComposition(compositionId: string): boolean {
   useTransitionsStore.getState().setTransitions(subComp.transitions ?? []);
   useKeyframesStore.getState().setKeyframes(subComp.keyframes ?? []);
   useSelectionStore.getState().clearSelection();
+  usePlaybackStore.getState().setBusAudioEq(subComp.busAudioEq);
   return true;
 }
 

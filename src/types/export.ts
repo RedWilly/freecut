@@ -1,3 +1,4 @@
+import type { AudioEqSettings } from './audio';
 import type { TimelineTrack } from './timeline';
 import type { Transition } from './transition';
 import type { ItemKeyframes } from './keyframe';
@@ -39,4 +40,5 @@ export interface CompositionInputProps {
   transitions?: Transition[]; // Transitions between clips
   backgroundColor?: string; // Hex color for canvas background
   keyframes?: ItemKeyframes[]; // Keyframe animations for items
+  busAudioEq?: AudioEqSettings;
 }

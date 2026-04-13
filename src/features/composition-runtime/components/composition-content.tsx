@@ -17,6 +17,7 @@ import { KeyframesProvider } from '../contexts/keyframes-context';
 import { CompositionSpaceProvider, useCompositionSpace } from '../contexts/composition-space-context';
 import { useNestedMediaResolutionMode } from '../contexts/nested-media-resolution-context';
 import { clearMixerLiveGain } from '@/shared/state/mixer-live-gain';
+import { appendResolvedAudioEqSources } from '@/shared/utils/audio-eq';
 import { Item } from './item';
 import type { MaskInfo } from './item';
 import { StableVideoSequence, type StableVideoSequenceItem } from './stable-video-sequence';
@@ -320,6 +321,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
           ...subItem,
           zIndex: (maxTrackOrder - trackOrder) * 1000,
           muted: parentMuted || track.muted || linkedVideoIdsWithOwnedAudio.has(subItem.id),
+          trackAudioEq: track.audioEq,
           trackOrder,
           trackVisible: parentVisible,
         }));
@@ -332,6 +334,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
 
         return {
           trackId: track.id,
+          trackAudioEq: track.audioEq,
           trackOrder,
           trackVisible: parentVisible,
           muted: parentMuted || track.muted,
@@ -432,17 +435,17 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
         visibility: videoItem.trackVisible ? 'visible' : 'hidden',
       }}
     >
-      <Item
-        item={videoItem}
-        muted={videoItem.muted}
-        visible={videoItem.trackVisible}
-        masks={getMasksForTrackOrder(activeMaskInfos, videoItem.trackOrder)}
-        renderDepth={renderDepth}
-        audioGainMultiplier={effectiveAudioGainMultiplier}
-        audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
-        audioEqStages={audioEqStages}
-        audioPitchShiftSemitones={audioPitchShiftSemitones}
-      />
+        <Item
+          item={videoItem}
+          muted={videoItem.muted}
+          visible={videoItem.trackVisible}
+          masks={getMasksForTrackOrder(activeMaskInfos, videoItem.trackOrder)}
+          renderDepth={renderDepth}
+          audioGainMultiplier={effectiveAudioGainMultiplier}
+          audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
+          audioEqStages={appendResolvedAudioEqSources(audioEqStages, videoItem.trackAudioEq)}
+          audioPitchShiftSemitones={audioPitchShiftSemitones}
+        />
     </AbsoluteFill>
   ), [
     activeMaskInfos,
@@ -506,7 +509,7 @@ export const CompositionContent = React.memo<CompositionContentProps>(({ item, p
                         compositionRenderMode={subItem.type === 'composition' && hasLinkedAudioCompanion(resolvedItems, subItem) ? 'visual-only' : 'full'}
                         audioGainMultiplier={effectiveAudioGainMultiplier}
                         audioGainLiveItemIds={effectiveAudioGainLiveItemIds}
-                        audioEqStages={audioEqStages}
+                        audioEqStages={appendResolvedAudioEqSources(audioEqStages, track.trackAudioEq)}
                         audioPitchShiftSemitones={audioPitchShiftSemitones}
                       />
                     </Sequence>

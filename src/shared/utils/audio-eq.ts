@@ -81,19 +81,19 @@ export const AUDIO_EQ_LOW_CUT_MIN_FREQUENCY_HZ = 30;
 export const AUDIO_EQ_LOW_CUT_MAX_FREQUENCY_HZ = 399;
 export const AUDIO_EQ_LOW_FREQUENCY_HZ = 120;
 export const AUDIO_EQ_LOW_MIN_FREQUENCY_HZ = 30;
-export const AUDIO_EQ_LOW_MAX_FREQUENCY_HZ = 399;
+export const AUDIO_EQ_LOW_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_LOW_MID_FREQUENCY_HZ = 400;
-export const AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ = 100;
-export const AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ = 1500;
+export const AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_MID_FREQUENCY_HZ = 1000;
 export const AUDIO_EQ_MID_Q = 0.9;
 export const AUDIO_EQ_LOW_MID_Q = 1.1;
 export const AUDIO_EQ_HIGH_MID_FREQUENCY_HZ = 1600;
-export const AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ = 450;
-export const AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ = 8000;
+export const AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_MID_Q = 1.1;
 export const AUDIO_EQ_HIGH_FREQUENCY_HZ = 2800;
-export const AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ = 1400;
+export const AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ = 30;
 export const AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_CUT_MIN_FREQUENCY_HZ = 1400;
@@ -283,6 +283,54 @@ export function appendResolvedAudioEqStage(
   source?: AudioEqSettings | AudioEqFieldSource | null,
 ): ResolvedAudioEqSettings[] {
   return [...(stages ?? []), resolveAudioEqSettings(source)];
+}
+
+export function appendOptionalResolvedAudioEqStage(
+  stages: ReadonlyArray<ResolvedAudioEqSettings> | undefined,
+  source?: AudioEqSettings | AudioEqFieldSource | null,
+): ResolvedAudioEqSettings[] {
+  if (source == null) {
+    return [...(stages ?? [])];
+  }
+
+  return appendResolvedAudioEqStage(stages, source);
+}
+
+export function appendResolvedAudioEqSources(
+  stages: ReadonlyArray<ResolvedAudioEqSettings> | undefined,
+  ...sources: Array<AudioEqSettings | AudioEqFieldSource | null | undefined>
+): ResolvedAudioEqSettings[] {
+  let nextStages = [...(stages ?? [])];
+
+  for (const source of sources) {
+    if (source == null) continue;
+    nextStages = appendResolvedAudioEqStage(nextStages, source);
+  }
+
+  return nextStages;
+}
+
+export function prependResolvedAudioEqSources(
+  stages: ReadonlyArray<ResolvedAudioEqSettings> | undefined,
+  ...sources: Array<AudioEqSettings | AudioEqFieldSource | null | undefined>
+): ResolvedAudioEqSettings[] {
+  const prefixStages = appendResolvedAudioEqSources(undefined, ...sources);
+
+  if (prefixStages.length === 0) {
+    return [...(stages ?? [])];
+  }
+
+  return [...prefixStages, ...(stages ?? [])];
+}
+
+export function normalizeAudioEqSettings(
+  source?: AudioEqSettings | AudioEqFieldSource | null,
+): AudioEqSettings | undefined {
+  if (source == null) {
+    return undefined;
+  }
+
+  return resolveAudioEqSettings(source);
 }
 
 export function resolvePreviewAudioEqStages(

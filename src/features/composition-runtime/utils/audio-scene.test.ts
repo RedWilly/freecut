@@ -94,6 +94,30 @@ describe('audio scene', () => {
     }));
   });
 
+  it('includes track and clip EQ stages on standalone audio segments', () => {
+    const segments = buildStandaloneAudioSegments([
+      {
+        id: 'audio-1',
+        type: 'audio',
+        trackId: 'track-1',
+        from: 0,
+        durationInFrames: 30,
+        src: 'audio.mp3',
+        label: 'Audio 1',
+        muted: false,
+        trackVolumeDb: 0,
+        trackVisible: true,
+        trackAudioEq: { lowGainDb: 4 },
+        audioEqHighGainDb: 3,
+      },
+    ], 30);
+
+    expect(segments[0]?.audioEqStages).toEqual([
+      expect.objectContaining({ lowGainDb: 4 }),
+      expect.objectContaining({ highGainDb: 3 }),
+    ]);
+  });
+
   it('expands transition video audio segments with overlap fades', () => {
     const segments = buildTransitionVideoAudioSegments([
       {

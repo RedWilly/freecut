@@ -20,6 +20,7 @@ import {
 import { useVideoConfig } from '../hooks/use-player-compat';
 import { useTransitionParticipantSync } from '../hooks/use-transition-participant-sync';
 import type { TimelineItem, VideoItem } from '@/types/timeline';
+import type { AudioEqSettings } from '@/types/audio';
 import type { ResolvedTransitionWindow } from '@/domain/timeline/transitions/transition-planner';
 import { VideoContent } from './video-content';
 import {
@@ -33,7 +34,7 @@ import {
 import { buildTransitionShadowWarmupRequests } from '../utils/transition-shadow-warmup';
 import { createLogger } from '@/shared/logging/logger';
 import { useMediaLibraryStore } from '@/features/composition-runtime/deps/stores';
-import { appendResolvedAudioEqStage, getAudioEqSettings } from '@/shared/utils/audio-eq';
+import { appendResolvedAudioEqSources, getAudioEqSettings } from '@/shared/utils/audio-eq';
 
 const warmupLog = createLogger('StableVideoWarmup');
 const SAME_ORIGIN_SHADOW_MOUNT_LOOKAHEAD_FRAMES = 8;
@@ -45,6 +46,7 @@ const TRANSITION_WARMUP_LOOKAHEAD_SECONDS = 1.5;
 export type StableVideoSequenceItem = VideoItem & {
   zIndex: number;
   muted: boolean;
+  trackAudioEq?: AudioEqSettings;
   trackOrder: number;
   trackVisible: boolean;
   _sequenceFrameOffset?: number;
@@ -176,8 +178,9 @@ const HiddenShadowVideoBridge = React.memo(({ item }: { item: StableVideoSequenc
   ));
 
   const audioEqStages = useMemo(
-    () => appendResolvedAudioEqStage(undefined, getAudioEqSettings(item)),
+    () => appendResolvedAudioEqSources(undefined, item.trackAudioEq, getAudioEqSettings(item)),
     [
+      item.trackAudioEq,
       item.audioEqLowCutEnabled, item.audioEqLowCutFrequencyHz, item.audioEqLowCutSlopeDbPerOct,
       item.audioEqLowGainDb, item.audioEqLowFrequencyHz,
       item.audioEqLowMidGainDb, item.audioEqLowMidFrequencyHz, item.audioEqLowMidQ,

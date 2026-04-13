@@ -31,6 +31,7 @@ import { convertTimelineToComposition } from '../utils/timeline-to-composition';
 import { useTimelineStore } from '@/features/export/deps/timeline';
 import { useProjectStore } from '@/features/export/deps/projects';
 import { resolveMediaUrls } from '@/features/export/deps/media-library';
+import { usePlaybackStore } from '@/shared/state/playback';
 import { createLogger, createOperationId } from '@/shared/logging/logger';
 import { createManagedWorker } from '@/shared/utils/managed-worker';
 import type {
@@ -265,6 +266,7 @@ export function useClientRender(): UseClientRenderReturn {
 
         // Get project metadata (background color and native resolution)
         const currentProject = useProjectStore.getState().currentProject;
+        const busAudioEq = usePlaybackStore.getState().busAudioEq;
         const backgroundColor = currentProject?.metadata?.backgroundColor;
         // Use PROJECT resolution for composition (transform calculations match preview)
         const projectWidth = currentProject?.metadata?.width ?? 1920;
@@ -372,7 +374,8 @@ export function useClientRender(): UseClientRenderReturn {
           effectiveInPoint,
           effectiveOutPoint,
           keyframes,
-          backgroundColor
+          backgroundColor,
+          busAudioEq,
         );
 
         const totalCompositionItems = composition.tracks.reduce((sum, t) => sum + (t.items?.length ?? 0), 0);

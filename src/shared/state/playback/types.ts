@@ -1,3 +1,5 @@
+import type { AudioEqSettings } from '@/types/audio';
+
 export interface CaptureOptions {
   width?: number;
   height?: number;
@@ -18,6 +20,7 @@ export interface PlaybackState {
   loop: boolean;
   volume: number;
   muted: boolean;
+  busAudioEq?: AudioEqSettings;
   zoom: number;
   /** Frame to preview on hover (null when not hovering) */
   previewFrame: number | null;
@@ -44,6 +47,7 @@ export interface PlaybackActions {
   toggleLoop: () => void;
   setVolume: (volume: number) => void;
   toggleMute: () => void;
+  setBusAudioEq: (eq: AudioEqSettings | undefined) => void;
   setZoom: (zoom: number) => void;
   setPreviewFrame: (frame: number | null, itemId?: string | null) => void;
   /** Toggle proxy playback mode */

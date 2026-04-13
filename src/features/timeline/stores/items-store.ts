@@ -38,6 +38,7 @@ import {
   clampAudioEqFrequencyHz,
   clampAudioEqGainDb,
   clampAudioEqQ,
+  normalizeAudioEqSettings,
 } from '@/shared/utils/audio-eq';
 import { normalizeCropSettings } from '@/shared/utils/media-crop';
 import {
@@ -256,6 +257,14 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   }
 
   return normalized;
+}
+
+function normalizeTrack(track: TimelineTrack): TimelineTrack {
+  return {
+    ...track,
+    volume: track.volume === undefined ? undefined : Math.max(-60, Math.min(12, track.volume)),
+    audioEq: normalizeAudioEqSettings(track.audioEq),
+  };
 }
 
 function areItemArraysEqual(a: TimelineItem[] | undefined, b: TimelineItem[]): boolean {
@@ -623,7 +632,9 @@ export const useItemsStore = create<ItemsState & ItemsActions>()(
       return withItemIndexes(normalizedItems, state);
     }),
     setTracks: (tracks) => set({
-      tracks: [...tracks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+      tracks: [...tracks]
+        .map((track) => normalizeTrack(track))
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     }),
 
     // Add item

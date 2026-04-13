@@ -94,4 +94,49 @@ describe('AudioEqCurveEditor', () => {
     expect(document.querySelector('[data-eq-band="high-cut"] [data-eq-band-number="6"]')).not.toBeNull();
     expect(document.querySelector('[data-eq-band="mid"]')).toBeNull();
   });
+
+  it('lets gain bands move across the full EQ span instead of staying in fixed lanes', () => {
+    const onLiveChange = vi.fn();
+    const onChange = vi.fn();
+
+    render(
+      <AudioEqCurveEditor
+        settings={DEFAULT_SETTINGS}
+        onLiveChange={onLiveChange}
+        onChange={onChange}
+      />,
+    );
+
+    const root = document.querySelector('[data-eq-curve-root="true"]') as HTMLDivElement | null;
+    const lowHandle = document.querySelector('[data-eq-band="low"]') as HTMLButtonElement | null;
+
+    expect(root).not.toBeNull();
+    expect(lowHandle).not.toBeNull();
+
+    Object.defineProperty(root!, 'getBoundingClientRect', {
+      value: () => ({
+        x: 0,
+        y: 10,
+        top: 10,
+        bottom: 150,
+        left: 0,
+        right: 320,
+        width: 320,
+        height: 140,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(root!, 'setPointerCapture', { value: vi.fn(), configurable: true });
+    Object.defineProperty(root!, 'releasePointerCapture', { value: vi.fn(), configurable: true });
+
+    fireEvent.pointerDown(lowHandle!, { pointerId: 7, clientX: 120, clientY: 70 });
+    fireEvent.pointerMove(root!, { pointerId: 7, clientX: 300, clientY: 70 });
+    fireEvent.pointerUp(root!, { pointerId: 7, clientX: 300, clientY: 70 });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      audioEqLowFrequencyHz: expect.any(Number),
+    }));
+    expect(onChange.mock.calls[0]?.[0].audioEqLowFrequencyHz).toBeGreaterThan(10000);
+  });
 });

@@ -43,6 +43,7 @@ import {
   clampAudioEqFrequencyHz,
   clampAudioEqGainDb,
   clampAudioEqQ,
+  normalizeAudioEqSettings,
 } from '@/shared/utils/audio-eq';
 import {
   clampAudioPitchCents,
@@ -73,6 +74,7 @@ function normalizeTrack(
     volume: normalizedVolume === undefined
       ? 0
       : Math.max(-60, Math.min(12, normalizedVolume)),
+    audioEq: normalizeAudioEqSettings(track.audioEq),
     kind: normalizedKind,
     // Ensure order is set (fallback to index if missing)
     order: track.order ?? index,
@@ -353,6 +355,7 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
     ...timeline,
     // Normalize tracks
     tracks: normalizedTracks,
+    busAudioEq: normalizeAudioEqSettings(timeline.busAudioEq),
     // Normalize items and repair overlaps
     items: repairOverlappingItems(normalizedItems, normalizedTransitions),
     // Normalize transitions if present
@@ -364,6 +367,7 @@ function normalizeTimeline(timeline: ProjectTimeline): ProjectTimeline {
       return {
         ...comp,
         tracks: flattenTrackGroups(comp.tracks.map((track, index) => normalizeTrack(track, index))),
+        busAudioEq: normalizeAudioEqSettings(comp.busAudioEq),
         items: repairOverlappingItems(compItems, compTransitions),
         transitions: compTransitions,
       };

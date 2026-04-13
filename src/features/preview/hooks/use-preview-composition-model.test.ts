@@ -124,4 +124,58 @@ describe('buildPreviewCompositionData', () => {
       expect(playbackVideoItem.audioSrc).toBe('blob://warm-audio');
     }
   });
+
+  it('preserves bus and track EQ in preview composition props', () => {
+    const track: TimelineTrack = {
+      id: 'track-1',
+      name: 'Audio 1',
+      height: 80,
+      locked: false,
+      visible: true,
+      muted: false,
+      solo: false,
+      order: 1,
+      audioEq: {
+        lowGainDb: 3,
+        lowCutEnabled: true,
+        lowCutFrequencyHz: 80,
+      },
+      items: [
+        {
+          id: 'clip-1',
+          trackId: 'track-1',
+          type: 'audio',
+          mediaId: 'media-1',
+          src: '',
+          label: 'VO',
+          from: 0,
+          durationInFrames: 120,
+        },
+      ],
+    };
+
+    const busAudioEq = {
+      highGainDb: -4,
+      highCutEnabled: true,
+      highCutFrequencyHz: 9000,
+    };
+
+    const result = buildPreviewCompositionData({
+      combinedTracks: [track],
+      fps: 30,
+      items: track.items,
+      keyframes: [],
+      transitions: [],
+      busAudioEq,
+      resolvedUrls: new Map([['media-1', 'blob://audio']]),
+      useProxy: false,
+      blobUrlVersion: 0,
+      project: { width: 1920, height: 1080, backgroundColor: '#000000' },
+    });
+
+    expect(result.inputProps.busAudioEq).toEqual(busAudioEq);
+    expect(result.fastScrubInputProps.busAudioEq).toEqual(busAudioEq);
+    expect(result.inputProps.tracks[0]?.audioEq).toEqual(track.audioEq);
+    expect(result.fastScrubInputProps.tracks[0]?.audioEq).toEqual(track.audioEq);
+  });
 });

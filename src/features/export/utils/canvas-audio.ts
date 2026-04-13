@@ -7,7 +7,7 @@
 
 import type { CompositionInputProps } from '@/types/export';
 import type { VideoItem, AudioItem, CompositionItem, TimelineItem, TimelineTrack } from '@/types/timeline';
-import type { ResolvedAudioEqSettings } from '@/types/audio';
+import type { AudioEqSettings, ResolvedAudioEqSettings } from '@/types/audio';
 import type { Keyframe as VolumeKeyframe } from '@/types/keyframe';
 import type { Transition } from '@/types/transition';
 import { createLogger } from '@/shared/logging/logger';
@@ -33,7 +33,7 @@ import {
 } from '@/shared/utils/linked-media';
 import { evaluateAudioFadeInCurve, evaluateAudioFadeOutCurve, type AudioClipFadeSpan } from '@/shared/utils/audio-fade-curve';
 import { createMediabunnyInputSource } from '@/infrastructure/browser/mediabunny-input-source';
-import { appendResolvedAudioEqStage, applyAudioEqStages, areAudioEqStagesEqual, getAudioEqSettings } from '@/shared/utils/audio-eq';
+import { appendResolvedAudioEqSources, applyAudioEqStages, areAudioEqStagesEqual, getAudioEqSettings } from '@/shared/utils/audio-eq';
 import {
   getAudioPitchRatioFromSemitones,
   getAudioPitchShiftSemitones,
@@ -102,6 +102,8 @@ interface TransitionAudioEntry<TItem extends TransitionAudioItem> {
   trackId: string;
   muted: boolean;
   trackVolume: number;
+  trackAudioEq?: AudioEqSettings;
+  audioEqStages?: ResolvedAudioEqSettings[];
   type: 'video' | 'audio';
   audioCodec?: string;
   volumeKeyframes?: VolumeKeyframe[];
@@ -396,7 +398,7 @@ function buildManagedTransitionAudioSegments<TItem extends TransitionAudioItem>(
       muted: entry.muted,
       type: entry.type,
       audioCodec: entry.audioCodec,
-      audioEqStages: appendResolvedAudioEqStage(undefined, getAudioEqSettings(item)),
+      audioEqStages: appendResolvedAudioEqSources(entry.audioEqStages, entry.trackAudioEq, getAudioEqSettings(item)),
       beforeFrames: before,
       afterFrames: after,
       volumeKeyframes: entry.volumeKeyframes,
@@ -534,7 +536,7 @@ function appendCompositionAudioSegments(params: {
 }): void {
   const { segments, track, compositionItem, subComp, fps } = params;
   const visited = params.visited ?? new Set<string>();
-  const wrapperAudioEqStages = appendResolvedAudioEqStage(params.audioEqStages, getAudioEqSettings(compositionItem));
+  const wrapperAudioEqStages = appendResolvedAudioEqSources(params.audioEqStages, getAudioEqSettings(compositionItem));
   const wrapperAudioPitchShiftSemitones = (params.audioPitchShiftSemitones ?? 0) + getAudioPitchShiftSemitones(compositionItem);
   const linkedSubCompVideoIds = getLinkedVideoIdsWithAudio(subComp.items);
   const compFrom = compositionItem.from;
@@ -607,7 +609,7 @@ function appendCompositionAudioSegments(params: {
         compositionItem: nestedWrapper,
         subComp: nestedSubComp,
         fps,
-        audioEqStages: wrapperAudioEqStages,
+        audioEqStages: appendResolvedAudioEqSources(wrapperAudioEqStages, subTrack?.audioEq),
         audioPitchShiftSemitones: wrapperAudioPitchShiftSemitones,
         visited: nestedVisited,
       });
@@ -646,7 +648,7 @@ function appendCompositionAudioSegments(params: {
       fadeInCurveX: subItem.audioFadeInCurveX ?? 0.52,
       fadeOutCurveX: subItem.audioFadeOutCurveX ?? 0.52,
       pitchShiftSemitones: wrapperAudioPitchShiftSemitones + getAudioPitchShiftSemitones(subItem),
-      audioEqStages: appendResolvedAudioEqStage(wrapperAudioEqStages, getAudioEqSettings(subItem)),
+      audioEqStages: appendResolvedAudioEqSources(wrapperAudioEqStages, subTrack?.audioEq, getAudioEqSettings(subItem)),
       contentStartOffsetFrames: 0,
       contentEndOffsetFrames: 0,
       fadeInDelayFrames: 0,
@@ -700,6 +702,7 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
       trackId: leftAudio.trackId,
     }),
   );
+  const busAudioEqStages = appendResolvedAudioEqSources(undefined, composition.busAudioEq);
   const audioTransitionItemIds = new Set<string>();
   const audioTransitionDefs: Transition[] = transitions.filter((transition) => {
     const leftItem = timelineItems.find((item) => item.id === transition.leftClipId);
@@ -729,6 +732,8 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
           trackId: track.id,
           muted: track.muted ?? false,
           trackVolume: track.volume ?? 0,
+          trackAudioEq: track.audioEq,
+          audioEqStages: busAudioEqStages,
           type: 'video',
           audioCodec: getMediaAudioCodecById(videoItem.mediaId),
           volumeKeyframes: (() => {
@@ -749,6 +754,7 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
             compositionItem: audioItem,
             subComp,
             fps,
+            audioEqStages: appendResolvedAudioEqSources(busAudioEqStages, track.audioEq),
           });
           continue;
         }
@@ -763,6 +769,8 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
           trackId: track.id,
           muted: track.muted ?? false,
           trackVolume: track.volume ?? 0,
+          trackAudioEq: track.audioEq,
+          audioEqStages: busAudioEqStages,
           type: 'audio',
           audioCodec: getMediaAudioCodecById(item.mediaId),
           volumeKeyframes: audioVolumeKfs.length > 0 ? audioVolumeKfs : undefined,
@@ -795,7 +803,7 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
           fadeInCurveX: item.audioFadeInCurveX ?? 0.52,
           fadeOutCurveX: item.audioFadeOutCurveX ?? 0.52,
           pitchShiftSemitones: getAudioPitchShiftSemitones(item),
-          audioEqStages: appendResolvedAudioEqStage(undefined, getAudioEqSettings(item)),
+          audioEqStages: appendResolvedAudioEqSources(busAudioEqStages, track.audioEq, getAudioEqSettings(item)),
           contentStartOffsetFrames: 0,
           contentEndOffsetFrames: 0,
           fadeInDelayFrames: 0,
@@ -848,6 +856,7 @@ export function extractAudioSegments(composition: CompositionInputProps, fps: nu
         compositionItem: compItem,
         subComp,
         fps,
+        audioEqStages: appendResolvedAudioEqSources(busAudioEqStages, track.audioEq),
       });
     }
   }

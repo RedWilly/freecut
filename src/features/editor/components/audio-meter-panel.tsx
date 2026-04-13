@@ -115,6 +115,8 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   const setVolume = usePlaybackStore((s) => s.setVolume);
   const muted = usePlaybackStore((s) => s.muted);
   const toggleMute = usePlaybackStore((s) => s.toggleMute);
+  const busAudioEq = usePlaybackStore((s) => s.busAudioEq);
+  const setBusAudioEq = usePlaybackStore((s) => s.setBusAudioEq);
 
   const [waveformsByMediaId, setWaveformsByMediaId] = useState<Map<string, AudioMeterWaveform | null>>(new Map());
   const meterVisualRootRef = useRef<HTMLDivElement | null>(null);
@@ -429,20 +431,12 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       };
     }
 
-    // Bus EQ: aggregate all track EQs (no dedicated bus EQ store yet)
-    const seenItemIds = new Set<string>();
-    const busItems = mixerSourceTracks.flatMap((track) => track.items).filter((item) => {
-      if (seenItemIds.has(item.id)) return false;
-      seenItemIds.add(item.id);
-      return true;
-    });
-
     return {
       title: 'Bus 1',
       targetLabel: 'Bus 1',
-      items: busItems,
+      busEq: busAudioEq,
     };
-  }, [eqPanelTarget, mixerSourceTracks]);
+  }, [busAudioEq, eqPanelTarget, mixerSourceTracks]);
 
   useEffect(() => {
     if (eqPanelTarget && !eqPanelDescriptor) {
@@ -496,7 +490,8 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   }, []);
 
   const handleTrackEqChange = useCallback((trackId: string, patch: AudioEqPatch) => {
-    const currentTracks = useItemsStore.getState().tracks;
+    const itemsState = useItemsStore.getState();
+    const currentTracks = itemsState.tracks;
     const targetTrack = currentTracks.find((track) => track.id === trackId);
     if (!targetTrack) return;
     const snapshot = captureSnapshot();
@@ -505,7 +500,13 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       tracks: snapshot.tracks.map((track) => ({ ...track })),
     };
     const eqPatch = getAudioEqSettings(patch);
-    (targetTrack as { audioEq: typeof targetTrack.audioEq }).audioEq = { ...targetTrack.audioEq, ...eqPatch };
+    const nextTrackEq = { ...targetTrack.audioEq, ...eqPatch };
+    const nextTracks = currentTracks.map((track) => (
+      track.id === trackId
+        ? { ...track, audioEq: nextTrackEq }
+        : track
+    ));
+    itemsState.setTracks(nextTracks);
     useTimelineStore.getState().markDirty();
     useTimelineCommandStore.getState().addUndoEntry(
       { type: 'UPDATE_TRACK_EQ', payload: { id: trackId } },
@@ -513,6 +514,17 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     );
     setTrackSnapshotVersion((version) => version + 1);
   }, []);
+
+  const handleBusEqChange = useCallback((patch: AudioEqPatch) => {
+    const snapshot = captureSnapshot();
+    const eqPatch = getAudioEqSettings(patch);
+    setBusAudioEq({ ...busAudioEq, ...eqPatch });
+    useTimelineStore.getState().markDirty();
+    useTimelineCommandStore.getState().addUndoEntry(
+      { type: 'UPDATE_BUS_EQ', payload: {} },
+      snapshot,
+    );
+  }, [busAudioEq, setBusAudioEq]);
 
   // Collect all item IDs for a track (needed for live gain bridging)
   const getTrackItemIds = useCallback((trackId: string): string[] => {
@@ -706,10 +718,11 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       className="rounded-[6px] border-[#3a3d45] bg-[#1c1f25]"
     >
       <AudioEqPanelContent
-        items={'items' in eqPanelDescriptor ? eqPanelDescriptor.items : undefined}
         targetLabel={eqPanelDescriptor.targetLabel}
-        trackEq={'trackEq' in eqPanelDescriptor ? eqPanelDescriptor.trackEq : undefined}
-        onTrackEqChange={'trackId' in eqPanelDescriptor ? (patch) => handleTrackEqChange((eqPanelDescriptor as { trackId: string }).trackId, patch) : undefined}
+        trackEq={'trackEq' in eqPanelDescriptor ? eqPanelDescriptor.trackEq : ('busEq' in eqPanelDescriptor ? eqPanelDescriptor.busEq : undefined)}
+        onTrackEqChange={'trackId' in eqPanelDescriptor
+          ? (patch) => handleTrackEqChange((eqPanelDescriptor as { trackId: string }).trackId, patch)
+          : ('busEq' in eqPanelDescriptor ? handleBusEqChange : undefined)}
       />
     </FloatingPanel>
   ) : null;

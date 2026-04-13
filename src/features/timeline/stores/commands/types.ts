@@ -1,4 +1,5 @@
 import type { TimelineItem, TimelineTrack, ProjectMarker } from '@/types/timeline';
+import type { AudioEqSettings } from '@/types/audio';
 import type { Transition } from '@/types/transition';
 import type { ItemKeyframes } from '@/types/keyframe';
 import type { SubComposition } from '../compositions-store';
@@ -22,6 +23,7 @@ export interface TimelineSnapshot {
   scrollPosition: number;
   snapEnabled: boolean;
   currentFrame: number;
+  busAudioEq?: AudioEqSettings;
   projectId: string | null;
   projectMetadata: ProjectResolution | null;
 }

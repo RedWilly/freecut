@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,16 @@ import { RotaryKnob } from '@/shared/ui/property-controls/rotary-knob';
 import { getMixedValue } from '../utils/mixed-value';
 import { AudioEqCurveEditor, type AudioEqPatch } from './audio-eq-curve-editor';
 import { getAudioSectionItems } from './audio-section-utils';
-import { buildTimelineEqPatchFromResolvedSettings, normalizeUiEqPatch, toTimelineEqPatch } from './audio-eq-ui';
+import {
+  AUDIO_EQ_CONTROL_RANGES,
+  buildTimelineEqPatchFromResolvedSettings,
+  clampFrequencyToAudioEqControlRange,
+  getAudioEqControlRangeById,
+  inferAudioEqControlRangeId,
+  normalizeUiEqPatch,
+  toTimelineEqPatch,
+  type AudioEqControlRangeId,
+} from './audio-eq-ui';
 import {
   AUDIO_EQ_GAIN_DB_MAX,
   AUDIO_EQ_GAIN_DB_MIN,
@@ -25,22 +34,14 @@ import {
   AUDIO_EQ_HIGH_CUT_MAX_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_CUT_MIN_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_FREQUENCY_HZ,
-  AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ,
-  AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
-  AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ,
-  AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_MID_Q,
   AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
   AUDIO_EQ_LOW_CUT_MAX_FREQUENCY_HZ,
   AUDIO_EQ_LOW_CUT_MIN_FREQUENCY_HZ,
   AUDIO_EQ_LOW_FREQUENCY_HZ,
-  AUDIO_EQ_LOW_MAX_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
-  AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ,
-  AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ,
   AUDIO_EQ_LOW_MID_Q,
-  AUDIO_EQ_LOW_MIN_FREQUENCY_HZ,
   AUDIO_EQ_PRESETS,
   type AudioEqPresetId,
   findAudioEqPresetId,
@@ -49,6 +50,15 @@ import {
 } from '@/shared/utils/audio-eq';
 
 const AUDIO_EQ_SLOPE_OPTIONS = [6, 12, 18, 24] as const;
+type GainBandControlKey = 'low' | 'lowMid' | 'highMid' | 'high';
+type GainBandControlRanges = Record<GainBandControlKey, AudioEqControlRangeId>;
+
+const DEFAULT_GAIN_BAND_CONTROL_RANGES = {
+  low: 'L',
+  lowMid: 'ML',
+  highMid: 'MH',
+  high: 'H',
+} satisfies GainBandControlRanges;
 
 interface AudioEqPanelContentProps {
   targetLabel: string;
@@ -120,6 +130,54 @@ function SlopeButtons({
       ))}
     </div>
   );
+}
+
+function formatFrequencyRangeLabel(frequencyHz: number): string {
+  if (frequencyHz >= 1000) {
+    return `${(frequencyHz / 1000).toFixed(1)}K`;
+  }
+  return `${Math.round(frequencyHz)}`;
+}
+
+function RangeButtons({
+  value,
+  onChange,
+}: {
+  value: AudioEqControlRangeId;
+  onChange: (value: AudioEqControlRangeId) => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-[4px] border border-[#2e2e31]">
+      {AUDIO_EQ_CONTROL_RANGES.map((range) => (
+        <button
+          key={range.id}
+          type="button"
+          className={cn(
+            'flex-1 border-r border-[#151517] py-1 text-[10px] font-medium transition-colors last:border-r-0',
+            value === range.id
+              ? 'bg-[#ff7b63] text-white'
+              : 'bg-[#252528] text-zinc-400 hover:bg-[#2a2a2d]',
+          )}
+          onClick={() => onChange(range.id)}
+        >
+          {range.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function getEffectiveGainBandControlRangeId(
+  selectedRangeId: AudioEqControlRangeId,
+  frequencyHz: number | 'mixed',
+  preferredRangeId: AudioEqControlRangeId,
+): AudioEqControlRangeId {
+  if (frequencyHz === 'mixed') return preferredRangeId;
+  const selectedRange = getAudioEqControlRangeById(selectedRangeId);
+  if (frequencyHz >= selectedRange.minFrequencyHz && frequencyHz <= selectedRange.maxFrequencyHz) {
+    return selectedRangeId;
+  }
+  return inferAudioEqControlRangeId(frequencyHz, preferredRangeId);
 }
 
 interface BandCardProps {
@@ -209,6 +267,11 @@ export function AudioEqPanelContent({
   );
 
   const [livePatch, setLivePatch] = useState<AudioEqPatch | null>(null);
+  const [gainBandControlRanges, setGainBandControlRanges] = useState<GainBandControlRanges>(DEFAULT_GAIN_BAND_CONTROL_RANGES);
+
+  useEffect(() => {
+    setGainBandControlRanges(DEFAULT_GAIN_BAND_CONTROL_RANGES);
+  }, [targetLabel]);
 
   const eqLowCutEnabled = livePatch?.audioEqLowCutEnabled ?? (resolvedTrackEq ? resolvedTrackEq.lowCutEnabled : getMixedValue(audioItems, (item) => item.audioEqLowCutEnabled ?? false, false));
   const eqLowCutFrequencyHz = livePatch?.audioEqLowCutFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.lowCutFrequencyHz : getMixedValue(audioItems, (item) => item.audioEqLowCutFrequencyHz ?? AUDIO_EQ_LOW_CUT_FREQUENCY_HZ, AUDIO_EQ_LOW_CUT_FREQUENCY_HZ));
@@ -227,6 +290,32 @@ export function AudioEqPanelContent({
   const eqHighCutEnabled = livePatch?.audioEqHighCutEnabled ?? (resolvedTrackEq ? resolvedTrackEq.highCutEnabled : getMixedValue(audioItems, (item) => item.audioEqHighCutEnabled ?? false, false));
   const eqHighCutFrequencyHz = livePatch?.audioEqHighCutFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.highCutFrequencyHz : getMixedValue(audioItems, (item) => item.audioEqHighCutFrequencyHz ?? AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ, AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ));
   const eqHighCutSlopeDbPerOct = livePatch?.audioEqHighCutSlopeDbPerOct ?? (resolvedTrackEq ? resolvedTrackEq.highCutSlopeDbPerOct : getMixedValue(audioItems, (item) => item.audioEqHighCutSlopeDbPerOct ?? 12, 12));
+
+  const lowRangeId = getEffectiveGainBandControlRangeId(
+    gainBandControlRanges.low,
+    eqLowFrequencyHz,
+    DEFAULT_GAIN_BAND_CONTROL_RANGES.low,
+  );
+  const lowMidRangeId = getEffectiveGainBandControlRangeId(
+    gainBandControlRanges.lowMid,
+    eqLowMidFrequencyHz,
+    DEFAULT_GAIN_BAND_CONTROL_RANGES.lowMid,
+  );
+  const highMidRangeId = getEffectiveGainBandControlRangeId(
+    gainBandControlRanges.highMid,
+    eqHighMidFrequencyHz,
+    DEFAULT_GAIN_BAND_CONTROL_RANGES.highMid,
+  );
+  const highRangeId = getEffectiveGainBandControlRangeId(
+    gainBandControlRanges.high,
+    eqHighFrequencyHz,
+    DEFAULT_GAIN_BAND_CONTROL_RANGES.high,
+  );
+
+  const lowRange = getAudioEqControlRangeById(lowRangeId);
+  const lowMidRange = getAudioEqControlRangeById(lowMidRangeId);
+  const highMidRange = getAudioEqControlRangeById(highMidRangeId);
+  const highRange = getAudioEqControlRangeById(highRangeId);
 
   const hasMixedEqSettings = [
     eqLowCutEnabled,
@@ -376,6 +465,20 @@ export function AudioEqPanelContent({
     handleEqPatchChange({ [field]: value } as AudioEqPatch);
   }, [handleEqPatchChange]);
 
+  const handleGainBandControlRangeChange = useCallback((
+    band: GainBandControlKey,
+    rangeId: AudioEqControlRangeId,
+    field: 'audioEqLowFrequencyHz' | 'audioEqLowMidFrequencyHz' | 'audioEqHighMidFrequencyHz' | 'audioEqHighFrequencyHz',
+    value: number | 'mixed',
+  ) => {
+    setGainBandControlRanges((current) => ({ ...current, [band]: rangeId }));
+    if (value === 'mixed') return;
+    const nextFrequencyHz = clampFrequencyToAudioEqControlRange(value, rangeId);
+    if (nextFrequencyHz !== value) {
+      handleEqFieldChange(field, nextFrequencyHz);
+    }
+  }, [handleEqFieldChange]);
+
   if (!isTrackMode && audioItems.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-sm text-zinc-500">
@@ -459,10 +562,11 @@ export function AudioEqPanelContent({
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
-                <NumberInput value={eqLowFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowFrequencyHz: v })} unit="Hz" min={AUDIO_EQ_LOW_MIN_FREQUENCY_HZ} max={AUDIO_EQ_LOW_MAX_FREQUENCY_HZ} step={1} className="flex-1" />
-                <RotaryKnob value={eqLowFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowFrequencyHz: v })} min={AUDIO_EQ_LOW_MIN_FREQUENCY_HZ} max={AUDIO_EQ_LOW_MAX_FREQUENCY_HZ} step={1} />
+                <NumberInput value={eqLowFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowFrequencyHz: v })} unit="Hz" min={lowRange.minFrequencyHz} max={lowRange.maxFrequencyHz} step={1} className="flex-1" />
+                <RotaryKnob value={eqLowFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowFrequencyHz: v })} min={lowRange.minFrequencyHz} max={lowRange.maxFrequencyHz} step={1} />
               </div>
-              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>30</span><span>399</span></div>
+              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>{formatFrequencyRangeLabel(lowRange.minFrequencyHz)}</span><span>{formatFrequencyRangeLabel(lowRange.maxFrequencyHz)}</span></div>
+              <RangeButtons value={lowRangeId} onChange={(rangeId) => handleGainBandControlRangeChange('low', rangeId, 'audioEqLowFrequencyHz', eqLowFrequencyHz)} />
               <div className="text-[10px] text-zinc-500">Gain</div>
               <div className="flex items-center gap-1.5">
                 <NumberInput value={eqLow} onChange={(v) => handleEqFieldChange('audioEqLowGainDb', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowGainDb: v })} unit="dB" min={AUDIO_EQ_GAIN_DB_MIN} max={AUDIO_EQ_GAIN_DB_MAX} step={0.1} className="flex-1" />
@@ -478,10 +582,11 @@ export function AudioEqPanelContent({
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
-                <NumberInput value={eqLowMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowMidFrequencyHz: v })} unit="Hz" min={AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ} max={AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ} step={1} className="flex-1" />
-                <RotaryKnob value={eqLowMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowMidFrequencyHz: v })} min={AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ} max={AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ} step={1} />
+                <NumberInput value={eqLowMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowMidFrequencyHz: v })} unit="Hz" min={lowMidRange.minFrequencyHz} max={lowMidRange.maxFrequencyHz} step={1} className="flex-1" />
+                <RotaryKnob value={eqLowMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqLowMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowMidFrequencyHz: v })} min={lowMidRange.minFrequencyHz} max={lowMidRange.maxFrequencyHz} step={1} />
               </div>
-              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>100</span><span>1.5K</span></div>
+              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>{formatFrequencyRangeLabel(lowMidRange.minFrequencyHz)}</span><span>{formatFrequencyRangeLabel(lowMidRange.maxFrequencyHz)}</span></div>
+              <RangeButtons value={lowMidRangeId} onChange={(rangeId) => handleGainBandControlRangeChange('lowMid', rangeId, 'audioEqLowMidFrequencyHz', eqLowMidFrequencyHz)} />
               <div className="text-[10px] text-zinc-500">Gain</div>
               <div className="flex items-center gap-1.5">
                 <NumberInput value={eqLowMid} onChange={(v) => handleEqFieldChange('audioEqLowMidGainDb', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqLowMidGainDb: v })} unit="dB" min={AUDIO_EQ_GAIN_DB_MIN} max={AUDIO_EQ_GAIN_DB_MAX} step={0.1} className="flex-1" />
@@ -503,10 +608,11 @@ export function AudioEqPanelContent({
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
-                <NumberInput value={eqHighMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighMidFrequencyHz: v })} unit="Hz" min={AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ} max={AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ} step={1} className="flex-1" />
-                <RotaryKnob value={eqHighMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighMidFrequencyHz: v })} min={AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ} max={AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ} step={1} />
+                <NumberInput value={eqHighMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighMidFrequencyHz: v })} unit="Hz" min={highMidRange.minFrequencyHz} max={highMidRange.maxFrequencyHz} step={1} className="flex-1" />
+                <RotaryKnob value={eqHighMidFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighMidFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighMidFrequencyHz: v })} min={highMidRange.minFrequencyHz} max={highMidRange.maxFrequencyHz} step={1} />
               </div>
-              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>450</span><span>8.0K</span></div>
+              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>{formatFrequencyRangeLabel(highMidRange.minFrequencyHz)}</span><span>{formatFrequencyRangeLabel(highMidRange.maxFrequencyHz)}</span></div>
+              <RangeButtons value={highMidRangeId} onChange={(rangeId) => handleGainBandControlRangeChange('highMid', rangeId, 'audioEqHighMidFrequencyHz', eqHighMidFrequencyHz)} />
               <div className="text-[10px] text-zinc-500">Gain</div>
               <div className="flex items-center gap-1.5">
                 <NumberInput value={eqHighMid} onChange={(v) => handleEqFieldChange('audioEqHighMidGainDb', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighMidGainDb: v })} unit="dB" min={AUDIO_EQ_GAIN_DB_MIN} max={AUDIO_EQ_GAIN_DB_MAX} step={0.1} className="flex-1" />
@@ -528,10 +634,11 @@ export function AudioEqPanelContent({
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
-                <NumberInput value={eqHighFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighFrequencyHz: v })} unit="Hz" min={AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ} max={AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ} step={1} className="flex-1" />
-                <RotaryKnob value={eqHighFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighFrequencyHz: v })} min={AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ} max={AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ} step={1} />
+                <NumberInput value={eqHighFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighFrequencyHz: v })} unit="Hz" min={highRange.minFrequencyHz} max={highRange.maxFrequencyHz} step={1} className="flex-1" />
+                <RotaryKnob value={eqHighFrequencyHz} onChange={(v) => handleEqFieldChange('audioEqHighFrequencyHz', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighFrequencyHz: v })} min={highRange.minFrequencyHz} max={highRange.maxFrequencyHz} step={1} />
               </div>
-              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>1.4K</span><span>22.0K</span></div>
+              <div className="mt-0.5 flex justify-between text-[9px] text-zinc-600"><span>{formatFrequencyRangeLabel(highRange.minFrequencyHz)}</span><span>{formatFrequencyRangeLabel(highRange.maxFrequencyHz)}</span></div>
+              <RangeButtons value={highRangeId} onChange={(rangeId) => handleGainBandControlRangeChange('high', rangeId, 'audioEqHighFrequencyHz', eqHighFrequencyHz)} />
               <div className="text-[10px] text-zinc-500">Gain</div>
               <div className="flex items-center gap-1.5">
                 <NumberInput value={eqHigh} onChange={(v) => handleEqFieldChange('audioEqHighGainDb', v)} onLiveChange={(v) => handleEqPatchLiveChange({ audioEqHighGainDb: v })} unit="dB" min={AUDIO_EQ_GAIN_DB_MIN} max={AUDIO_EQ_GAIN_DB_MAX} step={0.1} className="flex-1" />
