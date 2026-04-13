@@ -142,6 +142,60 @@ describe('AudioEqCurveEditor', () => {
     expect(onChange.mock.calls[0]?.[0].audioEqLowFrequencyHz).toBeGreaterThan(10000);
   });
 
+  it('clamps off-scale handle positions to the visible 20 Hz to 19 kHz plot bounds', () => {
+    render(
+      <AudioEqCurveEditor
+        settings={resolveAudioEqSettings({
+          lowFrequencyHz: 10,
+          highFrequencyHz: 22000,
+        })}
+        onLiveChange={() => undefined}
+        onChange={() => undefined}
+      />,
+    );
+
+    const lowHandle = document.querySelector('[data-eq-band="low"]') as HTMLButtonElement | null;
+    const highHandle = document.querySelector('[data-eq-band="high"]') as HTMLButtonElement | null;
+
+    expect(lowHandle).not.toBeNull();
+    expect(highHandle).not.toBeNull();
+
+    expect(parseFloat(lowHandle!.style.left)).toBeGreaterThanOrEqual(0);
+    expect(parseFloat(lowHandle!.style.left)).toBeLessThanOrEqual(2);
+    expect(parseFloat(highHandle!.style.left)).toBeGreaterThanOrEqual(98);
+    expect(parseFloat(highHandle!.style.left)).toBeLessThanOrEqual(100);
+  });
+
+  it('drops enabled cut handles to the bottom edge of the graph', () => {
+    const { rerender } = render(
+      <AudioEqCurveEditor
+        settings={DEFAULT_SETTINGS}
+        onLiveChange={() => undefined}
+        onChange={() => undefined}
+      />,
+    );
+
+    const lowCutHandle = document.querySelector('[data-eq-band="low-cut"]') as HTMLButtonElement | null;
+    const disabledTop = parseFloat(lowCutHandle!.style.top);
+
+    rerender(
+      <AudioEqCurveEditor
+        settings={resolveAudioEqSettings({
+          lowCutEnabled: true,
+          highCutEnabled: true,
+        })}
+        onLiveChange={() => undefined}
+        onChange={() => undefined}
+      />,
+    );
+
+    const enabledLowCutHandle = document.querySelector('[data-eq-band="low-cut"]') as HTMLButtonElement | null;
+    const enabledHighCutHandle = document.querySelector('[data-eq-band="high-cut"]') as HTMLButtonElement | null;
+
+    expect(parseFloat(enabledLowCutHandle!.style.top)).toBeGreaterThan(disabledTop);
+    expect(parseFloat(enabledHighCutHandle!.style.top)).toBeGreaterThan(disabledTop);
+  });
+
   it('keeps untouched handles fixed while a band is being dragged', () => {
     function Harness() {
       const [settings, setSettings] = useState(resolveAudioEqSettings({

@@ -39,8 +39,8 @@ function rms(samples: Float32Array): number {
 
 describe('audio-eq', () => {
   it('clamps gains into the supported range', () => {
-    expect(clampAudioEqGainDb(40)).toBe(18);
-    expect(clampAudioEqGainDb(-40)).toBe(-18);
+    expect(clampAudioEqGainDb(40)).toBe(20);
+    expect(clampAudioEqGainDb(-40)).toBe(-20);
     expect(clampAudioEqGainDb(Number.NaN)).toBe(0);
   });
 

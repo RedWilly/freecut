@@ -86,7 +86,7 @@ const CURVE_PADDING_X = 2;
 const CURVE_PADDING_TOP = 2;
 const CURVE_PADDING_BOTTOM = 24;
 const CURVE_MIN_FREQUENCY_HZ = 20;
-const CURVE_MAX_FREQUENCY_HZ = 24000;
+const CURVE_MAX_FREQUENCY_HZ = 19000;
 const CURVE_DISPLAY_DB_MAX = 0;
 const CURVE_DISPLAY_DB_MIN = -80;
 const CURVE_DISPLAY_EQ_BASELINE_DB = -40;
@@ -192,8 +192,9 @@ function roundFrequency(value: number): number {
 }
 
 function frequencyToX(frequencyHz: number): number {
+  const clampedFrequencyHz = Math.max(CURVE_MIN_FREQUENCY_HZ, Math.min(CURVE_MAX_FREQUENCY_HZ, frequencyHz));
   const normalized = (
-    Math.log(frequencyHz) - Math.log(CURVE_MIN_FREQUENCY_HZ)
+    Math.log(clampedFrequencyHz) - Math.log(CURVE_MIN_FREQUENCY_HZ)
   ) / (
     Math.log(CURVE_MAX_FREQUENCY_HZ) - Math.log(CURVE_MIN_FREQUENCY_HZ)
   );
@@ -262,8 +263,8 @@ function mergeDisplayedSettings(
   return resolveAudioEqSettings(merged as unknown as ResolvedAudioEqSettings);
 }
 
-function getCutHandleY(): number {
-  return displayDbToY(CURVE_DISPLAY_EQ_BASELINE_DB);
+function getCutHandleY(enabled: boolean): number {
+  return displayDbToY(enabled ? CURVE_DISPLAY_DB_MIN : CURVE_DISPLAY_EQ_BASELINE_DB);
 }
 
 function createPatchForPointer(
@@ -555,7 +556,7 @@ export function AudioEqCurveEditor({
           const frequencyHz = handle.getFrequencyHz(displayedSettings);
           const isActive = dragState?.handleId === handle.id;
           const top = handle.kind === 'cut'
-            ? getCutHandleY()
+            ? getCutHandleY(handle.getEnabled(displayedSettings))
             : gainToY(handle.getGainDb(displayedSettings));
           const title = handle.kind === 'cut'
             ? `${handle.label} ${handle.description} ${handle.getEnabled(displayedSettings) ? 'on' : 'off'} ${formatFrequencyLabel(frequencyHz)}`

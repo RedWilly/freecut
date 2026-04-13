@@ -71,8 +71,8 @@ interface OnePoleCoefficients {
   a1: number;
 }
 
-export const AUDIO_EQ_GAIN_DB_MIN = -18;
-export const AUDIO_EQ_GAIN_DB_MAX = 18;
+export const AUDIO_EQ_GAIN_DB_MIN = -20;
+export const AUDIO_EQ_GAIN_DB_MAX = 20;
 export const AUDIO_EQ_Q_MIN = 0.3;
 export const AUDIO_EQ_Q_MAX = 8;
 export const AUDIO_EQ_CUT_SLOPES_DB_PER_OCT = [6, 12, 18, 24] as const;
@@ -80,20 +80,20 @@ export const AUDIO_EQ_LOW_CUT_FREQUENCY_HZ = 30;
 export const AUDIO_EQ_LOW_CUT_MIN_FREQUENCY_HZ = 30;
 export const AUDIO_EQ_LOW_CUT_MAX_FREQUENCY_HZ = 399;
 export const AUDIO_EQ_LOW_FREQUENCY_HZ = 120;
-export const AUDIO_EQ_LOW_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_LOW_MIN_FREQUENCY_HZ = 20;
 export const AUDIO_EQ_LOW_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_LOW_MID_FREQUENCY_HZ = 400;
-export const AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ = 20;
 export const AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_MID_FREQUENCY_HZ = 1000;
 export const AUDIO_EQ_MID_Q = 0.9;
 export const AUDIO_EQ_LOW_MID_Q = 1.1;
 export const AUDIO_EQ_HIGH_MID_FREQUENCY_HZ = 1600;
-export const AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ = 20;
 export const AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_MID_Q = 1.1;
 export const AUDIO_EQ_HIGH_FREQUENCY_HZ = 2800;
-export const AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ = 30;
+export const AUDIO_EQ_HIGH_MIN_FREQUENCY_HZ = 20;
 export const AUDIO_EQ_HIGH_MAX_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ = 22000;
 export const AUDIO_EQ_HIGH_CUT_MIN_FREQUENCY_HZ = 1400;
