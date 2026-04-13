@@ -142,6 +142,11 @@ describe('resolveTransitionParticipantRenderState', () => {
     expect(result.transform.height).toBe(150);
     expect(result.transform.cornerRadius).toBe(12);
     expect(result.effects).toEqual([previewEffect]);
+    expect(result.renderSpan).toEqual({
+      from: 0,
+      durationInFrames: 90,
+      sourceStart: 0,
+    });
   });
 
   it('extends the incoming clip to the transition start so preroll frames stay visible', () => {
@@ -151,6 +156,7 @@ describe('resolveTransitionParticipantRenderState', () => {
       trackId: 'track-1',
       from: 60,
       durationInFrames: 40,
+      sourceStart: 30,
       label: 'Incoming',
       src: 'right.mp4',
       transform: {
@@ -183,8 +189,14 @@ describe('resolveTransitionParticipantRenderState', () => {
 
     const result = resolveTransitionParticipantRenderState(incomingClip, activeTransition, 50, 4, rctx);
 
-    expect(result.item.from).toBe(50);
-    expect(result.item.durationInFrames).toBe(50);
+    expect(result.item.from).toBe(60);
+    expect(result.item.durationInFrames).toBe(40);
+    expect(result.item.sourceStart).toBe(30);
+    expect(result.renderSpan).toEqual({
+      from: 50,
+      durationInFrames: 50,
+      sourceStart: 20,
+    });
     expect(result.transform.opacity).toBe(1);
   });
 
@@ -228,7 +240,62 @@ describe('resolveTransitionParticipantRenderState', () => {
     const result = resolveTransitionParticipantRenderState(outgoingClip, activeTransition, 65, 4, rctx);
 
     expect(result.item.from).toBe(0);
-    expect(result.item.durationInFrames).toBe(70);
+    expect(result.item.durationInFrames).toBe(60);
+    expect(result.renderSpan).toEqual({
+      from: 0,
+      durationInFrames: 70,
+      sourceStart: 0,
+    });
     expect(result.transform.opacity).toBe(1);
+  });
+
+  it('clamps transition preroll to the available source head handle', () => {
+    const incomingClip: VideoItem = {
+      id: 'right',
+      type: 'video',
+      trackId: 'track-1',
+      from: 60,
+      durationInFrames: 40,
+      sourceStart: 6,
+      label: 'Incoming',
+      src: 'right.mp4',
+      transform: {
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 100,
+        rotation: 0,
+        opacity: 1,
+      },
+    };
+    const activeTransition = createActiveTransition({ rightClip: incomingClip });
+    const rctx: ItemRenderContext = {
+      fps: 30,
+      canvasSettings: { width: 1920, height: 1080, fps: 30 },
+      canvasPool: {} as ItemRenderContext['canvasPool'],
+      textMeasureCache: {} as ItemRenderContext['textMeasureCache'],
+      renderMode: 'preview',
+      videoExtractors: new Map(),
+      videoElements: new Map(),
+      useMediabunny: new Set(),
+      mediabunnyDisabledItems: new Set(),
+      mediabunnyFailureCountByItem: new Map(),
+      imageElements: new Map(),
+      gifFramesMap: new Map(),
+      keyframesMap: new Map(),
+      adjustmentLayers: [],
+      subCompRenderData: new Map(),
+    };
+
+    const result = resolveTransitionParticipantRenderState(incomingClip, activeTransition, 50, 4, rctx);
+
+    expect(result.item.from).toBe(60);
+    expect(result.item.durationInFrames).toBe(40);
+    expect(result.item.sourceStart).toBe(6);
+    expect(result.renderSpan).toEqual({
+      from: 50,
+      durationInFrames: 50,
+      sourceStart: 0,
+    });
   });
 });
