@@ -17,19 +17,23 @@ export interface AudioEqFieldSource {
   audioEqLowCutEnabled?: boolean;
   audioEqLowCutFrequencyHz?: number;
   audioEqLowCutSlopeDbPerOct?: AudioEqCutSlopeDbPerOct;
+  audioEqLowEnabled?: boolean;
   audioEqLowType?: AudioEqInnerBandType;
   audioEqLowGainDb?: number;
   audioEqLowFrequencyHz?: number;
   audioEqLowQ?: number;
+  audioEqLowMidEnabled?: boolean;
   audioEqLowMidType?: AudioEqInnerBandType;
   audioEqLowMidGainDb?: number;
   audioEqLowMidFrequencyHz?: number;
   audioEqLowMidQ?: number;
   audioEqMidGainDb?: number;
+  audioEqHighMidEnabled?: boolean;
   audioEqHighMidType?: AudioEqInnerBandType;
   audioEqHighMidGainDb?: number;
   audioEqHighMidFrequencyHz?: number;
   audioEqHighMidQ?: number;
+  audioEqHighEnabled?: boolean;
   audioEqHighType?: AudioEqInnerBandType;
   audioEqHighGainDb?: number;
   audioEqHighFrequencyHz?: number;
@@ -140,19 +144,23 @@ export const DEFAULT_AUDIO_EQ_SETTINGS: Readonly<ResolvedAudioEqSettings> = Obje
   lowCutEnabled: false,
   lowCutFrequencyHz: AUDIO_EQ_LOW_CUT_FREQUENCY_HZ,
   lowCutSlopeDbPerOct: 12,
+  lowEnabled: true,
   lowType: 'low-shelf',
   lowGainDb: 0,
   lowFrequencyHz: AUDIO_EQ_LOW_FREQUENCY_HZ,
   lowQ: AUDIO_EQ_LOW_Q,
+  lowMidEnabled: true,
   lowMidType: 'peaking',
   lowMidGainDb: 0,
   lowMidFrequencyHz: AUDIO_EQ_LOW_MID_FREQUENCY_HZ,
   lowMidQ: AUDIO_EQ_LOW_MID_Q,
   midGainDb: 0,
+  highMidEnabled: true,
   highMidType: 'peaking',
   highMidGainDb: 0,
   highMidFrequencyHz: AUDIO_EQ_HIGH_MID_FREQUENCY_HZ,
   highMidQ: AUDIO_EQ_HIGH_MID_Q,
+  highEnabled: true,
   highType: 'high-shelf',
   highGainDb: 0,
   highFrequencyHz: AUDIO_EQ_HIGH_FREQUENCY_HZ,
@@ -261,19 +269,23 @@ export function getAudioEqSettings(source?: AudioEqFieldSource | null): AudioEqS
     lowCutEnabled: source?.audioEqLowCutEnabled,
     lowCutFrequencyHz: source?.audioEqLowCutFrequencyHz,
     lowCutSlopeDbPerOct: source?.audioEqLowCutSlopeDbPerOct,
+    lowEnabled: source?.audioEqLowEnabled,
     lowType: source?.audioEqLowType,
     lowGainDb: source?.audioEqLowGainDb,
     lowFrequencyHz: source?.audioEqLowFrequencyHz,
     lowQ: source?.audioEqLowQ,
+    lowMidEnabled: source?.audioEqLowMidEnabled,
     lowMidType: source?.audioEqLowMidType,
     lowMidGainDb: source?.audioEqLowMidGainDb,
     lowMidFrequencyHz: source?.audioEqLowMidFrequencyHz,
     lowMidQ: source?.audioEqLowMidQ,
     midGainDb: source?.audioEqMidGainDb,
+    highMidEnabled: source?.audioEqHighMidEnabled,
     highMidType: source?.audioEqHighMidType,
     highMidGainDb: source?.audioEqHighMidGainDb,
     highMidFrequencyHz: source?.audioEqHighMidFrequencyHz,
     highMidQ: source?.audioEqHighMidQ,
+    highEnabled: source?.audioEqHighEnabled,
     highType: source?.audioEqHighType,
     highGainDb: source?.audioEqHighGainDb,
     highFrequencyHz: source?.audioEqHighFrequencyHz,
@@ -451,6 +463,10 @@ export function resolveAudioEqSettings(
     lowCutEnabled: band1Enabled && band1Type === 'high-pass',
     lowCutFrequencyHz: band1FrequencyHz,
     lowCutSlopeDbPerOct: band1SlopeDbPerOct,
+    lowEnabled: resolveBoolean(
+      getSettingsValue(settings, fields, 'lowEnabled', 'audioEqLowEnabled'),
+      DEFAULT_AUDIO_EQ_SETTINGS.lowEnabled,
+    ),
     lowType: clampAudioEqInnerBandType(
       getSettingsValue(settings, fields, 'lowType', 'audioEqLowType'),
       DEFAULT_AUDIO_EQ_SETTINGS.lowType,
@@ -467,6 +483,10 @@ export function resolveAudioEqSettings(
     lowQ: clampAudioEqQ(
       Number(getSettingsValue(settings, fields, 'lowQ', 'audioEqLowQ')),
       DEFAULT_AUDIO_EQ_SETTINGS.lowQ,
+    ),
+    lowMidEnabled: resolveBoolean(
+      getSettingsValue(settings, fields, 'lowMidEnabled', 'audioEqLowMidEnabled'),
+      DEFAULT_AUDIO_EQ_SETTINGS.lowMidEnabled,
     ),
     lowMidType: clampAudioEqInnerBandType(
       getSettingsValue(settings, fields, 'lowMidType', 'audioEqLowMidType'),
@@ -488,6 +508,10 @@ export function resolveAudioEqSettings(
     midGainDb: clampAudioEqGainDb(
       Number(getSettingsValue(settings, fields, 'midGainDb', 'audioEqMidGainDb')),
     ),
+    highMidEnabled: resolveBoolean(
+      getSettingsValue(settings, fields, 'highMidEnabled', 'audioEqHighMidEnabled'),
+      DEFAULT_AUDIO_EQ_SETTINGS.highMidEnabled,
+    ),
     highMidType: clampAudioEqInnerBandType(
       getSettingsValue(settings, fields, 'highMidType', 'audioEqHighMidType'),
       DEFAULT_AUDIO_EQ_SETTINGS.highMidType,
@@ -504,6 +528,10 @@ export function resolveAudioEqSettings(
     highMidQ: clampAudioEqQ(
       Number(getSettingsValue(settings, fields, 'highMidQ', 'audioEqHighMidQ')),
       DEFAULT_AUDIO_EQ_SETTINGS.highMidQ,
+    ),
+    highEnabled: resolveBoolean(
+      getSettingsValue(settings, fields, 'highEnabled', 'audioEqHighEnabled'),
+      DEFAULT_AUDIO_EQ_SETTINGS.highEnabled,
     ),
     highType: clampAudioEqInnerBandType(
       getSettingsValue(settings, fields, 'highType', 'audioEqHighType'),
@@ -617,15 +645,15 @@ export function isAudioEqStageActive(stage?: AudioEqSettings | ResolvedAudioEqSe
   return (
     (!!stage.band1Enabled && stage.band1Type === 'high-pass')
     || (!!stage.band1Enabled && stage.band1Type !== 'high-pass' && Math.abs(stage.band1GainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
-    || (stage.lowType === 'notch')
-    || Math.abs(stage.lowGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
-    || (stage.lowMidType === 'notch')
-    || Math.abs(stage.lowMidGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
+    || (!!stage.lowEnabled && stage.lowType === 'notch')
+    || (!!stage.lowEnabled && Math.abs(stage.lowGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
+    || (!!stage.lowMidEnabled && stage.lowMidType === 'notch')
+    || (!!stage.lowMidEnabled && Math.abs(stage.lowMidGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
     || Math.abs(stage.midGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
-    || (stage.highMidType === 'notch')
-    || Math.abs(stage.highMidGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
-    || (stage.highType === 'notch')
-    || Math.abs(stage.highGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON
+    || (!!stage.highMidEnabled && stage.highMidType === 'notch')
+    || (!!stage.highMidEnabled && Math.abs(stage.highMidGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
+    || (!!stage.highEnabled && stage.highType === 'notch')
+    || (!!stage.highEnabled && Math.abs(stage.highGainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
     || (!!stage.band6Enabled && stage.band6Type === 'low-pass')
     || (!!stage.band6Enabled && stage.band6Type !== 'low-pass' && Math.abs(stage.band6GainDb ?? 0) > AUDIO_EQ_ACTIVE_EPSILON)
   );
@@ -653,19 +681,23 @@ export function areAudioEqStagesEqual(
       || leftStage.lowCutEnabled !== rightStage.lowCutEnabled
       || leftStage.lowCutFrequencyHz !== rightStage.lowCutFrequencyHz
       || leftStage.lowCutSlopeDbPerOct !== rightStage.lowCutSlopeDbPerOct
+      || leftStage.lowEnabled !== rightStage.lowEnabled
       || leftStage.lowType !== rightStage.lowType
       || leftStage.lowGainDb !== rightStage.lowGainDb
       || leftStage.lowFrequencyHz !== rightStage.lowFrequencyHz
       || leftStage.lowQ !== rightStage.lowQ
+      || leftStage.lowMidEnabled !== rightStage.lowMidEnabled
       || leftStage.lowMidType !== rightStage.lowMidType
       || leftStage.lowMidGainDb !== rightStage.lowMidGainDb
       || leftStage.lowMidFrequencyHz !== rightStage.lowMidFrequencyHz
       || leftStage.lowMidQ !== rightStage.lowMidQ
       || leftStage.midGainDb !== rightStage.midGainDb
+      || leftStage.highMidEnabled !== rightStage.highMidEnabled
       || leftStage.highMidType !== rightStage.highMidType
       || leftStage.highMidGainDb !== rightStage.highMidGainDb
       || leftStage.highMidFrequencyHz !== rightStage.highMidFrequencyHz
       || leftStage.highMidQ !== rightStage.highMidQ
+      || leftStage.highEnabled !== rightStage.highEnabled
       || leftStage.highType !== rightStage.highType
       || leftStage.highGainDb !== rightStage.highGainDb
       || leftStage.highFrequencyHz !== rightStage.highFrequencyHz
@@ -1193,7 +1225,7 @@ function getResolvedAudioEqResponseGainDb(
     }
   }
 
-  if (stage.lowType === 'notch' || Math.abs(stage.lowGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.lowEnabled && (stage.lowType === 'notch' || Math.abs(stage.lowGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     gainDb += evaluateBiquadMagnitudeDb(
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.lowType), stage.lowFrequencyHz, stage.lowGainDb, sampleRate, stage.lowQ),
       frequencyHz,
@@ -1201,7 +1233,7 @@ function getResolvedAudioEqResponseGainDb(
     );
   }
 
-  if (stage.lowMidType === 'notch' || Math.abs(stage.lowMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.lowMidEnabled && (stage.lowMidType === 'notch' || Math.abs(stage.lowMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     gainDb += evaluateBiquadMagnitudeDb(
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.lowMidType), stage.lowMidFrequencyHz, stage.lowMidGainDb, sampleRate, stage.lowMidQ),
       frequencyHz,
@@ -1217,7 +1249,7 @@ function getResolvedAudioEqResponseGainDb(
     );
   }
 
-  if (stage.highMidType === 'notch' || Math.abs(stage.highMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.highMidEnabled && (stage.highMidType === 'notch' || Math.abs(stage.highMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     gainDb += evaluateBiquadMagnitudeDb(
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.highMidType), stage.highMidFrequencyHz, stage.highMidGainDb, sampleRate, stage.highMidQ),
       frequencyHz,
@@ -1225,7 +1257,7 @@ function getResolvedAudioEqResponseGainDb(
     );
   }
 
-  if (stage.highType === 'notch' || Math.abs(stage.highGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.highEnabled && (stage.highType === 'notch' || Math.abs(stage.highGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     gainDb += evaluateBiquadMagnitudeDb(
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.highType), stage.highFrequencyHz, stage.highGainDb, sampleRate, stage.highQ),
       frequencyHz,
@@ -1364,14 +1396,14 @@ function applyAudioEqStage(
     }
   }
 
-  if (stage.lowType === 'notch' || Math.abs(stage.lowGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.lowEnabled && (stage.lowType === 'notch' || Math.abs(stage.lowGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     output = applyBiquad(
       output,
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.lowType), stage.lowFrequencyHz, stage.lowGainDb, sampleRate, stage.lowQ),
     );
   }
 
-  if (stage.lowMidType === 'notch' || Math.abs(stage.lowMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.lowMidEnabled && (stage.lowMidType === 'notch' || Math.abs(stage.lowMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     output = applyBiquad(
       output,
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.lowMidType), stage.lowMidFrequencyHz, stage.lowMidGainDb, sampleRate, stage.lowMidQ),
@@ -1385,14 +1417,14 @@ function applyAudioEqStage(
     );
   }
 
-  if (stage.highMidType === 'notch' || Math.abs(stage.highMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.highMidEnabled && (stage.highMidType === 'notch' || Math.abs(stage.highMidGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     output = applyBiquad(
       output,
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.highMidType), stage.highMidFrequencyHz, stage.highMidGainDb, sampleRate, stage.highMidQ),
     );
   }
 
-  if (stage.highType === 'notch' || Math.abs(stage.highGainDb) > AUDIO_EQ_ACTIVE_EPSILON) {
+  if (stage.highEnabled && (stage.highType === 'notch' || Math.abs(stage.highGainDb) > AUDIO_EQ_ACTIVE_EPSILON)) {
     output = applyBiquad(
       output,
       buildEqBiquadCoefficients(getInnerBandBiquadType(stage.highType), stage.highFrequencyHz, stage.highGainDb, sampleRate, stage.highQ),

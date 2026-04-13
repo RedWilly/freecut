@@ -45,19 +45,23 @@ type BaseTimelineItem = {
   audioEqLowCutEnabled?: boolean; // Enable low cut / high-pass filter
   audioEqLowCutFrequencyHz?: number; // Low cut frequency in Hz
   audioEqLowCutSlopeDbPerOct?: 6 | 12 | 18 | 24; // Low cut slope
+  audioEqLowEnabled?: boolean;
   audioEqLowType?: import('@/types/audio').AudioEqInnerBandType;
   audioEqLowGainDb?: number; // Low shelf EQ gain in dB (default: 0)
   audioEqLowFrequencyHz?: number; // Low shelf center frequency in Hz
   audioEqLowQ?: number; // Low band Q for peak/notch/shelf shape
+  audioEqLowMidEnabled?: boolean;
   audioEqLowMidType?: import('@/types/audio').AudioEqInnerBandType;
   audioEqLowMidGainDb?: number; // Low-mid peaking EQ gain in dB (default: 0)
   audioEqLowMidFrequencyHz?: number; // Low-mid center frequency in Hz
   audioEqLowMidQ?: number; // Low-mid bandwidth/Q
   audioEqMidGainDb?: number; // Legacy center band gain in dB (default: 0)
+  audioEqHighMidEnabled?: boolean;
   audioEqHighMidType?: import('@/types/audio').AudioEqInnerBandType;
   audioEqHighMidGainDb?: number; // High-mid peaking EQ gain in dB (default: 0)
   audioEqHighMidFrequencyHz?: number; // High-mid center frequency in Hz
   audioEqHighMidQ?: number; // High-mid bandwidth/Q
+  audioEqHighEnabled?: boolean;
   audioEqHighType?: import('@/types/audio').AudioEqInnerBandType;
   audioEqHighGainDb?: number; // High shelf EQ gain in dB (default: 0)
   audioEqHighFrequencyHz?: number; // High shelf center frequency in Hz

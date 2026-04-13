@@ -15,6 +15,7 @@ export interface AudioMixerTrack {
   muted: boolean;
   solo: boolean;
   volume: number; // dB, -60 to +12
+  eqEnabled?: boolean;
   itemIds: string[]; // item IDs on this track (for live gain during fader drag)
 }
 
@@ -44,6 +45,7 @@ export interface AudioMixerViewProps {
   onBusEqToggle?: () => void;
   activeEqTrackId?: string | null;
   busEqActive?: boolean;
+  busEqEnabled?: boolean;
   headerExtra?: ReactNode;
   /** Expanded layout for floating panel — wider strips, bigger meters */
   expanded?: boolean;
@@ -930,8 +932,7 @@ export const AudioMixerView = memo(function AudioMixerView({
   onTrackSoloToggle,
   onTrackEqToggle,
   onBusEqToggle,
-  activeEqTrackId,
-  busEqActive,
+  busEqEnabled,
   headerExtra,
   expanded,
 }: AudioMixerViewProps) {
@@ -987,7 +988,7 @@ export const AudioMixerView = memo(function AudioMixerView({
                 onMuteToggle={onTrackMuteToggle}
                 onSoloToggle={onTrackSoloToggle}
                 onEqToggle={onTrackEqToggle}
-                eqActive={activeEqTrackId === track.id}
+                eqActive={!!track.eqEnabled}
               />
             ))}
 
@@ -1014,7 +1015,7 @@ export const AudioMixerView = memo(function AudioMixerView({
           onVolumeChange={onMasterVolumeChange}
           onMuteToggle={onMasterMuteToggle}
           onEqToggle={onBusEqToggle}
-          eqActive={busEqActive}
+          eqActive={!!busEqEnabled}
         />
       </div>
     </aside>

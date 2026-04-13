@@ -398,6 +398,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       muted: track.muted,
       solo: track.solo,
       volume: track.volume || 0,
+      eqEnabled: !!track.audioEq && track.audioEq.enabled !== false,
       itemIds: track.items.map((item) => item.id),
     }));
   }, [mixerSourceTracks]);
@@ -411,11 +412,6 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       targetTrackIds: mixerSourceTracks.map((track) => track.id),
     });
   }, [combinedTracks, mixerFloating, mixerSourceTracks, panelMode, perTrackSources, waveformsByMediaId]);
-
-  const activeEqTrackId = eqPanelTarget?.kind === 'track'
-    ? eqPanelTarget.trackId
-    : null;
-  const busEqActive = eqPanelTarget?.kind === 'bus';
 
   const eqPanelDescriptor = useMemo(() => {
     if (!eqPanelTarget) return null;
@@ -641,20 +637,31 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   }, [applyMuteSoloLiveGains]);
 
   const handleTrackEqToggle = useCallback((trackId: string) => {
-    setEqPanelTarget((current) => (
-      current?.kind === 'track' && current.trackId === trackId
-        ? null
-        : { kind: 'track', trackId }
-    ));
-  }, []);
+    if (eqPanelTarget?.kind === 'track' && eqPanelTarget.trackId === trackId) {
+      setEqPanelTarget(null);
+      return;
+    }
+
+    const targetTrack = useItemsStore.getState().tracks.find((track) => track.id === trackId);
+    if (targetTrack && !targetTrack.audioEq) {
+      handleTrackEqEnabledChange(trackId, true);
+    }
+
+    setEqPanelTarget({ kind: 'track', trackId });
+  }, [eqPanelTarget, handleTrackEqEnabledChange]);
 
   const handleBusEqToggle = useCallback(() => {
-    setEqPanelTarget((current) => (
-      current?.kind === 'bus'
-        ? null
-        : { kind: 'bus' }
-    ));
-  }, []);
+    if (eqPanelTarget?.kind === 'bus') {
+      setEqPanelTarget(null);
+      return;
+    }
+
+    if (!usePlaybackStore.getState().busAudioEq) {
+      handleBusEqEnabledChange(true);
+    }
+
+    setEqPanelTarget({ kind: 'bus' });
+  }, [eqPanelTarget, handleBusEqEnabledChange]);
 
   // ---------------------------------------------------------------------------
   // Master volume (dB <-> linear gain for bus fader)
@@ -736,8 +743,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
         onTrackSoloToggle={handleTrackSoloToggle}
         onTrackEqToggle={handleTrackEqToggle}
         onBusEqToggle={handleBusEqToggle}
-        activeEqTrackId={activeEqTrackId}
-        busEqActive={busEqActive}
+        busEqEnabled={!!busAudioEq && busAudioEq.enabled !== false}
         expanded
       />
     </FloatingPanel>
@@ -789,8 +795,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
           onTrackSoloToggle={handleTrackSoloToggle}
           onTrackEqToggle={handleTrackEqToggle}
           onBusEqToggle={handleBusEqToggle}
-          activeEqTrackId={activeEqTrackId}
-          busEqActive={busEqActive}
+          busEqEnabled={!!busAudioEq && busAudioEq.enabled !== false}
           headerExtra={modeDropdown}
         />
       </>

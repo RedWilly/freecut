@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { ChevronDown, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -120,26 +126,33 @@ function FilterTypeSelect({
   onChange: (value: FilterType) => void;
 }) {
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as FilterType)}>
-      <SelectTrigger
-        className="h-6 w-11 rounded-[4px] border-[#2e2e31] bg-[#151517] px-1.5 text-zinc-400"
-        title={FILTER_TYPE_LABELS[value]}
-      >
-        <FilterTypeGlyph type={value} />
-      </SelectTrigger>
-      <SelectContent className="w-14 min-w-14 rounded-[4px] border-[#2e2e31] bg-[#151517] p-1">
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-6 w-11 items-center justify-center gap-0.5 rounded-[4px] border border-[#2e2e31] bg-[#151517] px-1 text-zinc-400 transition-colors hover:text-zinc-200"
+          title={FILTER_TYPE_LABELS[value]}
+        >
+          <FilterTypeGlyph type={value} />
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="bottom" sideOffset={4} className="z-[80] w-14 min-w-14 rounded-[4px] border-[#2e2e31] bg-[#151517] p-1">
         {options.map((option) => (
-          <SelectItem
+          <DropdownMenuItem
             key={option}
-            value={option}
-            className="my-0.5 flex h-7 items-center justify-center rounded-[4px] px-2 text-zinc-300 focus:bg-white/10 focus:text-white"
+            className={cn(
+              'my-0.5 flex h-7 items-center justify-center rounded-[4px] px-2 text-zinc-300 focus:bg-white/10 focus:text-white',
+              option === value && 'bg-white/10 text-white',
+            )}
             title={FILTER_TYPE_LABELS[option]}
+            onSelect={() => onChange(option)}
           >
             <FilterTypeGlyph type={option} />
-          </SelectItem>
+          </DropdownMenuItem>
         ))}
-      </SelectContent>
-    </Select>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -243,39 +256,43 @@ function BandCard({
   return (
     <section
       className={cn(
-        'flex flex-col rounded-[6px] border border-[#2e2e31] bg-[#212124] transition-opacity',
+        'flex min-w-0 flex-col rounded-[6px] border border-[#2e2e31] bg-[#212124] transition-opacity',
         !active && onToggle && 'opacity-50',
       )}
     >
-      <div className="flex items-center gap-1.5 border-b border-[#28282b] px-2 py-2">
-        {onToggle ? (
-          <button
-            type="button"
-            onClick={onToggle}
-            className={cn(
-              'whitespace-nowrap rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-wide transition-colors',
-              active
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 border-b border-[#28282b] px-2 py-2">
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          {onToggle ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              className={cn(
+                'inline-flex h-5 min-w-[3.55rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors',
+                active
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+              )}
+            >
+              {title}
+            </button>
+          ) : (
+            <span className="inline-flex h-5 min-w-[3.55rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
+              {title}
+            </span>
+          )}
+          <div className="shrink-0">
+            {filterOptions && onFilterTypeChange ? (
+              <FilterTypeSelect value={filterType} options={filterOptions} onChange={onFilterTypeChange} />
+            ) : (
+              <div className="flex h-6 items-center rounded-[4px] border border-[#2e2e31] bg-[#151517] px-1.5 text-zinc-400">
+                <FilterTypeGlyph type={filterType} />
+              </div>
             )}
-          >
-            {title}
-          </button>
-        ) : (
-          <span className="whitespace-nowrap rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary-foreground">
-            {title}
-          </span>
-        )}
-        {filterOptions && onFilterTypeChange ? (
-          <FilterTypeSelect value={filterType} options={filterOptions} onChange={onFilterTypeChange} />
-        ) : (
-          <div className="flex h-6 items-center rounded-[4px] border border-[#2e2e31] bg-[#151517] px-1.5 text-zinc-400">
-            <FilterTypeGlyph type={filterType} />
           </div>
-        )}
+        </div>
         <button
           type="button"
-          className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] text-zinc-600 transition-colors hover:bg-white/5 hover:text-zinc-300"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] text-zinc-600 transition-colors hover:bg-white/5 hover:text-zinc-300"
           onClick={onReset}
           aria-label={`Reset ${title}`}
           title={`Reset ${title}`}
@@ -335,18 +352,22 @@ export function AudioEqPanelContent({
   const eqBand1GainDb = livePatch?.audioEqBand1GainDb ?? (resolvedTrackEq ? resolvedTrackEq.band1GainDb : getMixedValue(resolvedItemEqSettings, (item) => item.band1GainDb, 0));
   const eqBand1Q = livePatch?.audioEqBand1Q ?? (resolvedTrackEq ? resolvedTrackEq.band1Q : getMixedValue(resolvedItemEqSettings, (item) => item.band1Q, AUDIO_EQ_LOW_MID_Q));
   const eqBand1SlopeDbPerOct = livePatch?.audioEqBand1SlopeDbPerOct ?? (resolvedTrackEq ? resolvedTrackEq.band1SlopeDbPerOct : getMixedValue(resolvedItemEqSettings, (item) => item.band1SlopeDbPerOct, 12));
+  const eqLowEnabled = livePatch?.audioEqLowEnabled ?? (resolvedTrackEq ? resolvedTrackEq.lowEnabled : getMixedValue(resolvedItemEqSettings, (item) => item.lowEnabled, true));
   const eqLowType = livePatch?.audioEqLowType ?? (resolvedTrackEq ? resolvedTrackEq.lowType : getMixedValue(resolvedItemEqSettings, (item) => item.lowType, 'low-shelf'));
   const eqLow = livePatch?.audioEqLowGainDb ?? (resolvedTrackEq ? resolvedTrackEq.lowGainDb : getMixedValue(resolvedItemEqSettings, (item) => item.lowGainDb, 0));
   const eqLowFrequencyHz = livePatch?.audioEqLowFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.lowFrequencyHz : getMixedValue(resolvedItemEqSettings, (item) => item.lowFrequencyHz, AUDIO_EQ_LOW_FREQUENCY_HZ));
   const eqLowQ = livePatch?.audioEqLowQ ?? (resolvedTrackEq ? resolvedTrackEq.lowQ : getMixedValue(resolvedItemEqSettings, (item) => item.lowQ, AUDIO_EQ_LOW_MID_Q));
+  const eqLowMidEnabled = livePatch?.audioEqLowMidEnabled ?? (resolvedTrackEq ? resolvedTrackEq.lowMidEnabled : getMixedValue(resolvedItemEqSettings, (item) => item.lowMidEnabled, true));
   const eqLowMidType = livePatch?.audioEqLowMidType ?? (resolvedTrackEq ? resolvedTrackEq.lowMidType : getMixedValue(resolvedItemEqSettings, (item) => item.lowMidType, 'peaking'));
   const eqLowMid = livePatch?.audioEqLowMidGainDb ?? (resolvedTrackEq ? resolvedTrackEq.lowMidGainDb : getMixedValue(resolvedItemEqSettings, (item) => item.lowMidGainDb, 0));
   const eqLowMidFrequencyHz = livePatch?.audioEqLowMidFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.lowMidFrequencyHz : getMixedValue(resolvedItemEqSettings, (item) => item.lowMidFrequencyHz, AUDIO_EQ_LOW_MID_FREQUENCY_HZ));
   const eqLowMidQ = livePatch?.audioEqLowMidQ ?? (resolvedTrackEq ? resolvedTrackEq.lowMidQ : getMixedValue(resolvedItemEqSettings, (item) => item.lowMidQ, AUDIO_EQ_LOW_MID_Q));
+  const eqHighMidEnabled = livePatch?.audioEqHighMidEnabled ?? (resolvedTrackEq ? resolvedTrackEq.highMidEnabled : getMixedValue(resolvedItemEqSettings, (item) => item.highMidEnabled, true));
   const eqHighMidType = livePatch?.audioEqHighMidType ?? (resolvedTrackEq ? resolvedTrackEq.highMidType : getMixedValue(resolvedItemEqSettings, (item) => item.highMidType, 'peaking'));
   const eqHighMid = livePatch?.audioEqHighMidGainDb ?? (resolvedTrackEq ? resolvedTrackEq.highMidGainDb : getMixedValue(resolvedItemEqSettings, (item) => item.highMidGainDb, 0));
   const eqHighMidFrequencyHz = livePatch?.audioEqHighMidFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.highMidFrequencyHz : getMixedValue(resolvedItemEqSettings, (item) => item.highMidFrequencyHz, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ));
   const eqHighMidQ = livePatch?.audioEqHighMidQ ?? (resolvedTrackEq ? resolvedTrackEq.highMidQ : getMixedValue(resolvedItemEqSettings, (item) => item.highMidQ, AUDIO_EQ_HIGH_MID_Q));
+  const eqHighEnabled = livePatch?.audioEqHighEnabled ?? (resolvedTrackEq ? resolvedTrackEq.highEnabled : getMixedValue(resolvedItemEqSettings, (item) => item.highEnabled, true));
   const eqHighType = livePatch?.audioEqHighType ?? (resolvedTrackEq ? resolvedTrackEq.highType : getMixedValue(resolvedItemEqSettings, (item) => item.highType, 'high-shelf'));
   const eqHigh = livePatch?.audioEqHighGainDb ?? (resolvedTrackEq ? resolvedTrackEq.highGainDb : getMixedValue(resolvedItemEqSettings, (item) => item.highGainDb, 0));
   const eqHighFrequencyHz = livePatch?.audioEqHighFrequencyHz ?? (resolvedTrackEq ? resolvedTrackEq.highFrequencyHz : getMixedValue(resolvedItemEqSettings, (item) => item.highFrequencyHz, AUDIO_EQ_HIGH_FREQUENCY_HZ));
@@ -391,18 +412,22 @@ export function AudioEqPanelContent({
     eqBand1GainDb,
     eqBand1Q,
     eqBand1SlopeDbPerOct,
+    eqLowEnabled,
     eqLowType,
     eqLow,
     eqLowFrequencyHz,
     eqLowQ,
+    eqLowMidEnabled,
     eqLowMidType,
     eqLowMid,
     eqLowMidFrequencyHz,
     eqLowMidQ,
+    eqHighMidEnabled,
     eqHighMidType,
     eqHighMid,
     eqHighMidFrequencyHz,
     eqHighMidQ,
+    eqHighEnabled,
     eqHighType,
     eqHigh,
     eqHighFrequencyHz,
@@ -423,19 +448,23 @@ export function AudioEqPanelContent({
       band1GainDb: eqBand1GainDb === 'mixed' ? 0 : eqBand1GainDb,
       band1Q: eqBand1Q === 'mixed' ? AUDIO_EQ_LOW_MID_Q : eqBand1Q,
       band1SlopeDbPerOct: eqBand1SlopeDbPerOct === 'mixed' ? 12 : eqBand1SlopeDbPerOct,
+      lowEnabled: eqLowEnabled === 'mixed' ? true : eqLowEnabled,
       lowType: eqLowType === 'mixed' ? 'low-shelf' : eqLowType,
       lowGainDb: eqLow === 'mixed' ? 0 : eqLow,
       lowFrequencyHz: eqLowFrequencyHz === 'mixed' ? AUDIO_EQ_LOW_FREQUENCY_HZ : eqLowFrequencyHz,
       lowQ: eqLowQ === 'mixed' ? AUDIO_EQ_LOW_MID_Q : eqLowQ,
+      lowMidEnabled: eqLowMidEnabled === 'mixed' ? true : eqLowMidEnabled,
       lowMidType: eqLowMidType === 'mixed' ? 'peaking' : eqLowMidType,
       lowMidGainDb: eqLowMid === 'mixed' ? 0 : eqLowMid,
       lowMidFrequencyHz: eqLowMidFrequencyHz === 'mixed' ? AUDIO_EQ_LOW_MID_FREQUENCY_HZ : eqLowMidFrequencyHz,
       lowMidQ: eqLowMidQ === 'mixed' ? AUDIO_EQ_LOW_MID_Q : eqLowMidQ,
       midGainDb: 0,
+      highMidEnabled: eqHighMidEnabled === 'mixed' ? true : eqHighMidEnabled,
       highMidType: eqHighMidType === 'mixed' ? 'peaking' : eqHighMidType,
       highMidGainDb: eqHighMid === 'mixed' ? 0 : eqHighMid,
       highMidFrequencyHz: eqHighMidFrequencyHz === 'mixed' ? AUDIO_EQ_HIGH_MID_FREQUENCY_HZ : eqHighMidFrequencyHz,
       highMidQ: eqHighMidQ === 'mixed' ? AUDIO_EQ_HIGH_MID_Q : eqHighMidQ,
+      highEnabled: eqHighEnabled === 'mixed' ? true : eqHighEnabled,
       highType: eqHighType === 'mixed' ? 'high-shelf' : eqHighType,
       highGainDb: eqHigh === 'mixed' ? 0 : eqHigh,
       highFrequencyHz: eqHighFrequencyHz === 'mixed' ? AUDIO_EQ_HIGH_FREQUENCY_HZ : eqHighFrequencyHz,
@@ -454,15 +483,18 @@ export function AudioEqPanelContent({
       eqBand1GainDb,
       eqBand1Q,
       eqBand1SlopeDbPerOct,
+      eqLowEnabled,
       eqLowType,
       eqHigh,
       eqHighFrequencyHz,
       eqHighQ,
       eqHighType,
+      eqHighEnabled,
       eqHighMid,
       eqHighMidFrequencyHz,
       eqHighMidQ,
       eqHighMidType,
+      eqHighMidEnabled,
       eqLow,
       eqLowFrequencyHz,
       eqLowQ,
@@ -470,6 +502,7 @@ export function AudioEqPanelContent({
       eqLowMidFrequencyHz,
       eqLowMidQ,
       eqLowMidType,
+      eqLowMidEnabled,
       eqBand6Enabled,
       eqBand6Type,
       eqBand6FrequencyHz,
@@ -658,7 +691,9 @@ export function AudioEqPanelContent({
               filterType={eqLowType === 'mixed' ? 'low-shelf' : eqLowType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqLowType', value === 'low-pass' || value === 'high-pass' ? 'low-shelf' : value)}
-              onReset={() => handleEqPatchChange({ audioEqLowType: 'low-shelf', audioEqLowFrequencyHz: AUDIO_EQ_LOW_FREQUENCY_HZ, audioEqLowGainDb: 0, audioEqLowQ: AUDIO_EQ_LOW_MID_Q })}
+              active={eqLowEnabled === 'mixed' ? false : eqLowEnabled}
+              onToggle={() => handleEqFieldChange('audioEqLowEnabled', eqLowEnabled === 'mixed' ? true : !eqLowEnabled)}
+              onReset={() => handleEqPatchChange({ audioEqLowEnabled: true, audioEqLowType: 'low-shelf', audioEqLowFrequencyHz: AUDIO_EQ_LOW_FREQUENCY_HZ, audioEqLowGainDb: 0, audioEqLowQ: AUDIO_EQ_LOW_MID_Q })}
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
@@ -694,7 +729,9 @@ export function AudioEqPanelContent({
               filterType={eqLowMidType === 'mixed' ? 'peaking' : eqLowMidType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqLowMidType', value === 'low-pass' || value === 'high-pass' ? 'peaking' : value)}
-              onReset={() => handleEqPatchChange({ audioEqLowMidType: 'peaking', audioEqLowMidFrequencyHz: AUDIO_EQ_LOW_MID_FREQUENCY_HZ, audioEqLowMidGainDb: 0, audioEqLowMidQ: AUDIO_EQ_LOW_MID_Q })}
+              active={eqLowMidEnabled === 'mixed' ? false : eqLowMidEnabled}
+              onToggle={() => handleEqFieldChange('audioEqLowMidEnabled', eqLowMidEnabled === 'mixed' ? true : !eqLowMidEnabled)}
+              onReset={() => handleEqPatchChange({ audioEqLowMidEnabled: true, audioEqLowMidType: 'peaking', audioEqLowMidFrequencyHz: AUDIO_EQ_LOW_MID_FREQUENCY_HZ, audioEqLowMidGainDb: 0, audioEqLowMidQ: AUDIO_EQ_LOW_MID_Q })}
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
@@ -730,7 +767,9 @@ export function AudioEqPanelContent({
               filterType={eqHighMidType === 'mixed' ? 'peaking' : eqHighMidType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqHighMidType', value === 'low-pass' || value === 'high-pass' ? 'peaking' : value)}
-              onReset={() => handleEqPatchChange({ audioEqHighMidType: 'peaking', audioEqHighMidFrequencyHz: AUDIO_EQ_HIGH_MID_FREQUENCY_HZ, audioEqHighMidGainDb: 0, audioEqHighMidQ: AUDIO_EQ_HIGH_MID_Q })}
+              active={eqHighMidEnabled === 'mixed' ? false : eqHighMidEnabled}
+              onToggle={() => handleEqFieldChange('audioEqHighMidEnabled', eqHighMidEnabled === 'mixed' ? true : !eqHighMidEnabled)}
+              onReset={() => handleEqPatchChange({ audioEqHighMidEnabled: true, audioEqHighMidType: 'peaking', audioEqHighMidFrequencyHz: AUDIO_EQ_HIGH_MID_FREQUENCY_HZ, audioEqHighMidGainDb: 0, audioEqHighMidQ: AUDIO_EQ_HIGH_MID_Q })}
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">
@@ -766,7 +805,9 @@ export function AudioEqPanelContent({
               filterType={eqHighType === 'mixed' ? 'high-shelf' : eqHighType}
               filterOptions={INNER_FILTER_OPTIONS}
               onFilterTypeChange={(value) => handleEqFieldChange('audioEqHighType', value === 'low-pass' || value === 'high-pass' ? 'high-shelf' : value)}
-              onReset={() => handleEqPatchChange({ audioEqHighType: 'high-shelf', audioEqHighFrequencyHz: AUDIO_EQ_HIGH_FREQUENCY_HZ, audioEqHighGainDb: 0, audioEqHighQ: AUDIO_EQ_HIGH_MID_Q })}
+              active={eqHighEnabled === 'mixed' ? false : eqHighEnabled}
+              onToggle={() => handleEqFieldChange('audioEqHighEnabled', eqHighEnabled === 'mixed' ? true : !eqHighEnabled)}
+              onReset={() => handleEqPatchChange({ audioEqHighEnabled: true, audioEqHighType: 'high-shelf', audioEqHighFrequencyHz: AUDIO_EQ_HIGH_FREQUENCY_HZ, audioEqHighGainDb: 0, audioEqHighQ: AUDIO_EQ_HIGH_MID_Q })}
             >
               <div className="text-[10px] text-zinc-500">Frequency</div>
               <div className="flex items-center gap-1.5">

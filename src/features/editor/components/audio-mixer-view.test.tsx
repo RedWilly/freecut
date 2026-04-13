@@ -697,4 +697,91 @@ describe('AudioMixerView', () => {
     expect(handleTrackEqToggle).toHaveBeenCalledWith('track-1');
     expect(handleBusEqToggle).toHaveBeenCalledTimes(1);
   });
+
+  it('lights EQ buttons from enabled state instead of floating-panel selection state', () => {
+    const { container, rerender } = render(
+      <AudioMixerView
+        tracks={[
+          {
+            id: 'track-1',
+            name: 'A1',
+            kind: 'audio',
+            muted: false,
+            solo: false,
+            volume: 0,
+            eqEnabled: false,
+            itemIds: ['item-1'],
+          },
+        ]}
+        perTrackLevels={new Map()}
+        masterEstimate={{
+          left: 0,
+          right: 0,
+          unresolvedSourceCount: 0,
+          resolvedSourceCount: 0,
+        }}
+        isPlaying={false}
+        onTrackVolumeChange={() => undefined}
+        onTrackMuteToggle={() => undefined}
+        onTrackSoloToggle={() => undefined}
+        onTrackEqToggle={() => undefined}
+        onBusEqToggle={() => undefined}
+        activeEqTrackId="track-1"
+        busEqActive={true}
+        busEqEnabled={false}
+        masterVolumeDb={0}
+        masterMuted={false}
+        onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
+      />,
+    );
+
+    const trackEqButton = container.querySelector('[aria-label="EQ A1"]') as HTMLButtonElement | null;
+    const busEqButton = container.querySelector('[aria-label="EQ Bus 1"]') as HTMLButtonElement | null;
+
+    expect(trackEqButton).not.toBeNull();
+    expect(busEqButton).not.toBeNull();
+    expect(trackEqButton).toHaveAttribute('aria-pressed', 'false');
+    expect(busEqButton).toHaveAttribute('aria-pressed', 'false');
+
+    rerender(
+      <AudioMixerView
+        tracks={[
+          {
+            id: 'track-1',
+            name: 'A1',
+            kind: 'audio',
+            muted: false,
+            solo: false,
+            volume: 0,
+            eqEnabled: true,
+            itemIds: ['item-1'],
+          },
+        ]}
+        perTrackLevels={new Map()}
+        masterEstimate={{
+          left: 0,
+          right: 0,
+          unresolvedSourceCount: 0,
+          resolvedSourceCount: 0,
+        }}
+        isPlaying={false}
+        onTrackVolumeChange={() => undefined}
+        onTrackMuteToggle={() => undefined}
+        onTrackSoloToggle={() => undefined}
+        onTrackEqToggle={() => undefined}
+        onBusEqToggle={() => undefined}
+        activeEqTrackId={null}
+        busEqActive={false}
+        busEqEnabled={true}
+        masterVolumeDb={0}
+        masterMuted={false}
+        onMasterVolumeChange={() => undefined}
+        onMasterMuteToggle={() => undefined}
+      />,
+    );
+
+    expect(trackEqButton).toHaveAttribute('aria-pressed', 'true');
+    expect(busEqButton).toHaveAttribute('aria-pressed', 'true');
+  });
 });

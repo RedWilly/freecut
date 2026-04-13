@@ -117,18 +117,22 @@ function configureStageBiquads(
   );
   configureFilterNode(
     stageNodes.lowNode,
-    targetStage.lowType === 'low-shelf' ? 'lowshelf' : targetStage.lowType === 'high-shelf' ? 'highshelf' : targetStage.lowType === 'notch' ? 'notch' : 'peaking',
+    targetStage.lowEnabled
+      ? (targetStage.lowType === 'low-shelf' ? 'lowshelf' : targetStage.lowType === 'high-shelf' ? 'highshelf' : targetStage.lowType === 'notch' ? 'notch' : 'peaking')
+      : 'peaking',
     targetStage.lowFrequencyHz,
-    targetStage.lowGainDb,
-    targetStage.lowQ,
+    targetStage.lowEnabled ? targetStage.lowGainDb : 0,
+    targetStage.lowEnabled ? targetStage.lowQ : 1,
     write,
   );
   configureFilterNode(
     stageNodes.lowMidNode,
-    targetStage.lowMidType === 'low-shelf' ? 'lowshelf' : targetStage.lowMidType === 'high-shelf' ? 'highshelf' : targetStage.lowMidType === 'notch' ? 'notch' : 'peaking',
+    targetStage.lowMidEnabled
+      ? (targetStage.lowMidType === 'low-shelf' ? 'lowshelf' : targetStage.lowMidType === 'high-shelf' ? 'highshelf' : targetStage.lowMidType === 'notch' ? 'notch' : 'peaking')
+      : 'peaking',
     targetStage.lowMidFrequencyHz,
-    targetStage.lowMidGainDb,
-    targetStage.lowMidQ,
+    targetStage.lowMidEnabled ? targetStage.lowMidGainDb : 0,
+    targetStage.lowMidEnabled ? targetStage.lowMidQ : 1,
     write,
   );
   configureFilterNode(
@@ -141,18 +145,22 @@ function configureStageBiquads(
   );
   configureFilterNode(
     stageNodes.highMidNode,
-    targetStage.highMidType === 'low-shelf' ? 'lowshelf' : targetStage.highMidType === 'high-shelf' ? 'highshelf' : targetStage.highMidType === 'notch' ? 'notch' : 'peaking',
+    targetStage.highMidEnabled
+      ? (targetStage.highMidType === 'low-shelf' ? 'lowshelf' : targetStage.highMidType === 'high-shelf' ? 'highshelf' : targetStage.highMidType === 'notch' ? 'notch' : 'peaking')
+      : 'peaking',
     targetStage.highMidFrequencyHz,
-    targetStage.highMidGainDb,
-    targetStage.highMidQ,
+    targetStage.highMidEnabled ? targetStage.highMidGainDb : 0,
+    targetStage.highMidEnabled ? targetStage.highMidQ : 1,
     write,
   );
   configureFilterNode(
     stageNodes.highNode,
-    targetStage.highType === 'low-shelf' ? 'lowshelf' : targetStage.highType === 'high-shelf' ? 'highshelf' : targetStage.highType === 'notch' ? 'notch' : 'peaking',
+    targetStage.highEnabled
+      ? (targetStage.highType === 'low-shelf' ? 'lowshelf' : targetStage.highType === 'high-shelf' ? 'highshelf' : targetStage.highType === 'notch' ? 'notch' : 'peaking')
+      : 'peaking',
     targetStage.highFrequencyHz,
-    targetStage.highGainDb,
-    targetStage.highQ,
+    targetStage.highEnabled ? targetStage.highGainDb : 0,
+    targetStage.highEnabled ? targetStage.highQ : 1,
     write,
   );
   configureFilterNode(

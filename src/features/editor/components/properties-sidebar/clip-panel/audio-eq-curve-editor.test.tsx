@@ -74,8 +74,8 @@ describe('AudioEqCurveEditor', () => {
 
     expect(screen.getByText('Mixed EQ values')).toBeInTheDocument();
 
-    const lowCutHandle = document.querySelector('[data-eq-band="band1"]') as HTMLButtonElement | null;
-    fireEvent.pointerDown(lowCutHandle!, { pointerId: 2, clientX: 24, clientY: 120 });
+    const lowHandle = document.querySelector('[data-eq-band="band2"]') as HTMLButtonElement | null;
+    fireEvent.pointerDown(lowHandle!, { pointerId: 2, clientX: 24, clientY: 120 });
 
     expect(onLiveChange).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
@@ -90,9 +90,10 @@ describe('AudioEqCurveEditor', () => {
       />,
     );
 
-    expect(document.querySelector('[data-eq-band="band1"] [data-eq-band-number="1"]')).not.toBeNull();
+    expect(document.querySelector('[data-eq-band="band1"]')).toBeNull();
+    expect(document.querySelector('[data-eq-band="band2"] [data-eq-band-number="2"]')).not.toBeNull();
     expect(document.querySelector('[data-eq-band="band4"] [data-eq-band-number="4"]')).not.toBeNull();
-    expect(document.querySelector('[data-eq-band="band6"] [data-eq-band-number="6"]')).not.toBeNull();
+    expect(document.querySelector('[data-eq-band="band6"]')).toBeNull();
     expect(document.querySelector('[data-eq-band="mid"]')).toBeNull();
     expect(screen.getByText('-80')).toBeInTheDocument();
   });
@@ -175,8 +176,8 @@ describe('AudioEqCurveEditor', () => {
       />,
     );
 
-    const lowCutHandle = document.querySelector('[data-eq-band="band1"]') as HTMLButtonElement | null;
-    const disabledTop = parseFloat(lowCutHandle!.style.top);
+    expect(document.querySelector('[data-eq-band="band1"]')).toBeNull();
+    expect(document.querySelector('[data-eq-band="band6"]')).toBeNull();
 
     rerender(
       <AudioEqCurveEditor
@@ -192,8 +193,9 @@ describe('AudioEqCurveEditor', () => {
     const enabledLowCutHandle = document.querySelector('[data-eq-band="band1"]') as HTMLButtonElement | null;
     const enabledHighCutHandle = document.querySelector('[data-eq-band="band6"]') as HTMLButtonElement | null;
 
-    expect(parseFloat(enabledLowCutHandle!.style.top)).toBeCloseTo(disabledTop, 4);
-    expect(parseFloat(enabledHighCutHandle!.style.top)).toBeCloseTo(disabledTop, 4);
+    expect(enabledLowCutHandle).not.toBeNull();
+    expect(enabledHighCutHandle).not.toBeNull();
+    expect(parseFloat(enabledLowCutHandle!.style.top)).toBeCloseTo(parseFloat(enabledHighCutHandle!.style.top), 4);
   });
 
   it('keeps untouched handles fixed while a band is being dragged', () => {

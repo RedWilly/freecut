@@ -107,12 +107,14 @@ function normalizeFrameFields<T extends TimelineItem>(item: T): T {
     audioEqLowCutSlopeDbPerOct: item.audioEqLowCutSlopeDbPerOct === undefined
       ? undefined
       : clampAudioEqCutSlopeDbPerOct(item.audioEqLowCutSlopeDbPerOct),
+    audioEqLowEnabled: item.audioEqLowEnabled === undefined ? undefined : !!item.audioEqLowEnabled,
     audioEqLowType: item.audioEqLowType,
     audioEqLowGainDb: item.audioEqLowGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqLowGainDb),
     audioEqLowFrequencyHz: item.audioEqLowFrequencyHz === undefined
       ? undefined
       : clampAudioEqFrequencyHz(item.audioEqLowFrequencyHz, AUDIO_EQ_LOW_MIN_FREQUENCY_HZ, AUDIO_EQ_LOW_MAX_FREQUENCY_HZ, AUDIO_EQ_LOW_FREQUENCY_HZ),
     audioEqLowQ: item.audioEqLowQ === undefined ? undefined : clampAudioEqQ(item.audioEqLowQ, AUDIO_EQ_LOW_MID_Q),
+    audioEqLowMidEnabled: item.audioEqLowMidEnabled === undefined ? undefined : !!item.audioEqLowMidEnabled,
     audioEqLowMidType: item.audioEqLowMidType,
     audioEqLowMidGainDb: item.audioEqLowMidGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqLowMidGainDb),
     audioEqLowMidFrequencyHz: item.audioEqLowMidFrequencyHz === undefined
@@ -120,12 +122,14 @@ function normalizeFrameFields<T extends TimelineItem>(item: T): T {
       : clampAudioEqFrequencyHz(item.audioEqLowMidFrequencyHz, AUDIO_EQ_LOW_MID_MIN_FREQUENCY_HZ, AUDIO_EQ_LOW_MID_MAX_FREQUENCY_HZ, AUDIO_EQ_LOW_MID_FREQUENCY_HZ),
     audioEqLowMidQ: item.audioEqLowMidQ === undefined ? undefined : clampAudioEqQ(item.audioEqLowMidQ, AUDIO_EQ_LOW_MID_Q),
     audioEqMidGainDb: item.audioEqMidGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqMidGainDb),
+    audioEqHighMidEnabled: item.audioEqHighMidEnabled === undefined ? undefined : !!item.audioEqHighMidEnabled,
     audioEqHighMidType: item.audioEqHighMidType,
     audioEqHighMidGainDb: item.audioEqHighMidGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqHighMidGainDb),
     audioEqHighMidFrequencyHz: item.audioEqHighMidFrequencyHz === undefined
       ? undefined
       : clampAudioEqFrequencyHz(item.audioEqHighMidFrequencyHz, AUDIO_EQ_HIGH_MID_MIN_FREQUENCY_HZ, AUDIO_EQ_HIGH_MID_MAX_FREQUENCY_HZ, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ),
     audioEqHighMidQ: item.audioEqHighMidQ === undefined ? undefined : clampAudioEqQ(item.audioEqHighMidQ, AUDIO_EQ_HIGH_MID_Q),
+    audioEqHighEnabled: item.audioEqHighEnabled === undefined ? undefined : !!item.audioEqHighEnabled,
     audioEqHighType: item.audioEqHighType,
     audioEqHighGainDb: item.audioEqHighGainDb === undefined ? undefined : clampAudioEqGainDb(item.audioEqHighGainDb),
     audioEqHighFrequencyHz: item.audioEqHighFrequencyHz === undefined
@@ -234,6 +238,9 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   if (normalized.audioEqLowCutSlopeDbPerOct !== undefined) {
     normalized.audioEqLowCutSlopeDbPerOct = clampAudioEqCutSlopeDbPerOct(normalized.audioEqLowCutSlopeDbPerOct);
   }
+  if (normalized.audioEqLowEnabled !== undefined) {
+    normalized.audioEqLowEnabled = !!normalized.audioEqLowEnabled;
+  }
   if (normalized.audioEqLowGainDb !== undefined) {
     normalized.audioEqLowGainDb = clampAudioEqGainDb(normalized.audioEqLowGainDb);
   }
@@ -247,6 +254,9 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   }
   if (normalized.audioEqLowQ !== undefined) {
     normalized.audioEqLowQ = clampAudioEqQ(normalized.audioEqLowQ, AUDIO_EQ_LOW_MID_Q);
+  }
+  if (normalized.audioEqLowMidEnabled !== undefined) {
+    normalized.audioEqLowMidEnabled = !!normalized.audioEqLowMidEnabled;
   }
   if (normalized.audioEqLowMidGainDb !== undefined) {
     normalized.audioEqLowMidGainDb = clampAudioEqGainDb(normalized.audioEqLowMidGainDb);
@@ -265,6 +275,9 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   if (normalized.audioEqMidGainDb !== undefined) {
     normalized.audioEqMidGainDb = clampAudioEqGainDb(normalized.audioEqMidGainDb);
   }
+  if (normalized.audioEqHighMidEnabled !== undefined) {
+    normalized.audioEqHighMidEnabled = !!normalized.audioEqHighMidEnabled;
+  }
   if (normalized.audioEqHighMidGainDb !== undefined) {
     normalized.audioEqHighMidGainDb = clampAudioEqGainDb(normalized.audioEqHighMidGainDb);
   }
@@ -278,6 +291,9 @@ function normalizeItemUpdates(updates: Partial<TimelineItem>): Partial<TimelineI
   }
   if (normalized.audioEqHighMidQ !== undefined) {
     normalized.audioEqHighMidQ = clampAudioEqQ(normalized.audioEqHighMidQ, AUDIO_EQ_HIGH_MID_Q);
+  }
+  if (normalized.audioEqHighEnabled !== undefined) {
+    normalized.audioEqHighEnabled = !!normalized.audioEqHighEnabled;
   }
   if (normalized.audioEqHighGainDb !== undefined) {
     normalized.audioEqHighGainDb = clampAudioEqGainDb(normalized.audioEqHighGainDb);
