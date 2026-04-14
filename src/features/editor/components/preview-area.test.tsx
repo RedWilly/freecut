@@ -88,7 +88,7 @@ describe('PreviewArea mask editor toolbar', () => {
     expect(screen.getByText('Path Edit')).toBeInTheDocument();
     expect(screen.getByText('4 points')).toBeInTheDocument();
     expect(
-      screen.getByText('Drag points, handles, or the mask body to adjust the shape.')
+      screen.getByText('Drag points, handles, or the path body to adjust the shape.')
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Corner' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Bezier' })).toBeDisabled();

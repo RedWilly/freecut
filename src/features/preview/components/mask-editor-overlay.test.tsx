@@ -174,8 +174,12 @@ describe('MaskEditorOverlay shape pen flow', () => {
     const shape = items[0];
     expect(shape?.type).toBe('shape');
     expect(shape?.shapeType).toBe('path');
-    expect(shape?.isMask).toBe(true);
+    expect(shape?.label).toBe('Path');
+    expect(shape?.fillColor).toBe('#3b82f6');
+    expect(shape?.isMask).toBe(false);
+    expect(shape?.maskType).toBeUndefined();
     expect(shape?.from).toBe(48);
+    expect(shape?.durationInFrames).toBe(150);
     expect(useSelectionStore.getState().selectedItemIds).toEqual([shape!.id]);
 
     expect(shape?.transform?.width).toBeCloseTo(100);
@@ -357,7 +361,7 @@ describe('MaskEditorOverlay shape pen flow', () => {
     expect(useSelectionStore.getState().activeTrackId).toBe(newTrack?.id ?? null);
   });
 
-  it('creates a video track when pen masks spill into a new classic track lane', async () => {
+  it('creates a video track when pen paths spill into a new classic track lane', async () => {
     useMaskEditorStore.getState().startShapePenMode();
     usePlaybackStore.getState().setCurrentFrame(120);
     useSelectionStore.getState().setActiveTrack('track-v1');
@@ -442,6 +446,7 @@ describe('MaskEditorOverlay shape pen flow', () => {
     expect(newTrack?.kind).toBe('video');
     expect(newTrack?.name).toBe('V2');
     expect(newTrack?.order).toBeLessThan(0);
+    expect(shape?.isMask).toBe(false);
     expect(shape?.trackId).toBe(newTrack?.id);
     expect(shape?.from).toBe(120);
     expect(useSelectionStore.getState().activeTrackId).toBe(newTrack?.id ?? null);
@@ -671,7 +676,7 @@ describe('MaskEditorOverlay shape pen flow', () => {
     const shape = useItemsStore.getState().items[0];
     expect(shape?.type).toBe('shape');
     expect(shape?.shapeType).toBe('path');
-    expect(shape?.isMask).toBe(true);
+    expect(shape?.isMask).toBe(false);
   });
 
   it('renders the closing segment while dragging the final bezier', async () => {

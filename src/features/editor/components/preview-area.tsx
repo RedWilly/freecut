@@ -194,8 +194,8 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
       ? 'Click in the preview to place your first point.'
       : `Add ${remainingPenPoints} more ${remainingPenPoints === 1 ? 'point' : 'points'} to finish.`;
   const editModeHint = displayedEditVertexCount > 0
-    ? 'Drag points, handles, or the mask body to adjust the shape.'
-    : 'Drag inside the mask to move it.';
+    ? 'Drag points, handles, or the path body to adjust the shape.'
+    : 'Drag inside the path to move it.';
   const selectedVertexHint = selectedVertexCount === 0
     ? 'Select a point to enable corner and bezier conversion.'
     : selectedVertexCount === 1 && selectedVertexIndex !== null
@@ -504,7 +504,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
               className="border-t border-border panel-header flex items-center px-3 flex-shrink-0 gap-3 overflow-hidden"
               style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
               role="toolbar"
-              aria-label="Mask pen controls"
+              aria-label="Path pen controls"
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -548,7 +548,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
               className="border-t border-border panel-header flex items-center px-3 flex-shrink-0 gap-3 overflow-hidden"
               style={{ height: EDITOR_LAYOUT_CSS_VALUES.previewControlsHeight }}
               role="toolbar"
-              aria-label="Mask path edit controls"
+              aria-label="Path edit controls"
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <div className="flex items-center gap-2 flex-shrink-0">

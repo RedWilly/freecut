@@ -643,7 +643,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   <button
                     onClick={() => useMaskEditorStore.getState().startShapePenMode()}
                     className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-colors group"
-                    title="Draw a custom shape mask with the pen tool"
+                    title="Draw a custom path shape with the pen tool"
                   >
                     <div className="w-7 h-7 rounded border border-border bg-secondary/50 flex items-center justify-center group-hover:bg-secondary/70">
                       <Pen className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground" />

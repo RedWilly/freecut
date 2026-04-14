@@ -86,6 +86,7 @@ const DRAG_THRESHOLD = 3;
 const PEN_BEZIER_DRAG_THRESHOLD = 10;
 /** Segment sampling density for interior hit testing on curved paths */
 const CURVE_HIT_TEST_STEPS = 16;
+const DEFAULT_PATH_SHAPE_DURATION_SECONDS = 5;
 type PenInteraction =
   | {
       type: 'create';
@@ -921,7 +922,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     [hitTestPen, penVertices, setPenVertices, setHover]
   );
 
-  /** Commit pen vertices as a new ShapeItem with shapeType='path' and isMask=true */
+  /** Commit pen vertices as a new ShapeItem with shapeType='path'. */
   const commitShapePenPath = useCallback((verts: MaskVertex[]) => {
     const bounds = getPathBounds(verts);
     if (!bounds) {
@@ -966,7 +967,7 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     const items = useItemsStore.getState().items;
     const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState();
     const currentFrame = usePlaybackStore.getState().currentFrame;
-    const durationInFrames = fps * 60;
+    const durationInFrames = Math.max(1, Math.round(fps * DEFAULT_PATH_SHAPE_DURATION_SECONDS));
     let placement = findBestCanvasDropPlacement({
       tracks,
       items,
@@ -1037,12 +1038,11 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       trackId: placement.trackId,
       from: placement.from,
       durationInFrames,
-      label: 'Path Mask',
+      label: 'Path',
       shapeType: 'path',
       pathVertices: localVerts,
-      fillColor: '#ffffff',
-      isMask: true,
-      maskType: 'alpha',
+      fillColor: '#3b82f6',
+      isMask: false,
       transform: {
         x: centerX,
         y: centerY,
