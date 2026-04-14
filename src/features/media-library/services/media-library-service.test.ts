@@ -203,7 +203,15 @@ describe('MediaLibraryService', () => {
       expect(indexedDbMocks.createMedia).toHaveBeenCalledTimes(1);
       expect(indexedDbMocks.associateMediaWithProject).toHaveBeenCalledWith('project-1', result.id);
       expect(indexedDbMocks.saveThumbnail).toHaveBeenCalledTimes(1);
-      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenCalledWith(
+      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenNthCalledWith(
+        1,
+        result.id,
+        mockFile,
+        10,
+        { startTime: 0, endTime: 1 },
+      );
+      expect(filmstripCacheMocks.prewarmPriorityWindow).toHaveBeenNthCalledWith(
+        2,
         result.id,
         mockFile,
         10,

@@ -38,6 +38,34 @@ interface VisibleItemsSnapshot {
   visibleTransitions: Transition[];
 }
 
+function getHysteresisFrames(
+  pixelsPerSecond: number,
+  fps: number,
+): number {
+  return fps > 0 && pixelsPerSecond > 0
+    ? (HYSTERESIS_PX / pixelsPerSecond) * fps
+    : 0;
+}
+
+function shouldExpandMountedRange(
+  previousRange: VisibleFrameRange,
+  nextRange: VisibleFrameRange,
+  hysteresisFrames: number,
+): boolean {
+  return nextRange.start < previousRange.start - hysteresisFrames
+    || nextRange.end > previousRange.end + hysteresisFrames;
+}
+
+function mergeVisibleRanges(
+  previousRange: VisibleFrameRange,
+  nextRange: VisibleFrameRange,
+): VisibleFrameRange {
+  return {
+    start: Math.min(previousRange.start, nextRange.start),
+    end: Math.max(previousRange.end, nextRange.end),
+  };
+}
+
 function quantizeInteractionPixelsPerSecond(pixelsPerSecond: number): number {
   if (!Number.isFinite(pixelsPerSecond) || pixelsPerSecond <= 0) {
     return 1;
@@ -105,21 +133,52 @@ export function useVisibleItems(trackId: string) {
 
   useEffect(() => {
     const apply = () => {
-      const cullingPixelsPerSecond = getCullingPixelsPerSecond(useZoomStore.getState());
+      const zoomState = useZoomStore.getState();
+      const cullingPixelsPerSecond = getCullingPixelsPerSecond(zoomState);
       const { fps } = useTimelineSettingsStore.getState();
       const itemsState = useItemsStore.getState();
       const items = itemsState.itemsByTrackId[trackId];
       const transitions = getTrackVisibleTransitions(trackId);
+      const prev = lastVersionRef.current;
+
       const { scrollLeft, viewportWidth } = useTimelineViewportStore.getState();
       const newRange = getVisibleFrameRange(scrollLeft, viewportWidth, cullingPixelsPerSecond, fps);
+      const lastRange = lastRangeRef.current;
+      const hysteresisFrames = getHysteresisFrames(cullingPixelsPerSecond, fps);
+
+      // Keep zoom-in stable, but allow zoom-out to expand the mounted set during
+      // the gesture so newly visible clips do not wait for the settle timeout.
+      if (
+        zoomState.isZoomInteracting
+        && prev.fps === fps
+        && prev.itemsRef === items
+        && prev.transRef === transitions
+      ) {
+        if (!lastRange || !shouldExpandMountedRange(lastRange, newRange, hysteresisFrames)) {
+          return;
+        }
+
+        const expandedRange = mergeVisibleRanges(lastRange, newRange);
+        const visibleItems = getVisibleItemsForRange(items, expandedRange);
+        const visibleTransitions = getVisibleTransitionsForRange(
+          transitions,
+          itemsState.itemById,
+          visibleItems,
+          expandedRange
+        );
+        const next: VisibleItemsSnapshot = { visibleItems, visibleTransitions };
+
+        lastRangeRef.current = expandedRange;
+        lastVersionRef.current = { pps: cullingPixelsPerSecond, fps, itemsRef: items, transRef: transitions };
+        setSnapshot((prevSnap) => (areVisibleSnapshotsEqual(prevSnap, next) ? prevSnap : next));
+        return;
+      }
 
       // Fast path: if only scroll changed and the range shift is within
       // hysteresis, the visible item set is guaranteed unchanged.
       // Array references are compared (not lengths) so in-place mutations
       // (move, trim, property edits) that produce a new array always
       // bypass the fast path and recompute.
-      const prev = lastVersionRef.current;
-      const lastRange = lastRangeRef.current;
       if (
         lastRange
         && prev.pps === cullingPixelsPerSecond
@@ -127,9 +186,6 @@ export function useVisibleItems(trackId: string) {
         && prev.itemsRef === items
         && prev.transRef === transitions
       ) {
-        const hysteresisFrames = fps > 0 && cullingPixelsPerSecond > 0
-          ? (HYSTERESIS_PX / cullingPixelsPerSecond) * fps
-          : 0;
         if (
           Math.abs(newRange.start - lastRange.start) < hysteresisFrames
           && Math.abs(newRange.end - lastRange.end) < hysteresisFrames
@@ -156,9 +212,20 @@ export function useVisibleItems(trackId: string) {
     // Zoom-specific subscriber: skip when the quantized culling pps hasn't
     // changed — avoids redundant store reads on every wheel tick.
     let lastCullingPps = getCullingPixelsPerSecond(useZoomStore.getState());
+    let wasZoomInteracting = useZoomStore.getState().isZoomInteracting;
     const applyZoom = () => {
-      const nextPps = getCullingPixelsPerSecond(useZoomStore.getState());
-      if (nextPps === lastCullingPps) return;
+      const zoomState = useZoomStore.getState();
+      const nextPps = getCullingPixelsPerSecond(zoomState);
+      if (zoomState.isZoomInteracting) {
+        wasZoomInteracting = true;
+        if (nextPps === lastCullingPps) return;
+        lastCullingPps = nextPps;
+        apply();
+        return;
+      }
+
+      if (!wasZoomInteracting && nextPps === lastCullingPps) return;
+      wasZoomInteracting = false;
       lastCullingPps = nextPps;
       apply();
     };

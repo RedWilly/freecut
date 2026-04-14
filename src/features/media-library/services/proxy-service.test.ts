@@ -387,7 +387,15 @@ describe('proxyService.loadExistingProxies', () => {
       loadCompletedProxy: (proxyKey: string) => Promise<void>;
     }).loadCompletedProxy('proxy-video-4');
 
-    expect(timelineServiceMocks.filmstripCache.prewarmPriorityWindow).toHaveBeenCalledWith(
+    expect(timelineServiceMocks.filmstripCache.prewarmPriorityWindow).toHaveBeenNthCalledWith(
+      1,
+      'video-4',
+      expect.objectContaining({ size: 1024 }),
+      20,
+      { startTime: 0, endTime: 1 },
+    );
+    expect(timelineServiceMocks.filmstripCache.prewarmPriorityWindow).toHaveBeenNthCalledWith(
+      2,
       'video-4',
       expect.objectContaining({ size: 1024 }),
       20,

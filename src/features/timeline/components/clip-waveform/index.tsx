@@ -73,6 +73,7 @@ export const ClipWaveform = memo(function ClipWaveform({
   const containerRef = useRef<HTMLDivElement>(null);
   const pixelsPerSecondRef = useRef(pixelsPerSecond);
   pixelsPerSecondRef.current = pixelsPerSecond;
+  const amplitudesBufferRef = useRef<Float32Array>(new Float32Array(0));
   const [height, setHeight] = useState(0);
   const conformStartedRef = useRef(false);
   const { blobUrl, setBlobUrl, hasStartedLoadingRef, blobUrlVersion } = useMediaBlobUrl(mediaId);
@@ -212,12 +213,17 @@ export const ClipWaveform = memo(function ClipWaveform({
       const currentPps = Math.max(1, pixelsPerSecondRef.current);
       const centerY = height / 2;
       const maxWaveHeight = Math.max(1, (height / 2) - WAVEFORM_VERTICAL_PADDING_PX);
-      const amplitudes = new Array<number>(tileWidth + 1).fill(0);
+      const amplitudeCount = tileWidth + 1;
+      if (amplitudesBufferRef.current.length < amplitudeCount) {
+        amplitudesBufferRef.current = new Float32Array(amplitudeCount);
+      }
+      const amplitudes = amplitudesBufferRef.current;
+      amplitudes.fill(0, 0, amplitudeCount);
 
       ctx.beginPath();
       ctx.moveTo(0, centerY);
 
-      for (let x = 0; x <= tileWidth; x++) {
+      for (let x = 0; x < amplitudeCount; x++) {
         const timelinePosition = (tileOffset + x) / currentPps;
         const sourceTime = effectiveStart + (timelinePosition * speed);
 
@@ -274,10 +280,10 @@ export const ClipWaveform = memo(function ClipWaveform({
         amplitudes[x] = amp * maxWaveHeight;
       }
 
-      for (let x = 0; x <= tileWidth; x++) {
+      for (let x = 0; x < amplitudeCount; x++) {
         ctx.lineTo(x, centerY - amplitudes[x]!);
       }
-      for (let x = tileWidth; x >= 0; x--) {
+      for (let x = amplitudeCount - 1; x >= 0; x--) {
         ctx.lineTo(x, centerY + amplitudes[x]!);
       }
       ctx.closePath();
@@ -314,6 +320,7 @@ export const ClipWaveform = memo(function ClipWaveform({
     baseVersion: `${loadedSamples}:${height}`,
     pixelsPerSecond,
     activeTileCount,
+    phaseKey: mediaId,
   });
 
   // Show empty state for unsupported/failed waveforms (no infinite skeleton).

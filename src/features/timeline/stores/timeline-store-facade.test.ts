@@ -9,7 +9,11 @@ const indexedDbMocks = vi.hoisted(() => ({
 
 const playbackMocks = vi.hoisted(() => ({
   currentFrame: 0,
+  busAudioEq: undefined,
   setCurrentFrame: vi.fn(),
+  setBusAudioEq: vi.fn((value) => {
+    playbackMocks.busAudioEq = value;
+  }),
   pause: vi.fn(),
   play: vi.fn(),
   setPreviewFrame: vi.fn(),
@@ -97,8 +101,12 @@ describe('TimelineStoreFacade', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     playbackMocks.currentFrame = 0;
+    playbackMocks.busAudioEq = undefined;
     playbackMocks.setCurrentFrame.mockImplementation((frame: number) => {
       playbackMocks.currentFrame = frame;
+    });
+    playbackMocks.setBusAudioEq.mockImplementation((value) => {
+      playbackMocks.busAudioEq = value;
     });
     zoomMocks.level = 1;
     zoomMocks.setZoomLevel.mockImplementation((level: number) => {
@@ -611,6 +619,51 @@ describe('TimelineStoreFacade', () => {
       );
     });
 
+    it('does not persist ephemeral clip thumbnail URLs into the project timeline', async () => {
+      indexedDbMocks.getProject.mockResolvedValue({
+        id: 'project-1',
+        metadata: { fps: 30, width: 1920, height: 1080 },
+      });
+
+      useItemsStore.getState().setTracks([{
+        id: 'track-1',
+        name: 'Video',
+        height: 80,
+        locked: false,
+        visible: true,
+        muted: false,
+        solo: false,
+        order: 0,
+        items: [],
+      }]);
+      useItemsStore.getState().setItems([{
+        id: 'clip-1',
+        type: 'video',
+        trackId: 'track-1',
+        from: 0,
+        durationInFrames: 90,
+        label: 'clip.mp4',
+        src: 'blob:video',
+        mediaId: 'media-1',
+        thumbnailUrl: 'blob:thumb',
+      }]);
+
+      await useTimelineStore.getState().saveTimeline('project-1');
+
+      expect(indexedDbMocks.updateProject).toHaveBeenCalledWith(
+        'project-1',
+        expect.objectContaining({
+          timeline: expect.objectContaining({
+            items: [
+              expect.not.objectContaining({
+                thumbnailUrl: expect.anything(),
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+
     it('restores the full nested composition path after saving', async () => {
       indexedDbMocks.getProject.mockResolvedValue({
         id: 'project-1',
@@ -864,6 +917,50 @@ describe('TimelineStoreFacade', () => {
       expect(itemsState.items[0]!.id).toBe('i1');
       expect(useTimelineSettingsStore.getState().fps).toBe(24);
       expect(playbackMocks.setCurrentFrame).toHaveBeenCalledWith(50);
+    });
+
+    it('strips persisted clip thumbnail URLs while loading an existing project', async () => {
+      indexedDbMocks.getProject.mockResolvedValue({
+        id: 'project-1',
+        metadata: { fps: 24 },
+        timeline: {
+          tracks: [{ id: 't1', name: 'Video', order: 0, height: 80, locked: false, visible: true, muted: false, solo: false }],
+          items: [{
+            id: 'i1',
+            type: 'video',
+            trackId: 't1',
+            from: 0,
+            durationInFrames: 100,
+            label: 'test.mp4',
+            thumbnailUrl: 'blob:thumb',
+          }],
+          currentFrame: 50,
+          zoomLevel: 2,
+          scrollPosition: 100,
+          keyframes: [],
+          transitions: [],
+          markers: [],
+        },
+      });
+      mediaValidationMocks.validateProjectMediaReferences.mockResolvedValue([]);
+
+      await useTimelineStore.getState().loadTimeline('project-1');
+
+      const itemsState = useItemsStore.getState();
+      expect(itemsState.items).toHaveLength(1);
+      expect(itemsState.items[0]).not.toHaveProperty('thumbnailUrl');
+      expect(indexedDbMocks.updateProject).toHaveBeenCalledWith(
+        'project-1',
+        expect.objectContaining({
+          timeline: expect.objectContaining({
+            items: [
+              expect.not.objectContaining({
+                thumbnailUrl: expect.anything(),
+              }),
+            ],
+          }),
+        }),
+      );
     });
 
     it('throws when project not found', async () => {

@@ -377,9 +377,9 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const isDropDisabled = isTrackLocked;
   const trackKind = getTrackKind(track);
 
-  // Virtualized items/transitions â€” only those overlapping the visible viewport + buffer
+  // Virtualized items/transitions — only those overlapping the visible viewport + buffer
   const { visibleItems: trackItems, visibleTransitions: trackTransitions } = useVisibleItems(track.id);
-  // Full item count â€” used for context menu guard (must not depend on virtualized subset)
+  // Full item count — used for context menu guard (must not depend on virtualized subset)
   const hasAnyItems = useItemsStore((s) => (s.itemsByTrackId[track.id]?.length ?? 0) > 0);
   const addItem = useTimelineStore((s) => s.addItem);
   const addItems = useTimelineStore((s) => s.addItems);

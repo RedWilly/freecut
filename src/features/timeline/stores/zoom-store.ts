@@ -15,6 +15,7 @@ interface ZoomState {
 interface ZoomActions {
   setZoomLevel: (level: number) => void;
   setZoomLevelImmediate: (level: number) => void; // Bypasses throttle for smooth momentum zoom
+  setZoomLevelSynchronized: (level: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomToFit: (containerWidth: number, contentDurationSeconds: number) => void;
@@ -161,6 +162,9 @@ export const useZoomStore = create<ZoomState & ZoomActions>((set, get) => ({
     lastVisualZoomUpdate = performance.now();
     setVisualZoom(set, level, true);
     stageContentZoomCommit(set, level);
+  },
+  setZoomLevelSynchronized: (level) => {
+    applySynchronizedZoom(set, level);
   },
   zoomIn: () => {
     const newLevel = Math.min(get().level * 1.1, 50); // 10% per step for finer control

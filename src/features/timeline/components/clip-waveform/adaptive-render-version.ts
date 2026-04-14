@@ -12,6 +12,7 @@ interface AdaptiveWaveformRenderVersionOptions {
   baseVersion: string;
   pixelsPerSecond: number;
   activeTileCount: number;
+  phaseKey?: string;
 }
 
 function nowMs(): number {
@@ -46,10 +47,36 @@ export function getWaveformZoomRedrawIntervalMs(activeTileCount: number): number
   return 32;
 }
 
+function hashPhaseKey(phaseKey: string): number {
+  let hash = 0;
+  for (let i = 0; i < phaseKey.length; i += 1) {
+    hash = ((hash << 5) - hash) + phaseKey.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+export function getWaveformZoomCommitPhaseMs(activeTileCount: number, phaseKey?: string): number {
+  if (!phaseKey || activeTileCount <= 2) {
+    return 0;
+  }
+
+  if (activeTileCount <= 4) {
+    return (hashPhaseKey(phaseKey) % 2) * 8;
+  }
+
+  if (activeTileCount <= 8) {
+    return (hashPhaseKey(phaseKey) % 4) * 8;
+  }
+
+  return (hashPhaseKey(phaseKey) % 6) * 10;
+}
+
 export function useAdaptiveWaveformRenderVersion({
   baseVersion,
   pixelsPerSecond,
   activeTileCount,
+  phaseKey,
 }: AdaptiveWaveformRenderVersionOptions): string {
   const zoomVersion = useMemo(
     () => `e${Math.round(Math.max(1, pixelsPerSecond) * 1000)}`,
@@ -58,6 +85,10 @@ export function useAdaptiveWaveformRenderVersion({
   const redrawIntervalMs = useMemo(
     () => getWaveformZoomRedrawIntervalMs(activeTileCount),
     [activeTileCount],
+  );
+  const phaseDelayMs = useMemo(
+    () => getWaveformZoomCommitPhaseMs(activeTileCount, phaseKey),
+    [activeTileCount, phaseKey],
   );
   const [committedZoomVersion, setCommittedZoomVersion] = useState(zoomVersion);
   const latestZoomVersionRef = useRef(zoomVersion);
@@ -89,7 +120,11 @@ export function useAdaptiveWaveformRenderVersion({
     };
 
     const now = nowMs();
-    if (lastCommitAtRef.current === 0 || now - lastCommitAtRef.current >= redrawIntervalMs) {
+    const elapsedMs = now - lastCommitAtRef.current;
+    if (
+      lastCommitAtRef.current === 0
+      || (elapsedMs >= redrawIntervalMs && phaseDelayMs === 0)
+    ) {
       clearPending();
       commit();
       return;
@@ -99,17 +134,19 @@ export function useAdaptiveWaveformRenderVersion({
       return;
     }
 
-    const remainingMs = Math.max(0, redrawIntervalMs - (now - lastCommitAtRef.current));
+    const remainingMs = Math.max(0, redrawIntervalMs - elapsedMs);
+    const scheduledDelayMs = lastCommitAtRef.current === 0
+      ? phaseDelayMs
+      : remainingMs + phaseDelayMs;
     timeoutRef.current = setTimeout(() => {
       timeoutRef.current = null;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
         commit();
       });
-    }, remainingMs);
-
+    }, scheduledDelayMs);
     return clearPending;
-  }, [committedZoomVersion, redrawIntervalMs, zoomVersion]);
+  }, [committedZoomVersion, phaseDelayMs, redrawIntervalMs, zoomVersion]);
 
   useEffect(() => {
     return () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getWaveformActiveTileCount,
+  getWaveformZoomCommitPhaseMs,
   getWaveformZoomRedrawIntervalMs,
 } from './adaptive-render-version';
 
@@ -26,5 +27,14 @@ describe('adaptive waveform render version helpers', () => {
     expect(getWaveformZoomRedrawIntervalMs(4)).toBe(20);
     expect(getWaveformZoomRedrawIntervalMs(8)).toBe(24);
     expect(getWaveformZoomRedrawIntervalMs(12)).toBe(32);
+  });
+
+  it('adds a stable phase delay for heavier redraw batches', () => {
+    expect(getWaveformZoomCommitPhaseMs(2, 'media-1')).toBe(0);
+    expect(getWaveformZoomCommitPhaseMs(8, 'media-1')).toBe(
+      getWaveformZoomCommitPhaseMs(8, 'media-1'),
+    );
+    expect(getWaveformZoomCommitPhaseMs(12, 'media-1')).toBeGreaterThanOrEqual(0);
+    expect(getWaveformZoomCommitPhaseMs(12, 'media-1')).toBeLessThanOrEqual(72);
   });
 });

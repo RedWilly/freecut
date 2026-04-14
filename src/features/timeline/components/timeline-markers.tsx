@@ -510,6 +510,7 @@ export const TimelineMarkers = memo(function TimelineMarkers({ duration, width }
     const ch = canvasHeightRef.current;
     const qPPS = quantizedPPSRef.current;
     const ck = cacheKeyRef.current;
+    if (dw <= 0 || ch <= 0 || qPPS <= 0) return;
 
     // ── Tile visibility ──
     const startTile = Math.max(0, Math.floor(sl / TILE_WIDTH));

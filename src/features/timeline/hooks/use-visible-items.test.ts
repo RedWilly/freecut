@@ -216,7 +216,7 @@ describe('useVisibleItems filtering logic', () => {
     vi.useRealTimers();
   });
 
-  it('culls items outside the buffered viewport during live zoom-in', () => {
+  it('keeps the mounted item set stable during live zoom-in and culls on settle', () => {
     vi.useFakeTimers();
 
     useItemsStore.getState().setItems([
@@ -230,21 +230,61 @@ describe('useVisibleItems filtering logic', () => {
     expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
     expect(onRender).toHaveBeenCalledTimes(1);
 
-    // Zoom in — culling now uses live pps (matching the viewport coordinate
-    // space) so item b at frame 500 correctly exits the buffered range.
+    // Zoom in — keep the mounted set stable during the interaction so clips do
+    // not thrash in and out while the live geometry is still moving.
     act(() => {
       useZoomStore.getState().setZoomLevelImmediate(2);
     });
 
-    expect(screen.getByTestId('visible-items')).toHaveTextContent('a');
-    expect(onRender).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
+    expect(onRender).toHaveBeenCalledTimes(1);
 
-    // After settle, same result
+    // After settle, recompute once in the committed coordinate space.
     act(() => {
       vi.advanceTimersByTime(100);
     });
 
     expect(screen.getByTestId('visible-items')).toHaveTextContent('a');
+    expect(onRender).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it('expands the mounted item set during live zoom-out before settle', () => {
+    vi.useFakeTimers();
+
+    useZoomStore.setState({
+      level: 2,
+      pixelsPerSecond: 200,
+      contentLevel: 2,
+      contentPixelsPerSecond: 200,
+      isZoomInteracting: false,
+    });
+    useItemsStore.getState().setItems([
+      makeItem('a', 0, 30),
+      makeItem('b', 700, 30), // outside at 2x zoom, visible again once we zoom out
+      makeItem('c', 940, 30),
+    ]);
+
+    const onRender = vi.fn();
+    render(createElement(VisibleItemsProbe, { onRender }));
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a');
+    expect(onRender).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useZoomStore.getState().setZoomLevelImmediate(1);
+    });
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
+    expect(onRender).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(screen.getByTestId('visible-items')).toHaveTextContent('a,b');
+    expect(onRender).toHaveBeenCalledTimes(3);
 
     vi.useRealTimers();
   });

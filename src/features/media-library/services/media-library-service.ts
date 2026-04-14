@@ -46,7 +46,9 @@ import {
 } from '@/features/media-library/deps/composition-runtime';
 export { FileAccessError } from './file-access';
 
+const IMPORT_FILMSTRIP_COVER_PREWARM_SECONDS = 1;
 const IMPORT_FILMSTRIP_PREWARM_SECONDS = 12;
+const IMPORT_BACKGROUND_COVER_WARM_DELAY_MS = 0;
 const IMPORT_BACKGROUND_WARM_DELAY_MS = 600;
 const IMPORT_BACKGROUND_HEAVY_DELAY_MS = 2200;
 
@@ -289,6 +291,20 @@ class MediaLibraryService {
     await associateMediaWithProject(projectId, id);
 
     if (metadata.type === 'video' && mediaMetadata.duration > 0) {
+      const coverWarmEndTime = Math.min(
+        mediaMetadata.duration,
+        IMPORT_FILMSTRIP_COVER_PREWARM_SECONDS,
+      );
+      enqueueBackgroundMediaWork(() => (
+        filmstripCache.prewarmPriorityWindow(id, file, mediaMetadata.duration, {
+          startTime: 0,
+          endTime: coverWarmEndTime,
+        })
+      ), {
+        priority: 'warm',
+        delayMs: IMPORT_BACKGROUND_COVER_WARM_DELAY_MS,
+      });
+
       const warmEndTime = Math.min(mediaMetadata.duration, IMPORT_FILMSTRIP_PREWARM_SECONDS);
       enqueueBackgroundMediaWork(() => (
         filmstripCache.prewarmPriorityWindow(id, file, mediaMetadata.duration, {

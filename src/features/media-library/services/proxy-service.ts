@@ -129,7 +129,9 @@ interface ProgressEmissionState {
 
 const PROXY_PROGRESS_EMIT_INTERVAL_MS = 150;
 const PROXY_PROGRESS_EMIT_MIN_DELTA = 0.01;
+const PROXY_FILMSTRIP_COVER_PREWARM_SECONDS = 1;
 const PROXY_FILMSTRIP_PREWARM_SECONDS = 12;
+const PROXY_FILMSTRIP_COVER_PREWARM_DELAY_MS = 0;
 const PROXY_FILMSTRIP_PREWARM_DELAY_MS = 900;
 const PROXY_PLAYBACK_ISSUE_SCORE_THRESHOLD = 5;
 const PROXY_PLAYBACK_ISSUE_WEIGHTS: Record<ProxyPlaybackIssue, number> = {
@@ -734,6 +736,17 @@ class ProxyService {
       if (!media || !media.mimeType.startsWith('video/') || media.duration <= 0) {
         continue;
       }
+
+      const coverWarmEndTime = Math.min(media.duration, PROXY_FILMSTRIP_COVER_PREWARM_SECONDS);
+      enqueueBackgroundMediaWork(() => (
+        filmstripCache.prewarmPriorityWindow(mediaId, proxyFile, media.duration, {
+          startTime: 0,
+          endTime: coverWarmEndTime,
+        })
+      ), {
+        priority: 'warm',
+        delayMs: PROXY_FILMSTRIP_COVER_PREWARM_DELAY_MS,
+      });
 
       const warmEndTime = Math.min(media.duration, PROXY_FILMSTRIP_PREWARM_SECONDS);
       enqueueBackgroundMediaWork(() => (

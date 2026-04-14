@@ -115,6 +115,68 @@ function cloneTransitionForProject(transition: Transition): Transition {
   };
 }
 
+function stripTimelineItemThumbnailUrl<T extends { thumbnailUrl?: string }>(item: T): T {
+  if (item.thumbnailUrl === undefined) {
+    return item;
+  }
+
+  const rest = { ...item };
+  delete rest.thumbnailUrl;
+  return rest as T;
+}
+
+function sanitizeTimelineEphemeralFields(timeline: ProjectTimeline): {
+  timeline: ProjectTimeline;
+  cleaned: boolean;
+} {
+  let cleaned = false;
+
+  const items = timeline.items.map((item) => {
+    if (item.thumbnailUrl === undefined) {
+      return item;
+    }
+
+    cleaned = true;
+    return stripTimelineItemThumbnailUrl(item);
+  }) as ProjectTimeline['items'];
+
+  const compositions = timeline.compositions?.map((composition) => {
+    let compositionCleaned = false;
+
+    const nextItems = composition.items.map((item) => {
+      if (item.thumbnailUrl === undefined) {
+        return item;
+      }
+
+      cleaned = true;
+      compositionCleaned = true;
+      return stripTimelineItemThumbnailUrl(item);
+    }) as ProjectTimeline['items'];
+
+    if (!compositionCleaned) {
+      return composition;
+    }
+
+    return {
+      ...composition,
+      items: nextItems,
+    };
+  }) as ProjectTimeline['compositions'];
+
+  if (!cleaned) {
+    return { timeline, cleaned: false };
+  }
+
+  return {
+    timeline: {
+      ...timeline,
+      items,
+      ...(compositions && { compositions }),
+    },
+    cleaned: true,
+  };
+}
+
 async function buildVideoHasAudioMap(mediaIds: string[]): Promise<Record<string, boolean | undefined>> {
   const mediaById = useMediaLibraryStore.getState().mediaById;
   const entries = await Promise.all(mediaIds.map(async (mediaId) => {
@@ -634,6 +696,7 @@ export async function saveTimeline(projectId: string): Promise<void> {
         };
       })(),
     };
+    const { timeline: sanitizedTimeline } = sanitizeTimelineEphemeralFields(timeline);
 
     // Generate thumbnail — prefer capturing the existing preview canvas
     // (near-free: reuses the already-initialized scrub renderer with cached
@@ -722,7 +785,7 @@ export async function saveTimeline(projectId: string): Promise<void> {
     // Update project
     // Clear deprecated thumbnail field when using thumbnailId to save space
     await updateProject(projectId, {
-      timeline,
+      timeline: sanitizedTimeline,
       ...(thumbnailId && { thumbnailId, thumbnail: undefined }),
       updatedAt: Date.now(),
     });
@@ -782,15 +845,25 @@ export async function loadTimeline(
     // Run migrations and normalization
     const migrationResult = migrateProject(rawProject);
     const repairedLegacyLayouts = await repairLegacyProjectAvLayouts(migrationResult.project);
-    const project = repairedLegacyLayouts.project;
+    const sanitizedTimeline = repairedLegacyLayouts.project.timeline
+      ? sanitizeTimelineEphemeralFields(repairedLegacyLayouts.project.timeline)
+      : { timeline: repairedLegacyLayouts.project.timeline, cleaned: false };
+    const project = sanitizedTimeline.cleaned
+      ? {
+        ...repairedLegacyLayouts.project,
+        timeline: sanitizedTimeline.timeline,
+      }
+      : repairedLegacyLayouts.project;
 
     // Log migration activity
-    if (migrationResult.migrated || repairedLegacyLayouts.repaired) {
+    if (migrationResult.migrated || repairedLegacyLayouts.repaired || sanitizedTimeline.cleaned) {
       if (migrationResult.appliedMigrations.length > 0) {
         logger.info(
           `Migrated project from v${migrationResult.fromVersion} to v${migrationResult.toVersion}`,
           { migrations: migrationResult.appliedMigrations }
         );
+      } else if (sanitizedTimeline.cleaned) {
+        logger.info('Removed ephemeral thumbnail URLs from stored timeline items', { projectId });
       } else if (repairedLegacyLayouts.repaired) {
         logger.info('Repaired legacy A/V track layout for project', { projectId });
       } else {

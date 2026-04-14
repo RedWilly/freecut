@@ -57,11 +57,13 @@ export const ClipContent = memo(function ClipContent({
   audioWaveformScale = 1,
   linkedSyncOffsetFrames = null,
 }: ClipContentProps) {
-  // Track the live pixelsPerSecond directly — filmstrip updates on every zoom
-  // tick (~0.23ms for 89 clips) so it tracks the zoom perfectly with zero
-  // visual jumps.  This is safe because drag/edit hooks now use imperative
-  // reads, keeping the total per-tick render cost under 0.5ms.
-  const pixelsPerSecond = useZoomStore((s) => s.pixelsPerSecond);
+  //   // Keep clip visuals in live zoom space while zooming so inner content stays locked to the shell
+  const isZoomInteracting = useZoomStore((s) => s.isZoomInteracting);
+  const livePixelsPerSecond = useZoomStore((s) => s.pixelsPerSecond);
+  const settledPixelsPerSecond = useZoomStore((s) => s.contentPixelsPerSecond);
+  const pixelsPerSecond = (preferImmediateRendering || isZoomInteracting)
+    ? livePixelsPerSecond
+    : settledPixelsPerSecond;
   const showWaveforms = useSettingsStore((s) => s.showWaveforms);
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
   const clipLeftPx = useMemo(
@@ -72,12 +74,12 @@ export const ClipContent = memo(function ClipContent({
     () => Math.max(0, fps > 0 ? (clipWidthFrames / fps) * pixelsPerSecond : 0),
     [clipWidthFrames, fps, pixelsPerSecond],
   );
-  // Small safety buffer — clips the excess via overflow:hidden.
+  // Small safety buffer - clips the excess via overflow:hidden.
   const renderWidth = Math.ceil(clipWidth * RENDER_BUFFER);
   const clipVisibility = useClipVisibility(clipLeftPx, clipWidth);
   const isCompositionAudioWrapper = item.type === 'audio' && !!item.compositionId;
 
-  // For composition items: find the topmost video in the sub-comp for filmstrip
+  // For composition items: find the topmost video in the sub-comp for filmstrip.
   const compositionId = item.type === 'composition' || isCompositionAudioWrapper ? item.compositionId : undefined;
   const composition = useCompositionsStore(
     useCallback((s) => (compositionId ? s.compositionById[compositionId] ?? null : null), [compositionId])
@@ -93,8 +95,7 @@ export const ClipContent = memo(function ClipContent({
   );
   const compositionSummary = useMemo(() => {
     if (!composition) {
-      return {
-        visualMediaId: null,
+      return {   visualMediaId: null,
         audioMediaId: null,
         hasOwnedAudio: false,
         hasMultipleOwnedAudioSources: false,

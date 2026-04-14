@@ -34,6 +34,7 @@ function useTimelineZoomInternal(
   const zoomLevel = useZoomStore(selectors.zoomLevel);
   const setZoomLevel = useZoomStore((s) => s.setZoomLevel);
   const setZoomLevelImmediate = useZoomStore((s) => s.setZoomLevelImmediate);
+  const setZoomLevelSynchronized = useZoomStore((s) => s.setZoomLevelSynchronized);
   const zoomInAction = useZoomStore((s) => s.zoomIn);
   const zoomOutAction = useZoomStore((s) => s.zoomOut);
   const pixelsPerSecond = useZoomStore(selectors.pixelsPerSecond);
@@ -113,6 +114,7 @@ function useTimelineZoomInternal(
     resetZoom,
     setZoom: (level: number) => setZoomLevel(Math.max(minZoom, Math.min(maxZoom, level))),
     setZoomImmediate: (level: number) => setZoomLevelImmediate(Math.max(minZoom, Math.min(maxZoom, level))),
+    setZoomSynchronized: (level: number) => setZoomLevelSynchronized(Math.max(minZoom, Math.min(maxZoom, level))),
   };
 }
 

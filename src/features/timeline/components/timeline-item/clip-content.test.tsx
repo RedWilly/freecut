@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { TimelineItem } from '@/types/timeline';
 import { useSettingsStore } from '@/features/timeline/deps/settings';
@@ -7,6 +7,30 @@ import { useItemsStore } from '../../stores/items-store';
 import { useTimelineStore } from '../../stores/timeline-store';
 import { useZoomStore, _resetZoomStoreForTest } from '../../stores/zoom-store';
 import { ClipContent } from './clip-content';
+
+vi.mock('../clip-filmstrip', () => ({
+  ClipFilmstrip: ({ pixelsPerSecond }: { pixelsPerSecond: number }) => (
+    <div data-testid="clip-filmstrip" data-pps={String(pixelsPerSecond)} />
+  ),
+}));
+
+vi.mock('../clip-filmstrip/image-filmstrip', () => ({
+  ImageFilmstrip: ({ pixelsPerSecond }: { pixelsPerSecond: number }) => (
+    <div data-testid="image-filmstrip" data-pps={String(pixelsPerSecond)} />
+  ),
+}));
+
+vi.mock('../clip-waveform', () => ({
+  ClipWaveform: ({ pixelsPerSecond }: { pixelsPerSecond: number }) => (
+    <div data-testid="clip-waveform" data-pps={String(pixelsPerSecond)} />
+  ),
+}));
+
+vi.mock('../clip-waveform/compound-clip-waveform', () => ({
+  CompoundClipWaveform: ({ pixelsPerSecond }: { pixelsPerSecond: number }) => (
+    <div data-testid="compound-clip-waveform" data-pps={String(pixelsPerSecond)} />
+  ),
+}));
 
 describe('ClipContent', () => {
   beforeEach(() => {
@@ -79,5 +103,78 @@ describe('ClipContent', () => {
 
     expect(screen.getByTitle('Linked audio/video pair')).toBeInTheDocument();
     expect(screen.getByText('Linked clip')).toBeInTheDocument();
+  });
+
+  it('uses settled zoom for filmstrip content by default', () => {
+    useZoomStore.setState({
+      level: 1.8,
+      pixelsPerSecond: 180,
+      contentLevel: 1,
+      contentPixelsPerSecond: 100,
+      isZoomInteracting: true,
+    });
+    useSettingsStore.setState({
+      showFilmstrips: true,
+      showWaveforms: false,
+    });
+
+    const item: TimelineItem = {
+      id: 'video-1',
+      type: 'video',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Video clip',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem;
+
+    render(
+      <ClipContent
+        item={item}
+        clipLeftFrames={0}
+        clipWidthFrames={96}
+        fps={30}
+      />,
+    );
+
+    expect(screen.getByTestId('clip-filmstrip')).toHaveAttribute('data-pps', '180');
+  });
+
+  it('can opt clip internals into live zoom for immediate edit previews', () => {
+    useZoomStore.setState({
+      level: 1.8,
+      pixelsPerSecond: 180,
+      contentLevel: 1,
+      contentPixelsPerSecond: 100,
+      isZoomInteracting: true,
+    });
+    useSettingsStore.setState({
+      showFilmstrips: false,
+      showWaveforms: true,
+    });
+
+    const item: TimelineItem = {
+      id: 'audio-1',
+      type: 'audio',
+      trackId: 'track-1',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Audio clip',
+      mediaId: 'media-1',
+      src: 'blob:test',
+    } as TimelineItem;
+
+    render(
+      <ClipContent
+        item={item}
+        clipLeftFrames={0}
+        clipWidthFrames={96}
+        fps={30}
+        preferImmediateRendering={true}
+      />,
+    );
+
+    expect(screen.getByTestId('clip-waveform')).toHaveAttribute('data-pps', '180');
   });
 });

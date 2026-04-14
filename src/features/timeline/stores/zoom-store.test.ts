@@ -70,4 +70,31 @@ describe('zoom-store interaction split', () => {
     expect(state.contentPixelsPerSecond).toBeCloseTo(110);
     expect(state.isZoomInteracting).toBe(false);
   });
+
+  it('can synchronize a direct zoom level update without leaving content behind', () => {
+    useZoomStore.getState().setZoomLevelImmediate(1.8);
+
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 1.8,
+      contentLevel: 1,
+      isZoomInteracting: true,
+    });
+
+    useZoomStore.getState().setZoomLevelSynchronized(0.75);
+
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 0.75,
+      pixelsPerSecond: 75,
+      contentLevel: 0.75,
+      contentPixelsPerSecond: 75,
+      isZoomInteracting: false,
+    });
+
+    vi.advanceTimersByTime(100);
+    expect(useZoomStore.getState()).toMatchObject({
+      level: 0.75,
+      contentLevel: 0.75,
+      isZoomInteracting: false,
+    });
+  });
 });
