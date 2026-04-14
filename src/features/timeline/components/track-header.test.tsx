@@ -30,7 +30,7 @@ function makeTrack(overrides: Partial<TimelineTrack> = {}): TimelineTrack {
 }
 
 function renderTrackHeader(track: TimelineTrack, onToggleDisabled = vi.fn()) {
-  render(
+  const renderResult = render(
     <TrackHeader
       track={track}
       isActive={false}
@@ -50,7 +50,7 @@ function renderTrackHeader(track: TimelineTrack, onToggleDisabled = vi.fn()) {
     />
   );
 
-  return { onToggleDisabled };
+  return { ...renderResult, onToggleDisabled };
 }
 
 describe('TrackHeader', () => {
@@ -71,11 +71,12 @@ describe('TrackHeader', () => {
   });
 
   it('derives the disable state from audio mute status', () => {
-    renderTrackHeader(makeTrack({ id: 'track-2', name: 'A1', kind: 'audio', muted: true }));
+    const { container } = renderTrackHeader(makeTrack({ id: 'track-2', name: 'A1', kind: 'audio', muted: true }));
 
     expect(screen.getByRole('button', { name: 'Enable track' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show track' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Unmute track' })).not.toBeInTheDocument();
+    expect(container.querySelector('[data-track-id="track-2"]')).toHaveAttribute('data-track-disabled', 'true');
   });
 
   it('calls onToggleDisabled when clicking Enable track on a muted audio track', () => {

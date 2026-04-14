@@ -13,7 +13,7 @@ import { useTrackDrag } from '../hooks/use-track-drag';
 import { TIMELINE_SIDEBAR_WIDTH } from '../constants';
 import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
 import { useItemsStore } from '../stores/items-store';
-import { getTrackKind } from '@/features/timeline/utils/classic-tracks';
+import { isTrackDisabled } from '@/features/timeline/utils/classic-tracks';
 import { isTrackSyncLockActive } from '../utils/track-sync-lock';
 
 interface TrackHeaderProps {
@@ -75,13 +75,8 @@ export const TrackHeader = memo(function TrackHeader({
   onDeleteEmptyTracks,
 }: TrackHeaderProps) {
   const itemCount = useItemsStore((s) => s.itemsByTrackId[track.id]?.length ?? 0);
-  const trackKind = getTrackKind(track);
   const syncLockEnabled = isTrackSyncLockActive(track);
-  const isTrackDisabled = trackKind === 'audio'
-    ? track.muted
-    : trackKind === 'video'
-      ? track.visible === false
-      : track.visible === false || track.muted;
+  const trackDisabled = isTrackDisabled(track);
 
   // Use track drag hook (visuals handled centrally by timeline.tsx via DOM)
   const { handleDragStart } = useTrackDrag(track);
@@ -94,8 +89,9 @@ export const TrackHeader = memo(function TrackHeader({
           className={`
             flex flex-col overflow-hidden px-1
             cursor-grab active:cursor-grabbing relative
-            ${isSelected ? 'bg-primary/10' : 'hover:bg-secondary/50'}
+            ${isSelected ? 'bg-primary/10' : trackDisabled ? 'bg-muted/30 hover:bg-muted/40' : 'hover:bg-secondary/50'}
             ${isActive ? 'border-l-3 border-l-primary' : 'border-l-3 border-l-transparent'}
+            ${trackDisabled ? 'text-muted-foreground' : ''}
             transition-colors duration-150
           `}
           style={{
@@ -107,6 +103,7 @@ export const TrackHeader = memo(function TrackHeader({
           onClick={onSelect}
           onMouseDown={handleDragStart}
           data-track-id={track.id}
+          data-track-disabled={trackDisabled ? 'true' : undefined}
         >
           <div className="flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-b border-border/60">
             <div className="flex h-5 w-4 shrink-0 items-center justify-center">
@@ -123,10 +120,10 @@ export const TrackHeader = memo(function TrackHeader({
                 onToggleDisabled();
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              aria-label={isTrackDisabled ? 'Enable track' : 'Disable track'}
-              data-tooltip={isTrackDisabled ? 'Enable track' : 'Disable track'}
+              aria-label={trackDisabled ? 'Enable track' : 'Disable track'}
+              data-tooltip={trackDisabled ? 'Enable track' : 'Disable track'}
             >
-              {isTrackDisabled ? (
+              {trackDisabled ? (
                 <PowerOff className="w-3 h-3 text-primary" />
               ) : (
                 <Power className="w-3 h-3 opacity-70" />

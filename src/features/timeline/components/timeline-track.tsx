@@ -88,6 +88,7 @@ import {
   captureContextMenuEventInit,
   replayContextMenuEvent,
 } from '../utils/lazy-context-menu';
+import { getTrackKind, isTrackDisabled as getIsTrackDisabled } from '@/features/timeline/utils/classic-tracks';
 
 /**
  * Lightweight on-demand context menu for track gaps.
@@ -364,18 +365,16 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
   const pendingDragPreviewRef = useRef<PendingDragPreview | null>(null);
   const dragOverFlagsRef = useRef({ isDragOver: false, isExternalDragOver: false });
 
-  // Resolve whether this track is effectively disabled for drops.
+  // Resolve whether this track is effectively disabled for rendering or drops.
   // Uses the shared resolveEffectiveTrackStates helper so group-inherited
-  // locked/visible/muted flags are consistent with the rest of the codebase.
-  const isDropDisabled = useTimelineStore((s) => {
-    const effective = resolveEffectiveTrackStates(s.tracks).find((t) => t.id === track.id);
-    if (!effective) return track.locked;
-    if (effective.locked) return true;
-    const kind = effective.kind;
-    if (kind === 'audio') return effective.muted;
-    if (kind === 'video') return effective.visible === false;
-    return effective.visible === false || effective.muted;
+  // locked/visible/muted flags stay consistent with the rest of the timeline.
+  const trackInteractionState = useTimelineStore((s) => {
+    const effective = resolveEffectiveTrackStates(s.tracks).find((t) => t.id === track.id) ?? track;
+    return (effective.locked ? 1 : 0) | (getIsTrackDisabled(effective) ? 2 : 0);
   });
+  const isTrackDisabled = (trackInteractionState & 2) !== 0;
+  const isDropDisabled = trackInteractionState !== 0;
+  const trackKind = getTrackKind(track);
 
   // Virtualized items/transitions â€” only those overlapping the visible viewport + buffer
   const { visibleItems: trackItems, visibleTransitions: trackTransitions } = useVisibleItems(track.id);
@@ -1246,12 +1245,12 @@ export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrac
           />
         )}
 
-        {/* Render all items for this track - dimmed when track is hidden */}
-        <TimelineTrackItems trackItems={trackItems} trackLocked={track.locked} trackHidden={!track.visible} />
+        {/* Render all items for this track - dimmed when the track is disabled */}
+        <TimelineTrackItems trackItems={trackItems} trackLocked={track.locked} trackHidden={isTrackDisabled} />
 
         {/* Render transitions for this track */}
-        {track.kind !== 'audio' && trackTransitions.map((transition) => (
-          <TransitionItem key={transition.id} transition={transition} trackHidden={!track.visible} />
+        {trackKind !== 'audio' && trackTransitions.map((transition) => (
+          <TransitionItem key={transition.id} transition={transition} trackHidden={isTrackDisabled} />
         ))}
 
         {/* Locked track overlay indicator */}

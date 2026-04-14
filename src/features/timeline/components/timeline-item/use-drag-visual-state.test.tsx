@@ -24,9 +24,11 @@ function makeVideoItem(overrides: Partial<VideoItem> = {}): VideoItem {
 function DragVisualHarness({
   item,
   isDragging = false,
+  initialOpacity = '0.3',
 }: {
   item: VideoItem;
   isDragging?: boolean;
+  initialOpacity?: string;
 }) {
   const transformRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -40,7 +42,7 @@ function DragVisualHarness({
 
   return (
     <>
-      <div data-testid="body" ref={transformRef} />
+      <div data-testid="body" ref={transformRef} style={{ opacity: initialOpacity }} />
       <div data-testid="ghost" ref={ghostRef} />
       <div data-testid="join-state">
         {String(dragVisualState.dragAffectsJoin.left)}
@@ -95,9 +97,18 @@ describe('useDragVisualState', () => {
     expect(screen.getByTestId('join-state')).toHaveTextContent('false:false');
   });
 
+  it('preserves the host opacity when no drag visuals are active', async () => {
+    const item = makeVideoItem();
+    render(<DragVisualHarness item={item} initialOpacity="0.3" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('body').style.opacity).toBe('0.3');
+    });
+  });
+
   it('applies follower transforms during move drags and cleans them up when the drag ends', async () => {
     const item = makeVideoItem();
-    render(<DragVisualHarness item={item} />);
+    render(<DragVisualHarness item={item} initialOpacity="0.3" />);
 
     dragOffsetRef.current = { x: 18, y: 6 };
     setDragState([item.id]);
@@ -116,7 +127,7 @@ describe('useDragVisualState', () => {
 
     await waitFor(() => {
       expect(body.style.transform).toBe('');
-      expect(body.style.opacity).toBe('');
+      expect(body.style.opacity).toBe('0.3');
       expect(body.style.pointerEvents).toBe('');
       expect(body.style.zIndex).toBe('');
     });
@@ -135,7 +146,7 @@ describe('useDragVisualState', () => {
     const ghost = screen.getByTestId('ghost');
     await waitFor(() => {
       expect(body.style.transform).toBe('');
-      expect(body.style.opacity).toBe('');
+      expect(body.style.opacity).toBe('0.3');
       expect(body.style.pointerEvents).toBe('none');
       expect(ghost.style.display).toBe('block');
       expect(ghost.style.transform).toBe('translate(11px, 7px)');

@@ -5,6 +5,7 @@ import {
   findNearestTrackByKind,
   getAdjacentTrackOrder,
   getNextClassicTrackName,
+  isTrackDisabled,
   getTrackKind,
   renameTrackForKind,
 } from './classic-tracks';
@@ -31,6 +32,14 @@ describe('classic tracks', () => {
     expect(getTrackKind(makeTrack({ name: 'V2' }))).toBe('video');
     expect(getTrackKind(makeTrack({ name: 'A4' }))).toBe('audio');
     expect(getTrackKind(makeTrack({ name: 'Track 1' }))).toBeNull();
+  });
+
+  it('derives disabled state from stored visibility or mute flags', () => {
+    expect(isTrackDisabled(makeTrack({ kind: 'video', visible: false }))).toBe(true);
+    expect(isTrackDisabled(makeTrack({ kind: 'audio', muted: true }))).toBe(true);
+    expect(isTrackDisabled(makeTrack({ name: 'V2', kind: undefined, visible: false }))).toBe(true);
+    expect(isTrackDisabled(makeTrack({ name: 'A4', kind: undefined, muted: true }))).toBe(true);
+    expect(isTrackDisabled(makeTrack({ name: 'Track 1', visible: true, muted: false }))).toBe(false);
   });
 
   it('renames generic tracks into classic names when assigning a kind', () => {

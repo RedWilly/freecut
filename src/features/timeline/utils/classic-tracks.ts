@@ -28,6 +28,17 @@ export function getTrackKind(track: TimelineTrack): TrackKind | null {
   return null;
 }
 
+export function isTrackDisabled(track: TimelineTrack): boolean {
+  const kind = getTrackKind(track);
+  if (kind === 'audio') {
+    return track.muted;
+  }
+  if (kind === 'video') {
+    return track.visible === false;
+  }
+  return track.visible === false || track.muted;
+}
+
 export function getNextClassicTrackName(tracks: TimelineTrack[], kind: TrackKind): string {
   const regex = getTrackNameRegex(kind);
   const numbers = new Set<number>();
