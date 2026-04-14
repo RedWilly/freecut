@@ -43,15 +43,12 @@ import { AudioMixerView, type AudioMixerTrack } from './audio-mixer-view';
 import { AudioEqPanelContent } from './properties-sidebar/clip-panel/audio-eq-panel-content';
 import { type AudioEqPatch } from './properties-sidebar/clip-panel/audio-eq-curve-editor';
 import { getSparseAudioEqSettings } from '@/shared/utils/audio-eq';
-import { clearMixerLiveGainLayer, setMixerLiveGainLayer } from '@/shared/state/mixer-live-gain';
 import { type AudioEqSettings } from '@/types/audio';
 
 type PanelMode = 'meter' | 'mixer';
 type EqPanelTarget =
   | { kind: 'track'; trackId: string }
   | { kind: 'bus' };
-
-const MUTE_SOLO_GAIN_LAYER_ID = 'audio-meter-mute-solo';
 
 function toWaveformSnapshot(
   waveform: { peaks: Float32Array; sampleRate: number; channels?: number; stereo?: boolean } | null | undefined,
@@ -637,7 +634,6 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     return true;
   }, []);
 
-
   // Collect all item IDs for a track (needed for live gain bridging)
   const getTrackItemIds = useCallback((trackId: string): string[] => {
     const items = useItemsStore.getState().itemsByTrackId[trackId];
@@ -659,20 +655,17 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       }))
       .filter((track) => isAudioMixerTrack(track, currentTimelineItems));
     if (audioTracks.length === 0) {
-      clearMixerLiveGainLayer(MUTE_SOLO_GAIN_LAYER_ID);
       return;
     }
     const anySoloed = audioTracks.some((t) => t.solo);
 
-    const entries: Array<{ itemId: string; gain: number }> = [];
     for (const t of audioTracks) {
       const shouldMute = t.muted || (anySoloed && !t.solo);
       const gain = shouldMute ? 0 : 1;
       for (const itemId of getTrackItemIds(t.id)) {
-        entries.push({ itemId, gain });
+        usePlaybackStore.getState().setLiveItemGain(itemId, gain);
       }
     }
-    setMixerLiveGainLayer(MUTE_SOLO_GAIN_LAYER_ID, entries);
   }, [getTrackItemIds]);
 
   // In-place mutation for mute/solo — same pattern as volume change.
