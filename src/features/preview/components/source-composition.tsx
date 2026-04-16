@@ -17,7 +17,7 @@ import {
 } from '@/features/preview/deps/export';
 import { resolveProxyUrl } from '../utils/media-resolver';
 import { usePlaybackStore } from '@/shared/state/playback';
-import { mediaLibraryService, proxyService, useMediaLibraryStore } from '@/features/preview/deps/media-library';
+import { useMediaLibraryStore } from '@/features/preview/deps/media-library';
 import { FileAudio } from 'lucide-react';
 
 interface SourceCompositionProps {
@@ -35,10 +35,6 @@ const SOURCE_MONITOR_STRICT_DECODE_FALLBACK_FAILURES = 2;
 const SOURCE_MONITOR_FRAME_CACHE_MAX = 90;
 const SOURCE_MONITOR_CACHE_TIME_QUANTUM = 1 / 60;
 const SOURCE_MONITOR_PLAYING_RESYNC_THRESHOLD_FRAMES = 6;
-const SOURCE_MONITOR_SLOW_DECODE_MS = 120;
-const SOURCE_MONITOR_SLOW_SEEK_MS = 120;
-const SOURCE_MONITOR_DROPPED_FRAME_BURST = 6;
-const SOURCE_MONITOR_DROPPED_FRAME_RATIO = 0.12;
 
 function getSourceMonitorDecoderPool(): SharedVideoExtractorPool {
   if (!globalSourceMonitorDecoderPool) {
@@ -82,11 +78,6 @@ export function SourceComposition({ mediaId, src, mediaType, fileName }: SourceC
 
 function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
   const activeSrc = useSourceMonitorVideoSrc(mediaId, src);
-  const media = useMediaLibraryStore((s) => (
-    mediaId
-      ? (s.mediaById?.[mediaId] ?? s.mediaItems.find((item) => item.id === mediaId) ?? null)
-      : null
-  ));
   const clock = useClock();
   const playing = useClockIsPlaying();
   const playbackRate = useClockPlaybackRate();
@@ -115,21 +106,6 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
   const [useLegacyPausedSeek, setUseLegacyPausedSeek] = useState(false);
   const [strictDecodeReady, setStrictDecodeReady] = useState(false);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
-
-  const reportPlaybackIssue = useCallback((
-    issue: 'slow-seek' | 'slow-decode' | 'playback-resync' | 'waiting' | 'stalled' | 'dropped-frames',
-  ) => {
-    if (!mediaId || !media) {
-      return;
-    }
-
-    proxyService.reportPlaybackIssue(mediaId, issue, {
-      source: () => mediaLibraryService.getMediaFile(mediaId),
-      sourceWidth: media.width,
-      sourceHeight: media.height,
-      priority: 'background',
-    });
-  }, [media, mediaId]);
 
   useEffect(() => {
     playingRef.current = playing;
@@ -188,7 +164,6 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
       return true;
     }
 
-    const decodeStart = performance.now();
     const didDraw = await extractor.drawFrame(
       ctx,
       Math.max(0, targetTime),
@@ -197,10 +172,6 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
       canvas.width,
       canvas.height,
     );
-    const decodeDurationMs = performance.now() - decodeStart;
-    if (didDraw && decodeDurationMs >= SOURCE_MONITOR_SLOW_DECODE_MS) {
-      reportPlaybackIssue('slow-decode');
-    }
     if (!didDraw) return false;
 
     try {
@@ -220,7 +191,7 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
     }
 
     return true;
-  }, [reportPlaybackIssue]);
+  }, []);
 
   const pumpLatestDecodedFrame = useCallback(() => {
     if (renderInFlightRef.current) return;
@@ -303,83 +274,7 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
 
     videoRef.current = video;
 
-    let pausedSeekStartedAtMs = 0;
-    let rafId: number | null = null;
-    let lastDroppedFrames = 0;
-    let lastTotalFrames = 0;
-
-    const handleWaiting = () => {
-      if (!playingRef.current) {
-        return;
-      }
-
-      reportPlaybackIssue('waiting');
-    };
-
-    const handleStalled = () => {
-      if (!playingRef.current) {
-        return;
-      }
-
-      reportPlaybackIssue('stalled');
-    };
-
-    const handleSeeking = () => {
-      if (!playingRef.current) {
-        pausedSeekStartedAtMs = performance.now();
-      }
-    };
-
-    const handleSeeked = () => {
-      if (playingRef.current || pausedSeekStartedAtMs === 0) {
-        pausedSeekStartedAtMs = 0;
-        return;
-      }
-
-      const seekLatencyMs = performance.now() - pausedSeekStartedAtMs;
-      pausedSeekStartedAtMs = 0;
-      if (seekLatencyMs >= SOURCE_MONITOR_SLOW_SEEK_MS) {
-        reportPlaybackIssue('slow-seek');
-      }
-    };
-
-    const samplePlaybackQuality = () => {
-      if (typeof video.getVideoPlaybackQuality === 'function') {
-        const quality = video.getVideoPlaybackQuality();
-        const deltaDroppedFrames = quality.droppedVideoFrames - lastDroppedFrames;
-        const deltaTotalFrames = quality.totalVideoFrames - lastTotalFrames;
-
-        if (
-          playingRef.current
-          && lastTotalFrames > 0
-          && deltaDroppedFrames >= SOURCE_MONITOR_DROPPED_FRAME_BURST
-          && deltaTotalFrames > 0
-          && (deltaDroppedFrames / Math.max(1, deltaTotalFrames)) >= SOURCE_MONITOR_DROPPED_FRAME_RATIO
-        ) {
-          reportPlaybackIssue('dropped-frames');
-        }
-
-        lastDroppedFrames = quality.droppedVideoFrames;
-        lastTotalFrames = quality.totalVideoFrames;
-      }
-
-      rafId = requestAnimationFrame(samplePlaybackQuality);
-    };
-
-    video.addEventListener('waiting', handleWaiting);
-    video.addEventListener('stalled', handleStalled);
-    video.addEventListener('seeking', handleSeeking);
-    video.addEventListener('seeked', handleSeeked);
-    samplePlaybackQuality();
-
     return () => {
-      video.removeEventListener('waiting', handleWaiting);
-      video.removeEventListener('stalled', handleStalled);
-      video.removeEventListener('seeking', handleSeeking);
-      video.removeEventListener('seeked', handleSeeked);
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
       video.pause();
       if (video.parentElement) {
         video.parentElement.removeChild(video);
@@ -387,7 +282,7 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
       pool.releaseClip(clipId);
       videoRef.current = null;
     };
-  }, [activeSrc, reportPlaybackIssue]);
+  }, [activeSrc]);
 
   useEffect(() => {
     decoderReadyRef.current = false;
@@ -491,7 +386,6 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
         syncAudioTime();
         return;
       }
-      reportPlaybackIssue('playback-resync');
       try {
         video.currentTime = targetTime;
       } catch {
@@ -508,7 +402,7 @@ function VideoSource({ mediaId, src }: { mediaId?: string; src: string }) {
     }
 
     syncAudioTime();
-  }, [activeSrc, fps, hasDecodedFrame, pumpLatestDecodedFrame, reportPlaybackIssue, src, strictDecodeReady, useLegacyPausedSeek]);
+  }, [activeSrc, fps, hasDecodedFrame, pumpLatestDecodedFrame, src, strictDecodeReady, useLegacyPausedSeek]);
 
   useEffect(() => {
     syncSourceFrame(clock.currentFrame);

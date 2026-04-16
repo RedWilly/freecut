@@ -34,7 +34,7 @@ import {
   getSourceStripPointFromRatio,
   shiftSourceIoRange,
 } from '../utils/source-io';
-import { useMediaLibraryStore, getMediaType, proxyService } from '@/features/preview/deps/media-library';
+import { useMediaLibraryStore, getMediaType } from '@/features/preview/deps/media-library';
 import { useItemsStore } from '@/features/preview/deps/timeline-store';
 import { useSettingsStore } from '@/features/preview/deps/settings';
 import { useEditorStore } from '@/shared/state/editor';
@@ -166,14 +166,6 @@ export const SourceMonitor = memo(function SourceMonitor({
       useSourcePlayerStore.getState().releaseCurrentMediaId(mediaId);
     };
   }, [interactive, mediaId]);
-
-  useEffect(() => {
-    if (!interactive || !media || !media.mimeType.startsWith('video/')) {
-      return;
-    }
-
-    proxyService.prioritizeProxy(mediaId);
-  }, [interactive, media, mediaId]);
 
   // Auto-close if media is deleted
   useEffect(() => {

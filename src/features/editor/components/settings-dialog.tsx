@@ -64,12 +64,6 @@ import {
   WHISPER_QUANTIZATION_OPTIONS,
 } from '@/shared/utils/whisper-settings';
 import type { MediaTranscriptModel, MediaTranscriptQuantization } from '@/types/storage';
-import {
-  PROXY_GENERATION_MODE_OPTIONS,
-  PROXY_GENERATION_RESOLUTION_OPTIONS,
-  type ProxyGenerationMode,
-  type ProxyGenerationResolution,
-} from '@/config/proxy-generation';
 
 const log = createLogger('SettingsDialog');
 const TRANSCRIPTION_MODEL_OPTIONS = getMediaTranscriptionModelOptions();
@@ -222,8 +216,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips);
   const autoSaveInterval = useSettingsStore((s) => s.autoSaveInterval);
   const maxUndoHistory = useSettingsStore((s) => s.maxUndoHistory);
-  const proxyGenerationMode = useSettingsStore((s) => s.proxyGenerationMode);
-  const proxyGenerationResolution = useSettingsStore((s) => s.proxyGenerationResolution);
   const defaultWhisperModel = useSettingsStore((s) => s.defaultWhisperModel);
   const defaultWhisperQuantization = useSettingsStore((s) => s.defaultWhisperQuantization);
   const defaultWhisperLanguage = useSettingsStore((s) => s.defaultWhisperLanguage);
@@ -314,7 +306,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         proxyService.setProxyKey(media.id, sharedProxyKey);
         proxyService.generateProxy(
           media.id,
-          () => mediaLibraryService.getMediaFile(media.id),
+          media.storageType === 'opfs' && media.opfsPath
+            ? { kind: 'opfs', path: media.opfsPath, mimeType: media.mimeType }
+            : () => mediaLibraryService.getMediaFile(media.id),
           media.width,
           media.height,
           sharedProxyKey,
@@ -332,12 +326,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const defaultWhisperLanguageValue = getWhisperLanguageSelectValue(defaultWhisperLanguage);
   const defaultWhisperQuantizationOption = getWhisperQuantizationOption(defaultWhisperQuantization);
-  const proxyGenerationModeOption = PROXY_GENERATION_MODE_OPTIONS.find(
-    (option) => option.value === proxyGenerationMode
-  ) ?? PROXY_GENERATION_MODE_OPTIONS[0];
-  const proxyGenerationResolutionOption = PROXY_GENERATION_RESOLUTION_OPTIONS.find(
-    (option) => option.value === proxyGenerationResolution
-  ) ?? PROXY_GENERATION_RESOLUTION_OPTIONS[0];
   const missingProjectProxyCount = mediaItems.filter((media) => (
     media.mimeType.startsWith('video/')
     && proxyStatus.get(media.id) !== 'ready'
@@ -535,55 +523,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               {activeSection === 'storage' && (
                 <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Automatic Proxy Generation</Label>
-                    <Select
-                      value={proxyGenerationMode}
-                      onValueChange={(value) =>
-                        setSetting('proxyGenerationMode', value as ProxyGenerationMode)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROXY_GENERATION_MODE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {proxyGenerationModeOption.description} Manual proxy generation stays available from any video clip menu.
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Smart Proxy Threshold</Label>
-                    <Select
-                      value={proxyGenerationResolution}
-                      onValueChange={(value) =>
-                        setSetting('proxyGenerationResolution', value as ProxyGenerationResolution)
-                      }
-                      disabled={proxyGenerationMode !== 'smart'}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROXY_GENERATION_RESOLUTION_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {proxyGenerationMode === 'smart'
-                        ? `${proxyGenerationResolutionOption.description} Clips with heavier audio codecs are still proxied automatically.`
-                        : 'Only used when Automatic Proxy Generation is set to Smart.'}
-                    </p>
-                  </div>
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-sm">Generate Missing Proxies</Label>

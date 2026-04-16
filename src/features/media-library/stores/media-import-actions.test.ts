@@ -11,7 +11,6 @@ const mediaLibraryServiceMocks = vi.hoisted(() => ({
 const proxyServiceMocks = vi.hoisted(() => ({
   setProxyKey: vi.fn(),
   canGenerateProxy: vi.fn(),
-  needsProxy: vi.fn(),
   hasProxy: vi.fn(),
   generateProxy: vi.fn(),
 }));
@@ -149,7 +148,6 @@ describe('createImportActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     proxyServiceMocks.canGenerateProxy.mockImplementation((mimeType: string) => mimeType.startsWith('video/'));
-    proxyServiceMocks.needsProxy.mockReturnValue(false);
     proxyServiceMocks.hasProxy.mockReturnValue(false);
   });
 
@@ -172,48 +170,6 @@ describe('createImportActions', () => {
     expect(currentState.mediaItems).toEqual([imported]);
     expect(currentState.importingIds).toEqual([]);
     expect(proxyServiceMocks.setProxyKey).toHaveBeenCalledWith('imported-1', 'proxy-imported-1');
-  });
-
-  it('queues automatic proxy generation for imported 4k webm clips that qualify for smart mode', async () => {
-    const file = new File(['video'], 'clip.webm', { type: 'video/webm' });
-    const handle = createHandle(file);
-    const imported = makeMedia({
-      id: 'imported-4k',
-      fileName: 'clip.webm',
-      mimeType: 'video/webm',
-      width: 3840,
-      height: 2160,
-      codec: 'vp8',
-      audioCodec: 'vorbis',
-    });
-    mediaLibraryServiceMocks.importMediaWithHandle.mockResolvedValue(imported);
-    proxyServiceMocks.needsProxy.mockReturnValue(true);
-
-    let currentState = createMockState();
-    const set = vi.fn((updater: ImportUpdater) => {
-      currentState = applyStateUpdate(currentState, updater) as MediaLibraryState & MediaLibraryActions;
-    });
-    const get = vi.fn(() => currentState);
-
-    const actions = createImportActions(set, get);
-    const result = await actions.importHandles([handle]);
-
-    expect(result).toEqual([imported]);
-    expect(proxyServiceMocks.needsProxy).toHaveBeenCalledWith(
-      3840,
-      2160,
-      'video/webm',
-      'vorbis',
-      'imported-4k',
-    );
-    expect(proxyServiceMocks.generateProxy).toHaveBeenCalledWith(
-      'imported-4k',
-      expect.any(Function),
-      3840,
-      2160,
-      'proxy-imported-4k',
-      { priority: 'background' },
-    );
   });
 
   it('removes duplicate placeholders and shows an info notification', async () => {

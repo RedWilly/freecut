@@ -1,7 +1,7 @@
 ﻿/**
  * Proxy Video Service
  *
- * Manages 720p proxy video generation lifecycle:
+ * Manages 960x540-bounded proxy video generation lifecycle:
  * - Start/cancel proxy generation for a media item
  * - Track generation status per mediaId
  * - Load existing proxies from OPFS on startup
@@ -17,15 +17,8 @@
 import { createLogger } from '@/shared/logging/logger';
 import { createManagedWorker } from '@/shared/utils/managed-worker';
 import { registerObjectUrl, unregisterObjectUrl } from '@/infrastructure/browser/object-url-registry';
-import { useSettingsStore } from '@/features/media-library/deps/settings-contract';
 import { filmstripCache } from '@/features/media-library/deps/timeline-services';
-import { needsCustomAudioDecoder } from '@/features/media-library/deps/composition-runtime';
-import {
-  DEFAULT_PROXY_GENERATION_MODE,
-  DEFAULT_PROXY_GENERATION_RESOLUTION,
-  getProxyGenerationThreshold,
-  isVideoProxyCandidate,
-} from '@/config/proxy-generation';
+import { isVideoProxyCandidate } from '@/config/proxy-generation';
 import { PROXY_DIR, PROXY_SCHEMA_VERSION } from '../proxy-constants';
 import type {
   ProxyWorkerRequest,
@@ -45,33 +38,6 @@ function getProxyOpfsPath(proxyKey: string): string {
   return `${PROXY_DIR}/${proxyKey}/proxy.mp4`;
 }
 
-const PROXY_PRIORITY_AUDIO_CODECS = new Set([
-  'ac-3',
-  'ac3',
-  'ec-3',
-  'eac3',
-  'e-ac-3',
-  'dts',
-  'pcm-s16be',
-  'pcm-s16le',
-  'pcm-s24be',
-  'pcm-s24le',
-  'pcm-s32be',
-  'pcm-s32le',
-  's16be',
-  's16le',
-  's24be',
-  's24le',
-  's32be',
-  's32le',
-  's16',
-  's24',
-  's32',
-  'twos',
-  'sowt',
-  'lpcm',
-]);
-
 interface ProxyMetadata {
   version?: number;
   width: number;
@@ -89,26 +55,34 @@ type ProxyStatusListener = (
 ) => void;
 
 type ProxySourceLoader = () => Promise<Blob | null>;
-type ProxySourceInput = Blob | ProxySourceLoader;
+interface ProxyOpfsSource {
+  kind: 'opfs';
+  path: string;
+  mimeType?: string;
+}
+type ProxySourceInput = Blob | ProxySourceLoader | ProxyOpfsSource;
 type ProxyJobPriority = 'user' | 'background';
-type ProxyPlaybackIssue =
-  | 'slow-seek'
-  | 'slow-decode'
-  | 'playback-resync'
-  | 'waiting'
-  | 'stalled'
-  | 'dropped-frames';
 
 interface ProxyGenerationOptions {
   priority?: ProxyJobPriority;
 }
 
-interface ProxyPlaybackIssueOptions {
-  proxyKey?: string;
-  source?: ProxySourceInput;
-  sourceWidth?: number;
-  sourceHeight?: number;
-  priority?: ProxyJobPriority;
+type QueuedProxySource =
+  | {
+      kind: 'loader';
+      load: ProxySourceLoader;
+    }
+  | {
+      kind: 'opfs';
+      path: string;
+      mimeType?: string;
+    };
+
+function isProxyOpfsSource(source: ProxySourceInput): source is ProxyOpfsSource {
+  return typeof source === 'object'
+    && source !== null
+    && 'kind' in source
+    && source.kind === 'opfs';
 }
 
 interface QueuedProxyJob {
@@ -116,7 +90,7 @@ interface QueuedProxyJob {
   proxyKey: string;
   sourceWidth: number;
   sourceHeight: number;
-  loadSource: ProxySourceLoader;
+  source: QueuedProxySource;
   priority: ProxyJobPriority;
 }
 
@@ -133,31 +107,11 @@ const PROXY_FILMSTRIP_COVER_PREWARM_SECONDS = 1;
 const PROXY_FILMSTRIP_PREWARM_SECONDS = 12;
 const PROXY_FILMSTRIP_COVER_PREWARM_DELAY_MS = 0;
 const PROXY_FILMSTRIP_PREWARM_DELAY_MS = 900;
-const PROXY_PLAYBACK_ISSUE_SCORE_THRESHOLD = 5;
-const PROXY_PLAYBACK_ISSUE_WEIGHTS: Record<ProxyPlaybackIssue, number> = {
-  'slow-seek': 2,
-  'slow-decode': 2,
-  'playback-resync': 2,
-  waiting: 3,
-  stalled: 3,
-  'dropped-frames': 3,
-};
-const PROXY_PLAYBACK_ISSUE_COOLDOWN_MS: Record<ProxyPlaybackIssue, number> = {
-  'slow-seek': 1200,
-  'slow-decode': 1200,
-  'playback-resync': 1500,
-  waiting: 2500,
-  stalled: 2500,
-  'dropped-frames': 3000,
-};
-
 class ProxyService {
   private proxyBlobUrlByKey = new Map<string, string>();
   private proxyKeyByMediaId = new Map<string, string>();
   private mediaIdsByProxyKey = new Map<string, Set<string>>();
   private progressByProxyKey = new Map<string, number>();
-  private playbackIssueScoreByMediaId = new Map<string, number>();
-  private playbackIssueLastAtByMediaId = new Map<string, Map<ProxyPlaybackIssue, number>>();
   private pendingJobsByKey = new Map<string, QueuedProxyJob>();
   private pendingJobOrder: string[] = [];
   private activeJobPhaseByKey = new Map<string, 'loading' | 'processing'>();
@@ -250,126 +204,11 @@ class ProxyService {
     return this.proxyKeyByMediaId.get(mediaId);
   }
 
-  prioritizeProxy(mediaId: string, proxyKey?: string): void {
-    const resolvedProxyKey = this.resolveProxyKey(mediaId, proxyKey);
-    const pendingJob = this.pendingJobsByKey.get(resolvedProxyKey);
-    if (!pendingJob || pendingJob.priority === 'user') {
-      return;
-    }
-
-    this.removePendingJob(resolvedProxyKey);
-    pendingJob.priority = 'user';
-    this.insertPendingJob(pendingJob);
-  }
-
   /**
    * Check if media supports manual proxy generation.
    */
   canGenerateProxy(mimeType: string): boolean {
     return isVideoProxyCandidate(mimeType);
-  }
-
-  isProxyRecommended(mediaId: string): boolean {
-    return useSettingsStore.getState().proxyRecommendedMediaIds.includes(mediaId);
-  }
-
-  reportPlaybackIssue(
-    mediaId: string,
-    issue: ProxyPlaybackIssue,
-    options: ProxyPlaybackIssueOptions = {},
-  ): boolean {
-    const normalizedMediaId = mediaId.trim();
-    if (!normalizedMediaId) {
-      return false;
-    }
-
-    if (this.isProxyRecommended(normalizedMediaId)) {
-      return false;
-    }
-
-    const now = Date.now();
-    const issueTimestamps = this.playbackIssueLastAtByMediaId.get(normalizedMediaId) ?? new Map();
-    const lastIssueAt = issueTimestamps.get(issue) ?? 0;
-    if ((now - lastIssueAt) < PROXY_PLAYBACK_ISSUE_COOLDOWN_MS[issue]) {
-      return false;
-    }
-
-    issueTimestamps.set(issue, now);
-    this.playbackIssueLastAtByMediaId.set(normalizedMediaId, issueTimestamps);
-
-    const nextScore = (
-      this.playbackIssueScoreByMediaId.get(normalizedMediaId) ?? 0
-    ) + PROXY_PLAYBACK_ISSUE_WEIGHTS[issue];
-    this.playbackIssueScoreByMediaId.set(normalizedMediaId, nextScore);
-
-    if (nextScore < PROXY_PLAYBACK_ISSUE_SCORE_THRESHOLD) {
-      return false;
-    }
-
-    useSettingsStore.getState().markProxyRecommended(normalizedMediaId);
-    this.playbackIssueScoreByMediaId.delete(normalizedMediaId);
-    this.playbackIssueLastAtByMediaId.delete(normalizedMediaId);
-
-    logger.info(`Runtime proxy recommendation triggered for ${normalizedMediaId}`, {
-      issue,
-      score: nextScore,
-    });
-
-    const shouldAutoQueue = (
-      (useSettingsStore.getState().proxyGenerationMode ?? DEFAULT_PROXY_GENERATION_MODE) === 'smart'
-      && options.source
-      && typeof options.sourceWidth === 'number'
-      && typeof options.sourceHeight === 'number'
-    );
-
-    if (shouldAutoQueue) {
-      this.generateProxy(
-        normalizedMediaId,
-        options.source!,
-        options.sourceWidth!,
-        options.sourceHeight!,
-        options.proxyKey,
-        { priority: options.priority ?? 'background' }
-      );
-    }
-
-    return true;
-  }
-
-  /**
-   * Check if a video qualifies for automatic proxy generation.
-   * - Honors user settings for smart/manual/all modes
-   * - Always true in smart mode for heavy/problematic audio codecs
-   * - Otherwise true for sources at or above the configured resolution threshold
-   */
-  needsProxy(width: number, height: number, mimeType: string, audioCodec?: string, mediaId?: string): boolean {
-    if (!this.canGenerateProxy(mimeType)) return false;
-
-    const settings = useSettingsStore.getState();
-    const proxyGenerationMode = settings.proxyGenerationMode ?? DEFAULT_PROXY_GENERATION_MODE;
-    if (proxyGenerationMode === 'manual') {
-      return false;
-    }
-    if (proxyGenerationMode === 'all') {
-      return true;
-    }
-
-    if (mediaId && this.isProxyRecommended(mediaId)) {
-      return true;
-    }
-
-    const normalizedAudioCodec = (audioCodec ?? '').toLowerCase();
-    if (PROXY_PRIORITY_AUDIO_CODECS.has(normalizedAudioCodec)) {
-      return true;
-    }
-    if (needsCustomAudioDecoder(audioCodec)) {
-      return true;
-    }
-
-    const threshold = getProxyGenerationThreshold(
-      settings.proxyGenerationResolution ?? DEFAULT_PROXY_GENERATION_RESOLUTION
-    );
-    return width >= threshold.width || height >= threshold.height;
   }
 
   /**
@@ -417,7 +256,7 @@ class ProxyService {
       proxyKey: resolvedProxyKey,
       sourceWidth,
       sourceHeight,
-      loadSource: this.normalizeSourceLoader(source),
+      source: this.normalizeSource(source),
       priority: options?.priority ?? 'user',
     });
     this.drainQueue();
@@ -489,8 +328,6 @@ class ProxyService {
       revokeRegisteredObjectUrl(url);
       this.proxyBlobUrlByKey.delete(resolvedProxyKey);
     }
-
-    this.clearPlaybackRecommendationForProxyKey(resolvedProxyKey);
 
     // Remove from OPFS
     try {
@@ -575,8 +412,8 @@ class ProxyService {
             continue;
           }
 
-          // Invalidate stale proxy formats to avoid aspect distortion from
-          // legacy fixed-1280x720 transcodes.
+          // Invalidate stale proxy formats to avoid carrying forward old proxy
+          // dimensions after proxy sizing changes.
           if (metadata.version !== PROXY_SCHEMA_VERSION) {
             const mappedMediaIds = collectMappedMediaIds(proxyKey);
             if (mappedMediaIds.length > 0) {
@@ -846,11 +683,25 @@ class ProxyService {
     return this.proxyKeyByMediaId.get(mediaId) ?? mediaId;
   }
 
-  private normalizeSourceLoader(source: ProxySourceInput): ProxySourceLoader {
-    if (typeof source === 'function') {
-      return source;
+  private normalizeSource(source: ProxySourceInput): QueuedProxySource {
+    if (isProxyOpfsSource(source)) {
+      return {
+        kind: 'opfs',
+        path: source.path,
+        mimeType: source.mimeType,
+      };
     }
-    return async () => source;
+
+    if (typeof source === 'function') {
+      return {
+        kind: 'loader',
+        load: source,
+      };
+    }
+    return {
+      kind: 'loader',
+      load: async () => source,
+    };
   }
 
   private insertPendingJob(job: QueuedProxyJob): void {
@@ -905,35 +756,49 @@ class ProxyService {
 
   private async runQueuedJob(job: QueuedProxyJob): Promise<void> {
     const { proxyKey } = job;
-    this.activeJobPhaseByKey.set(proxyKey, 'loading');
-
-    let source: Blob | null = null;
     try {
-      source = await job.loadSource();
-    } catch (error) {
+      const worker = this.getWorker();
+
+      if (job.source.kind === 'opfs') {
+        this.activeJobPhaseByKey.set(proxyKey, 'processing');
+        worker.postMessage({
+          type: 'generate',
+          mediaId: proxyKey,
+          sourceOpfsPath: job.source.path,
+          sourceMimeType: job.source.mimeType,
+          sourceWidth: job.sourceWidth,
+          sourceHeight: job.sourceHeight,
+        } as ProxyWorkerRequest);
+        return;
+      }
+
+      this.activeJobPhaseByKey.set(proxyKey, 'loading');
+
+      let source: Blob | null = null;
+      try {
+        source = await job.source.load();
+      } catch (error) {
+        if (!this.generatingProxyKeys.has(proxyKey)) {
+          this.activeJobPhaseByKey.delete(proxyKey);
+          this.drainQueue();
+          return;
+        }
+
+        this.failQueuedJob(proxyKey, `Failed to load source for ${proxyKey}`, error);
+        return;
+      }
+
       if (!this.generatingProxyKeys.has(proxyKey)) {
         this.activeJobPhaseByKey.delete(proxyKey);
         this.drainQueue();
         return;
       }
 
-      this.failQueuedJob(proxyKey, `Failed to load source for ${proxyKey}`, error);
-      return;
-    }
+      if (!source) {
+        this.failQueuedJob(proxyKey, `Source media unavailable for ${proxyKey}`);
+        return;
+      }
 
-    if (!this.generatingProxyKeys.has(proxyKey)) {
-      this.activeJobPhaseByKey.delete(proxyKey);
-      this.drainQueue();
-      return;
-    }
-
-    if (!source) {
-      this.failQueuedJob(proxyKey, `Source media unavailable for ${proxyKey}`);
-      return;
-    }
-
-    try {
-      const worker = this.getWorker();
       this.activeJobPhaseByKey.set(proxyKey, 'processing');
       worker.postMessage({
         type: 'generate',
@@ -1017,27 +882,10 @@ class ProxyService {
 
   private clearProgressEmissionState(proxyKey: string): void {
     const state = this.progressEmissionByProxyKey.get(proxyKey);
-    if (state?.timeoutId !== null) {
+    if (state?.timeoutId != null) {
       clearTimeout(state.timeoutId);
     }
     this.progressEmissionByProxyKey.delete(proxyKey);
-  }
-
-  private clearPlaybackRecommendationForProxyKey(proxyKey: string): void {
-    const settings = useSettingsStore.getState();
-    const mappedMediaIds = this.mediaIdsByProxyKey.get(proxyKey);
-    if (mappedMediaIds && mappedMediaIds.size > 0) {
-      for (const mediaId of mappedMediaIds) {
-        settings.clearProxyRecommended(mediaId);
-        this.playbackIssueScoreByMediaId.delete(mediaId);
-        this.playbackIssueLastAtByMediaId.delete(mediaId);
-      }
-      return;
-    }
-
-    settings.clearProxyRecommended(proxyKey);
-    this.playbackIssueScoreByMediaId.delete(proxyKey);
-    this.playbackIssueLastAtByMediaId.delete(proxyKey);
   }
 
   private emitStatusForProxyKey(

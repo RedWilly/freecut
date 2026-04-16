@@ -155,81 +155,14 @@ describe('proxyService.loadExistingProxies', () => {
     expect(proxyService.canGenerateProxy('audio/mpeg')).toBe(false);
   });
 
-  it('uses proxy generation settings when deciding automatic proxy work', async () => {
-    const { useSettingsStore } = await import('@/features/media-library/deps/settings-contract');
-    const { proxyService } = await import('./proxy-service');
-
-    useSettingsStore.getState().resetToDefaults();
-    expect(proxyService.needsProxy(1920, 1080, 'video/mp4')).toBe(true);
-
-    useSettingsStore.getState().setSetting('proxyGenerationMode', 'manual');
-    expect(proxyService.needsProxy(3840, 2160, 'video/mp4')).toBe(false);
-
-    useSettingsStore.getState().setSetting('proxyGenerationMode', 'smart');
-    useSettingsStore.getState().setSetting('proxyGenerationResolution', '2160p');
-    expect(proxyService.needsProxy(1920, 1080, 'video/mp4')).toBe(false);
-    expect(proxyService.needsProxy(3840, 2160, 'video/mp4')).toBe(true);
-
-    useSettingsStore.getState().setSetting('proxyGenerationMode', 'all');
-    expect(proxyService.needsProxy(1280, 720, 'video/mp4')).toBe(true);
-  });
-
-  it('treats custom-decoded audio codecs as smart proxy candidates', async () => {
-    const { useSettingsStore } = await import('@/features/media-library/deps/settings-contract');
-    const { proxyService } = await import('./proxy-service');
-
-    useSettingsStore.getState().resetToDefaults();
-    useSettingsStore.getState().setSetting('proxyGenerationMode', 'smart');
-    useSettingsStore.getState().setSetting('proxyGenerationResolution', '2160p');
-
-    expect(proxyService.needsProxy(1280, 720, 'video/webm', 'vorbis')).toBe(true);
-  });
-
-  it('records runtime playback trouble and auto-queues a smart proxy recommendation', async () => {
-    const workerPostMessage = vi.fn();
-    workerManagerMocks.getWorker.mockReturnValue({
-      postMessage: workerPostMessage,
-    });
-
-    const { useSettingsStore } = await import('@/features/media-library/deps/settings-contract');
-    const { proxyService } = await import('./proxy-service');
-
-    useSettingsStore.getState().resetToDefaults();
-    proxyService.setProxyKey('video-runtime', 'proxy-video-runtime');
-
-    expect(proxyService.reportPlaybackIssue('video-runtime', 'slow-decode', {
-      source: new Blob(['video-bytes'], { type: 'video/mp4' }),
-      sourceWidth: 1280,
-      sourceHeight: 720,
-    })).toBe(false);
-
-    expect(proxyService.reportPlaybackIssue('video-runtime', 'waiting', {
-      source: new Blob(['video-bytes'], { type: 'video/mp4' }),
-      sourceWidth: 1280,
-      sourceHeight: 720,
-    })).toBe(true);
-
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(useSettingsStore.getState().proxyRecommendedMediaIds).toContain('video-runtime');
-    expect(proxyService.needsProxy(1280, 720, 'video/mp4', undefined, 'video-runtime')).toBe(true);
-    expect(workerPostMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'generate',
-      mediaId: 'proxy-video-runtime',
-      sourceWidth: 1280,
-      sourceHeight: 720,
-    }));
-  });
-
-  it('requeues interrupted generating proxies on startup and removes partial output', async () => {
+  it('removes partial output for interrupted proxy generations on startup', async () => {
     const removeEntry = vi.fn(async () => undefined);
     const proxyDirectory = createDirectoryHandle({
       files: {
         'meta.json': createJsonFile({
-          version: 3,
-          width: 1280,
-          height: 720,
+          version: 4,
+          width: 960,
+          height: 540,
           sourceWidth: 3840,
           sourceHeight: 2160,
           status: 'generating',
@@ -268,9 +201,9 @@ describe('proxyService.loadExistingProxies', () => {
     const proxyDirectory = createDirectoryHandle({
       files: {
         'meta.json': createJsonFile({
-          version: 3,
-          width: 1280,
-          height: 720,
+          version: 4,
+          width: 960,
+          height: 540,
           sourceWidth: 3840,
           sourceHeight: 2160,
           status: 'error',
@@ -309,9 +242,9 @@ describe('proxyService.loadExistingProxies', () => {
     const proxyDirectory = createDirectoryHandle({
       files: {
         'meta.json': createJsonFile({
-          version: 3,
-          width: 1280,
-          height: 720,
+          version: 4,
+          width: 960,
+          height: 540,
           sourceWidth: 3840,
           sourceHeight: 2160,
           status: 'ready',
@@ -401,5 +334,64 @@ describe('proxyService.loadExistingProxies', () => {
       20,
       { startTime: 0, endTime: 12 },
     );
+  });
+
+  it('posts OPFS-backed proxy jobs to the worker without loading the source on the main thread', async () => {
+    const worker = {
+      postMessage: vi.fn(),
+    } as unknown as Worker;
+    workerManagerMocks.getWorker.mockReturnValue(worker);
+
+    const { proxyService } = await import('./proxy-service');
+
+    proxyService.generateProxy(
+      'video-opfs',
+      { kind: 'opfs', path: 'content/ab/cd/video/data', mimeType: 'video/mp4' },
+      1920,
+      1080,
+      'proxy-video-opfs',
+    );
+
+    await vi.waitFor(() => {
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'generate',
+        mediaId: 'proxy-video-opfs',
+        sourceOpfsPath: 'content/ab/cd/video/data',
+        sourceMimeType: 'video/mp4',
+        sourceWidth: 1920,
+        sourceHeight: 1080,
+      });
+    });
+  });
+
+  it('still loads handle-backed proxy sources on the main thread before posting to the worker', async () => {
+    const worker = {
+      postMessage: vi.fn(),
+    } as unknown as Worker;
+    workerManagerMocks.getWorker.mockReturnValue(worker);
+
+    const sourceBlob = new Blob(['proxy-source'], { type: 'video/mp4' });
+    const loadSource = vi.fn(async () => sourceBlob);
+
+    const { proxyService } = await import('./proxy-service');
+
+    proxyService.generateProxy(
+      'video-handle',
+      loadSource,
+      1920,
+      1080,
+      'proxy-video-handle',
+    );
+
+    await vi.waitFor(() => {
+      expect(loadSource).toHaveBeenCalledTimes(1);
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'generate',
+        mediaId: 'proxy-video-handle',
+        source: sourceBlob,
+        sourceWidth: 1920,
+        sourceHeight: 1080,
+      });
+    });
   });
 });

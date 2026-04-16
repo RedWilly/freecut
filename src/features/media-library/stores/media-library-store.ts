@@ -11,7 +11,6 @@ import type { MediaMetadata } from '@/types/storage';
 import { mediaLibraryService } from '../services/media-library-service';
 import { createLogger, createOperationId } from '@/shared/logging/logger';
 import { proxyService } from '../services/proxy-service';
-import { enqueueBackgroundMediaWork } from '../services/background-media-work';
 import { getSharedProxyKey } from '../utils/proxy-key';
 import { createImportActions } from './media-import-actions';
 import { createDeleteActions } from './media-delete-actions';
@@ -20,7 +19,6 @@ import { getTranscriptMediaIds } from '@/infrastructure/storage/indexeddb';
 import { mergeTranscriptionProgress } from '@/shared/utils/transcription-progress';
 
 const logger = createLogger('MediaLibraryStore');
-const BACKGROUND_PROXY_DELAY_MS = 2500;
 
 /** Tracked timeout for notification auto-clear */
 let notificationTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -62,31 +60,6 @@ function getProxyCapableVideoItems(mediaItems: MediaMetadata[]): MediaMetadata[]
   );
 }
 
-function enqueueBackgroundProxies(
-  videoItems: MediaMetadata[],
-  reason: 'recovery' | 'automatic',
-): void {
-  videoItems.forEach((item) => {
-    try {
-      enqueueBackgroundMediaWork(() => {
-        proxyService.generateProxy(
-          item.id,
-          () => mediaLibraryService.getMediaFile(item.id),
-          item.width,
-          item.height,
-          getSharedProxyKey(item),
-          { priority: 'background' }
-        );
-      }, {
-        priority: 'heavy',
-        delayMs: BACKGROUND_PROXY_DELAY_MS,
-      });
-    } catch (error) {
-      logger.warn(`[MediaLibraryStore] Failed to enqueue ${reason} proxy generation for ${item.id}:`, error);
-    }
-  });
-}
-
 async function initializeProxyState(mediaItems: MediaMetadata[]): Promise<void> {
   const videoItems = getProxyCapableVideoItems(mediaItems);
 
@@ -98,26 +71,7 @@ async function initializeProxyState(mediaItems: MediaMetadata[]): Promise<void> 
     proxyService.setProxyKey(item.id, getSharedProxyKey(item));
   }
 
-  const staleProxyIds = await proxyService.loadExistingProxies(videoItems.map((item) => item.id));
-  const staleProxyIdSet = new Set(staleProxyIds);
-  enqueueBackgroundProxies(
-    videoItems.filter((item) => staleProxyIdSet.has(item.id)),
-    'recovery'
-  );
-
-  const automaticProxyCandidates = videoItems.filter((item) => {
-    if (staleProxyIdSet.has(item.id)) {
-      return false;
-    }
-
-    if (!proxyService.needsProxy(item.width, item.height, item.mimeType, item.audioCodec, item.id)) {
-      return false;
-    }
-
-    return !proxyService.hasProxy(item.id, getSharedProxyKey(item));
-  });
-
-  enqueueBackgroundProxies(automaticProxyCandidates, 'automatic');
+  await proxyService.loadExistingProxies(videoItems.map((item) => item.id));
 }
 
 export const useMediaLibraryStore = create<
@@ -228,8 +182,7 @@ export const useMediaLibraryStore = create<
 
           event.set('transcriptsReady', [...transcriptStatus.values()].filter((s) => s === 'ready').length);
 
-          // Load existing proxies from OPFS, recover interrupted jobs, and
-          // auto-generate missing smart proxies in the background.
+          // Load existing proxies from OPFS and clean up interrupted/failed entries.
           try {
             await initializeProxyState(mediaItems);
           } catch (error) {

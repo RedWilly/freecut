@@ -11,7 +11,6 @@ const mediaLibraryServiceMocks = vi.hoisted(() => ({
 
 const proxyServiceMocks = vi.hoisted(() => ({
   canGenerateProxy: vi.fn(),
-  needsProxy: vi.fn(),
   setProxyKey: vi.fn(),
   generateProxy: vi.fn(),
   cancelProxy: vi.fn(),
@@ -183,7 +182,6 @@ describe('MediaCard', () => {
     mediaLibraryServiceMocks.getMediaFile.mockResolvedValue(new Blob(['video-data']));
     mediaLibraryServiceMocks.getMediaBlobUrl.mockResolvedValue('blob:media-1');
     proxyServiceMocks.canGenerateProxy.mockReturnValue(true);
-    proxyServiceMocks.needsProxy.mockReturnValue(true);
     proxyServiceMocks.deleteProxy.mockResolvedValue(undefined);
     mediaTranscriptionServiceMocks.transcribeMedia.mockResolvedValue(undefined);
   });
