@@ -155,7 +155,7 @@ describe('proxyService.loadExistingProxies', () => {
     expect(proxyService.canGenerateProxy('audio/mpeg')).toBe(false);
   });
 
-  it('requeues interrupted generating proxies on startup and removes partial output', async () => {
+  it('removes partial output for interrupted proxy generations on startup', async () => {
     const removeEntry = vi.fn(async () => undefined);
     const proxyDirectory = createDirectoryHandle({
       files: {

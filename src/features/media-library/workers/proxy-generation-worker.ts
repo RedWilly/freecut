@@ -110,7 +110,7 @@ async function getSourceBlobFromOpfs(path: string, mimeType?: string): Promise<B
 
   const fileHandle = await dir.getFileHandle(fileName);
   const file = await fileHandle.getFile();
-  if (!mimeType || file.type === mimeType || file.type.length > 0) {
+  if (!mimeType || file.type) {
     return file;
   }
 

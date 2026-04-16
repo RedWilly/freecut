@@ -182,8 +182,7 @@ export const useMediaLibraryStore = create<
 
           event.set('transcriptsReady', [...transcriptStatus.values()].filter((s) => s === 'ready').length);
 
-          // Load existing proxies from OPFS, recover interrupted jobs, and
-          // auto-generate missing smart proxies in the background.
+          // Load existing proxies from OPFS and clean up interrupted/failed entries.
           try {
             await initializeProxyState(mediaItems);
           } catch (error) {
