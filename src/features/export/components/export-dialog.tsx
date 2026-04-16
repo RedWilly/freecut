@@ -29,7 +29,7 @@ import type { ExportSettings, ExportMode } from '@/types/export';
 import { useClientRender } from '../hooks/use-client-render';
 import { useProjectStore } from '@/features/export/deps/projects';
 import { useTimelineStore } from '@/features/export/deps/timeline';
-import { formatTimecode, framesToSeconds } from '@/utils/time-utils';
+import { formatTimecode, framesToSeconds } from '@/shared/utils/time-utils';
 import {
   getCompatibleVideoCodecs,
   getDefaultVideoCodec,
@@ -102,8 +102,8 @@ function getResolutionOptions(projectWidth: number, projectHeight: number) {
 
     const label =
       scale === 1
-        ? `Same as project (${width}×${height})`
-        : `${Math.min(width, height)}p (${width}×${height})`;
+        ? `Same as project (${width}Ã—${height})`
+        : `${Math.min(width, height)}p (${width}Ã—${height})`;
 
     return { value: `${width}x${height}`, label };
   });

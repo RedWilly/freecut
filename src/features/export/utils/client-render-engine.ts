@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Client Render Engine
  *
  * Contains the `createCompositionRenderer` factory that builds the per-frame
@@ -54,7 +54,7 @@ import {
   type ActiveTransition,
 } from './canvas-transitions';
 import { type CachedGifFrames, gifFrameCache } from '@/features/export/deps/timeline';
-import { isGifUrl, isWebpUrl } from '@/utils/media-utils';
+import { isGifUrl, isWebpUrl } from '@/shared/utils/media-utils';
 import { CanvasPool, TextMeasurementCache } from './canvas-pool';
 import { SharedVideoExtractorPool, type VideoFrameSource } from './shared-video-extractor';
 import { getCompositeOperation } from '@/types/blend-mode-css';

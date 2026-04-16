@@ -1,6 +1,6 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { TimelineItem } from '@/types/timeline';
-import type { ResolvedTransitionWindow } from '@/domain/timeline/transitions/transition-planner';
+import type { ResolvedTransitionWindow } from '@/core/timeline/transitions/transition-planner';
 import { usePlaybackStore } from '@/shared/state/playback';
 import {
   getBestDomVideoElementForItem,
@@ -185,7 +185,7 @@ export function usePreviewTransitionSessionController({
           try {
             el.currentTime = clamped;
           } catch {
-            // Element may be settling — ignore transient seek failures.
+            // Element may be settling â€” ignore transient seek failures.
           }
         } else if (drift > 0.016) {
           el.playbackRate = clipSpeed;

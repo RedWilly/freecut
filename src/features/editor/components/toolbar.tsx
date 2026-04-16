@@ -26,7 +26,7 @@ import { ProjectDebugPanel } from './project-debug-panel';
 import { SettingsDialog } from './settings-dialog';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { UnsavedChangesDialog } from './unsaved-changes-dialog';
-import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/app/editor-layout';
 import { cn } from '@/shared/ui/cn';
 import { useDebugStore } from '@/features/editor/stores/debug-store';
 

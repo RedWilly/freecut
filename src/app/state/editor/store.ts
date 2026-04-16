@@ -4,7 +4,7 @@ import {
   EDITOR_LAYOUT,
   getLeftEditorSidebarBounds,
   getRightEditorSidebarBounds,
-} from '@/shared/ui/editor-layout';
+} from '@/app/editor-layout';
 
 const LEGACY_SIDEBAR_DEFAULT_WIDTH = 320;
 

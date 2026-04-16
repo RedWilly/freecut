@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Debug Utilities for Project Data
  *
  * Exposes debugging functions on window.__DEBUG__ in development mode.
@@ -356,7 +356,7 @@ function createDebugAPI(): ProjectDebugAPI {
         import('@/features/timeline/stores/timeline-store'),
       ]);
       const { resolveTransitionWindows } = await import(
-        '@/domain/timeline/transitions/transition-planner'
+        '@/core/timeline/transitions/transition-planner'
       );
       const transitions = useTransitionsStore.getState().transitions;
       const itemsByTrackId = useItemsStore.getState().itemsByTrackId;

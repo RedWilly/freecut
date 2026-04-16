@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { CURRENT_SCHEMA_VERSION } from '@/domain/projects/migrations';
+import { CURRENT_SCHEMA_VERSION } from '@/core/projects/migrations';
 import { getProject } from '@/infrastructure/storage/indexeddb';
 
 export const Route = createFileRoute('/editor/$projectId')({

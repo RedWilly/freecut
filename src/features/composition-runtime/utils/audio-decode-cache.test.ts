@@ -17,6 +17,7 @@ const ac3Mocks = vi.hoisted(() => ({
 
 const objectUrlRegistryMocks = vi.hoisted(() => ({
   getObjectUrlBlob: vi.fn(() => null),
+  getObjectUrlSourceMetadata: vi.fn(() => null),
 }));
 
 const previewAudioConformMocks = vi.hoisted(() => ({

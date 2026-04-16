@@ -7,7 +7,7 @@ import {
   useClock,
 } from '@/features/preview/deps/player-context';
 import { usePlaybackStore } from '@/shared/state/playback';
-import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/app/editor-layout';
 import {
   buildSubCompositionInput,
   collectSubCompositionMediaIds,

@@ -11,11 +11,11 @@ import { useCompositionsStore } from '../../stores/compositions-store';
 import { useItemsStore } from '../../stores/items-store';
 import { useClipVisibility } from '../../hooks/use-clip-visibility';
 import { useZoomStore } from '../../stores/zoom-store';
-import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/app/editor-layout';
 import { summarizeCompositionClipContent } from '../../utils/composition-clip-summary';
 import { hasLinkedAudioCompanion } from '@/shared/utils/linked-media';
-import { formatSignedFrameDelta } from '@/utils/time-utils';
-import { isGifUrl, isWebpUrl } from '@/utils/media-utils';
+import { formatSignedFrameDelta } from '@/shared/utils/time-utils';
+import { isGifUrl, isWebpUrl } from '@/shared/utils/media-utils';
 
 const EMPTY_COMPOSITION_LOOKUP: Record<string, never> = {};
 const FILMSTRIP_MIN_WIDTH_PX = 5;
@@ -41,7 +41,7 @@ interface ClipContentProps {
 
 /**
  * Renders the visual content of a timeline clip based on its type.
- * - Video: 2-row layout — label | filmstrip
+ * - Video: 2-row layout â€” label | filmstrip
  * - Audio: Label row + waveform
  * - Composition (with video): Label | filmstrip | waveform
  * - Text: Text content preview
@@ -59,7 +59,7 @@ export const ClipContent = memo(function ClipContent({
   linkedSyncOffsetFrames = null,
 }: ClipContentProps) {
   // Subscribe to live pixelsPerSecond so filmstrip/waveform content stays in sync
-  // with the CSS-variable-driven clip shell during zoom — avoids a visible catchup
+  // with the CSS-variable-driven clip shell during zoom â€” avoids a visible catchup
   // jump at settle. Per-item render cost is kept low by the filmstrip skip (<5px)
   // and compact clip shell optimizations in the parent.
   const pixelsPerSecond = useZoomStore((s) => s.pixelsPerSecond);

@@ -14,9 +14,9 @@ import {
 } from 'lucide-react';
 import { usePlaybackStore } from '@/shared/state/playback';
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge';
-import { EDITOR_LAYOUT_CSS_VALUES } from '@/shared/ui/editor-layout';
+import { EDITOR_LAYOUT_CSS_VALUES } from '@/app/editor-layout';
 import { useMediaLibraryStore, mediaLibraryService } from '@/features/preview/deps/media-library-contract';
-import { formatTimecode } from '@/utils/time-utils';
+import { formatTimecode } from '@/shared/utils/time-utils';
 import { toast } from 'sonner';
 
 interface PlaybackControlsProps {
@@ -270,7 +270,7 @@ export function PlaybackControls({ totalFrames, fps }: PlaybackControlsProps) {
         </Button>
       </div>
 
-      {/* Save frame — hidden at narrow widths */}
+      {/* Save frame â€” hidden at narrow widths */}
       <div className="hidden @min-[440px]:flex items-center gap-0.5 flex-shrink-0">
         <Separator orientation="vertical" className="h-4 flex-shrink-0" />
 
@@ -294,7 +294,7 @@ export function PlaybackControls({ totalFrames, fps }: PlaybackControlsProps) {
         </Button>
       </div>
 
-      {/* Proxy toggle — hidden at narrow widths */}
+      {/* Proxy toggle â€” hidden at narrow widths */}
       <div className="hidden @min-[440px]:flex items-center gap-0.5 flex-shrink-0">
         <Separator orientation="vertical" className="h-4 flex-shrink-0" />
 

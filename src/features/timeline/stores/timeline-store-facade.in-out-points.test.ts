@@ -65,7 +65,7 @@ vi.mock('@/features/timeline/deps/media-library-store', () => ({
   },
 }));
 
-vi.mock('@/domain/projects/migrations', () => ({
+vi.mock('@/core/projects/migrations', () => ({
   migrateProject: vi.fn((project) => ({
     project,
     migrated: false,

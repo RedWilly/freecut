@@ -18,7 +18,7 @@ import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache';
 import { proxyService } from '../services/proxy-service';
 import { mediaTranscriptionService } from '../services/media-transcription-service';
 import { isLocalInferenceCancellationError } from '@/shared/state/local-inference';
-import { useEditorStore } from '@/shared/state/editor';
+import { useEditorStore } from '@/app/state/editor';
 import { useSourcePlayerStore } from '@/shared/state/source-player';
 import { captionVideo, captionImage } from '../deps/analysis';
 import {
@@ -699,7 +699,7 @@ export const MediaCard = memo(function MediaCard({
           )}
         </div>
 
-        {/* Info — single row: icon + name + duration */}
+        {/* Info â€” single row: icon + name + duration */}
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           {isImporting ? (
             <span className="text-[10px] text-muted-foreground">Importing...</span>

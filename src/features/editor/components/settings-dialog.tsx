@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type { MediaMetadata } from '@/types/storage';
 import {
   Dialog,
@@ -55,7 +55,7 @@ import {
 import { clearPreviewAudioCache } from '@/features/editor/deps/composition-runtime';
 import { createLogger } from '@/shared/logging/logger';
 import { cn } from '@/shared/ui/cn';
-import { EDITOR_DENSITY_OPTIONS } from '@/shared/ui/editor-layout';
+import { EDITOR_DENSITY_OPTIONS } from '@/app/editor-layout';
 import {
   getWhisperQuantizationOption,
   getWhisperLanguageSelectValue,

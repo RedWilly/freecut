@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Keyframe Graph Panel Component
  *
  * Panel that shows the value graph editor for selected items.
@@ -42,7 +42,7 @@ import { useTimelineCommandStore } from '../stores/timeline-command-store';
 import { captureSnapshot } from '../stores/commands/snapshot';
 import type { TimelineSnapshot } from '../stores/commands/types';
 import { usePlaybackStore } from '@/shared/state/playback';
-import { useEditorStore } from '@/shared/state/editor';
+import { useEditorStore } from '@/app/state/editor';
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store';
 import {
   DEFAULT_BEZIER_POINTS,
