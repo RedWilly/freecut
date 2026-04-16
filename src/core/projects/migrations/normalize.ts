@@ -17,7 +17,7 @@
  */
 
 import type { Project, ProjectTimeline } from '@/types/project';
-import { DEFAULT_TRACK_HEIGHT, DEFAULT_FPS } from '@/domain/timeline/defaults';
+import { DEFAULT_TRACK_HEIGHT, DEFAULT_FPS } from '@/core/timeline/defaults';
 import {
   AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ,
   AUDIO_EQ_HIGH_CUT_MAX_FREQUENCY_HZ,
@@ -63,7 +63,7 @@ function normalizeTrack(
     : undefined;
   return {
     ...track,
-    // Always use current default — no user-facing track resize exists yet
+    // Always use current default â€” no user-facing track resize exists yet
     height: DEFAULT_TRACK_HEIGHT,
     // Ensure boolean fields have defaults
     locked: track.locked ?? false,
@@ -386,7 +386,7 @@ function repairOverlappingItems(
         const next = group[j]!;
         if (next.item.from >= currentEnd) break; // No overlap
 
-        // Skip transition-linked overlaps — they're intentional
+        // Skip transition-linked overlaps â€” they're intentional
         const pairKey = `${current.item.id}:${next.item.id}`;
         if (transitionPairs.has(pairKey)) continue;
 

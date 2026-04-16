@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Canvas Audio Processing System
  *
  * Handles audio extraction, processing, mixing, and encoding for client-side export.
@@ -11,7 +11,7 @@ import type { AudioEqSettings, ResolvedAudioEqSettings } from '@/types/audio';
 import type { Keyframe as VolumeKeyframe } from '@/types/keyframe';
 import type { Transition } from '@/types/transition';
 import { createLogger } from '@/shared/logging/logger';
-import { resolveTransitionWindows } from '@/domain/timeline/transitions/transition-planner';
+import { resolveTransitionWindows } from '@/core/timeline/transitions/transition-planner';
 import {
   timelineToSourceFrames,
   sourceToTimelineFrames,

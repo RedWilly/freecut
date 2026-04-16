@@ -5,7 +5,7 @@ import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineCommandStore } from '../timeline-command-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
-import { useEditorStore } from '@/shared/state/editor';
+import { useEditorStore } from '@/app/state/editor';
 import {
   addTransition,
 } from './transition-actions';
@@ -381,7 +381,7 @@ describe('linked edit tools', () => {
 
   it('slide trims companion-only adjacent neighbors (solo audio next to companion)', () => {
     useItemsStore.getState().setItems([
-      // Video track: [video-left][video-middle] — no video-right neighbor
+      // Video track: [video-left][video-middle] â€” no video-right neighbor
       makeVideoItem({ id: 'video-left', linkedGroupId: 'group-left' }),
       makeAudioItem({ id: 'audio-left', linkedGroupId: 'group-left' }),
       makeVideoItem({ id: 'video-middle', from: 60, linkedGroupId: 'group-middle', mediaId: 'media-2' }),

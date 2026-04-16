@@ -8,7 +8,7 @@
  * 2. Normalization - Applied every load to ensure current defaults
  *
  * Usage:
- *   import { migrateProject, CURRENT_SCHEMA_VERSION } from '@/domain/projects/migrations';
+ *   import { migrateProject, CURRENT_SCHEMA_VERSION } from '@/core/projects/migrations';
  *
  *   const result = migrateProject(loadedProject);
  *   if (result.migrated) {
@@ -16,14 +16,11 @@
  *   }
  */
 
-import { createLogger } from '@/shared/logging/logger';
 import type { Project } from '@/types/project';
 import type { MigrationResult } from './types';
 import { CURRENT_SCHEMA_VERSION } from './types';
 import { getMigrationsToApply } from './migrations';
 import { normalizeProject, didNormalizationChange } from './normalize';
-
-const logger = createLogger('Migrations');
 
 // Re-export types and constants
 export { CURRENT_SCHEMA_VERSION } from './types';
@@ -67,12 +64,14 @@ function runMigrations(project: Project): {
   let migratedProject = project;
 
   for (const migration of migrationsToApply) {
-    logger.info(`Running migration v${migration.version}: ${migration.description}`);
+    if (import.meta.env.DEV) {
+      console.warn(`[Migrations] Running migration v${migration.version}: ${migration.description}`);
+    }
     try {
       migratedProject = migration.migrate(migratedProject);
       appliedMigrations.push(migration.version);
     } catch (error) {
-      logger.error(`Migration v${migration.version} failed:`, error);
+      console.error(`[Migrations] Migration v${migration.version} failed:`, error);
       throw new Error(
         `Failed to migrate project from v${fromVersion} to v${migration.version}: ${error}`
       );

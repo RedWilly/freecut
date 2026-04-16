@@ -11,14 +11,14 @@
 
 import { useHotkeys } from 'react-hotkeys-hook';
 import { HOTKEY_OPTIONS } from '@/config/hotkeys';
-import { useEditorStore } from '@/shared/state/editor';
+import { useEditorStore } from '@/app/state/editor';
 import { performInsertEdit, performOverwriteEdit } from '../../stores/actions/source-edit-actions';
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings';
 
 export function useSourceMonitorShortcuts() {
   const hotkeys = useResolvedHotkeys();
 
-  // Insert Edit: , (comma) — works globally when source monitor is open
+  // Insert Edit: , (comma) â€” works globally when source monitor is open
   useHotkeys(
     hotkeys.INSERT_EDIT,
     (event) => {
@@ -31,7 +31,7 @@ export function useSourceMonitorShortcuts() {
     []
   );
 
-  // Overwrite Edit: . (period) — works globally when source monitor is open
+  // Overwrite Edit: . (period) â€” works globally when source monitor is open
   useHotkeys(
     hotkeys.OVERWRITE_EDIT,
     (event) => {

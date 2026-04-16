@@ -9,7 +9,6 @@
  * - A TransitionRenderer (calculation logic for CSS styles and canvas export)
  */
 
-import { createLogger } from '@/shared/logging/logger';
 import type {
   TransitionDefinition,
   TransitionCategory,
@@ -18,8 +17,6 @@ import type {
   FlipDirection,
 } from '@/types/transition';
 import type { TransitionStyleCalculation } from './engine';
-
-function getRegistryLogger() { return createLogger('TransitionRegistry'); }
 
 /**
  * Renderer interface for CSS/DOM-based transitions (preview + Composition).
@@ -86,7 +83,7 @@ export class TransitionRegistry {
    */
   register(id: string, definition: TransitionDefinition, renderer: TransitionRenderer): void {
     if (this.entries.has(id)) {
-      getRegistryLogger().warn(`Transition "${id}" is being overwritten`);
+      console.warn(`[TransitionRegistry] Transition "${id}" is being overwritten`);
     }
     this.entries.set(id, { definition, renderer });
   }

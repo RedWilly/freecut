@@ -2,7 +2,7 @@ import { Info, Video, FileAudio, Image as ImageIcon, Film, Clock, Maximize2, Har
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { MediaMetadata } from '@/types/storage';
 import { getMediaType, formatDuration } from '../utils/validation';
-import { formatBytes } from '@/utils/format-utils';
+import { formatBytes } from '@/shared/utils/format-utils';
 
 function formatTimestamp(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -31,7 +31,7 @@ export function MediaInfoPopover({ media, triggerClassName, onSeekToCaption }: M
   }
 
   if ((mediaType === 'video' || mediaType === 'image') && media.width > 0 && media.height > 0) {
-    rows.push({ icon: <Maximize2 className="w-3 h-3" />, label: 'Dimensions', value: `${media.width} × ${media.height}` });
+    rows.push({ icon: <Maximize2 className="w-3 h-3" />, label: 'Dimensions', value: `${media.width} Ã— ${media.height}` });
   }
 
   if (media.codec && media.codec !== 'importing...') {

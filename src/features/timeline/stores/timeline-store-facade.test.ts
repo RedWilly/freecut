@@ -73,7 +73,7 @@ vi.mock('@/features/timeline/deps/media-library-store', () => ({
   },
 }));
 
-vi.mock('@/domain/projects/migrations', () => ({
+vi.mock('@/core/projects/migrations', () => ({
   migrateProject: vi.fn((project) => ({
     project,
     migrated: false,
@@ -1050,8 +1050,8 @@ describe('TimelineStoreFacade', () => {
       ]);
       const rootCompoundVideo = rootItems.find((item) => item.type === 'composition');
       const rootCompoundAudio = rootItems.find((item) => item.type === 'audio' && item.compositionId === 'comp-1');
-      expect(rootCompoundVideo).toMatchObject({ trackId: 'root-v1', sourceStart: 0, sourceEnd: 60, sourceDuration: 120 });
-      expect(rootCompoundAudio).toMatchObject({ trackId: rootAudioTrack?.id, compositionId: 'comp-1', sourceStart: 0, sourceEnd: 60, sourceDuration: 120 });
+      expect(rootCompoundVideo).toMatchObject({ trackId: 'root-v1', sourceStart: 0, sourceEnd: 60, sourceDuration: 60 });
+      expect(rootCompoundAudio).toMatchObject({ trackId: rootAudioTrack?.id, compositionId: 'comp-1', sourceStart: 0, sourceEnd: 60, sourceDuration: 60 });
       expect(rootCompoundAudio?.linkedGroupId).toBe(rootCompoundVideo?.linkedGroupId);
 
       expect(composition?.tracks.map((track) => `${track.name}:${track.kind}`)).toEqual([

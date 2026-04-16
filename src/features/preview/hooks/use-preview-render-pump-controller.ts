@@ -3,7 +3,7 @@ import type { PlayerRef } from '@/features/preview/deps/player-core';
 import { getGlobalVideoSourcePool } from '@/features/preview/deps/player-pool';
 import { usePlaybackStore } from '@/shared/state/playback';
 import type { TimelineItem, TimelineTrack } from '@/types/timeline';
-import type { ResolvedTransitionWindow } from '@/domain/timeline/transitions/transition-planner';
+import type { ResolvedTransitionWindow } from '@/core/timeline/transitions/transition-planner';
 import { useGizmoStore } from '../stores/gizmo-store';
 import { useCornerPinStore } from '../stores/corner-pin-store';
 import { useMaskEditorStore } from '../stores/mask-editor-store';
@@ -539,7 +539,7 @@ export function usePreviewRenderPump({
             if (suppressScrubBackgroundPrewarmRef.current) {
               continue;
             }
-            // Skip prewarm during playback ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â WASM decode prewarm renders
+            // Skip prewarm during playback ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â WASM decode prewarm renders
             // (40-80ms each) block the loop from processing priority frames,
             // causing the overlay to fall behind and show stale content.
             if (usePlaybackStore.getState().isPlaying) {
@@ -558,12 +558,12 @@ export function usePreviewRenderPump({
             break;
           }
           // For background prewarm frames, bail if a newer scrub target arrived.
-          // Priority frames proceed regardless ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â their rendered content is always useful.
+          // Priority frames proceed regardless ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â their rendered content is always useful.
           if (!isPriorityFrame && isStale()) break;
 
           // Enable DOM video element provider during playback for zero-copy rendering.
           // During playback, the Player's <video> elements are already at
-          // the correct frame ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reading from them avoids mediabunny decode entirely.
+          // the correct frame ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â reading from them avoids mediabunny decode entirely.
           if ('setDomVideoElementProvider' in renderer) {
             const playbackNow = usePlaybackStore.getState();
             if (playbackNow.isPlaying) {
@@ -605,7 +605,7 @@ export function usePreviewRenderPump({
             // Visible scrub targets still use full composition rendering.
             const renderStartMs = performance.now();
             await renderer.renderFrame(frameToRender);
-            // Don't check isStale() here ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the priority frame is fully rendered
+            // Don't check isStale() here ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â the priority frame is fully rendered
             // and should always be displayed. Discarding it wastes the decode work
             // and reduces scrub hit rate.
             const renderMs = performance.now() - renderStartMs;
@@ -654,7 +654,7 @@ export function usePreviewRenderPump({
               scrubPrewarmQueuedSetRef.current.delete(next);
               prewarmBatch.push(next);
             }
-            // Batch prewarm via samplesAtTimestamps ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â each packet decoded at most
+            // Batch prewarm via samplesAtTimestamps ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â each packet decoded at most
             // once across the batch. Falls back to sequential drawFrame internally
             // for sources where batch mode has been disabled.
             await renderer.prewarmFrames(prewarmBatch);
@@ -727,7 +727,7 @@ export function usePreviewRenderPump({
         disposeFastScrubRenderer();
       } finally {
         if (scrubRenderGenerationRef.current === generation) {
-          // Current generation ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â this pump owns the lock. Release normally.
+          // Current generation ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â this pump owns the lock. Release normally.
           scrubRenderInFlightRef.current = false;
           const deferredPrepareFrame = deferredPlaybackTransitionPrepareFrameRef.current;
           if (deferredPrepareFrame !== null) {
@@ -737,7 +737,7 @@ export function usePreviewRenderPump({
             void pumpRenderLoop();
           }
         }
-        // Stale generation ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a newer seek/play bumped the generation while
+        // Stale generation ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a newer seek/play bumped the generation while
         // we were in-flight. DON'T release the lock here; the playback-start
         // force-clear or the new pump's finally handles it. Releasing would
         // allow a concurrent pump to start and share mutable canvas state.
@@ -748,7 +748,7 @@ export function usePreviewRenderPump({
       void pumpRenderLoop();
     };
 
-    // rAF-driven render pump for playback ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fires at display vsync (60Hz+),
+    // rAF-driven render pump for playback ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â fires at display vsync (60Hz+),
     // catching frames the Zustand subscription misses due to event loop
     // contention from React renders, GC pauses, etc. This reduces the ~9%
     // frame drop rate during playback to near zero.
@@ -814,7 +814,7 @@ export function usePreviewRenderPump({
 
     // Threshold for triggering background worker preseek on large jumps.
     // Below this threshold, mediabunny sequential advance is fast (~1ms).
-    // Above it, a keyframe seek is needed (300-600ms) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the worker does it off-thread.
+    // Above it, a keyframe seek is needed (300-600ms) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â the worker does it off-thread.
     const JUMP_PRESEEK_THRESHOLD_FRAMES = Math.round(fps * 3);
 
     // Playback store handlers are kept separate so the subscription reads like
@@ -1116,7 +1116,7 @@ export function usePreviewRenderPump({
         lastPausedPrearmTargetRef.current = null;
         schedulePlaybackTransitionPrepare(null);
         // Don't clear the session when stepping out of a paused transition
-        // frame — handleScrubTargetUpdate needs the session to render the
+        // frame â€” handleScrubTargetUpdate needs the session to render the
         // post-transition frame on the overlay before handing off to the
         // Player. The session will be cleared there after the handoff.
         const wasOnTransition = !prev.isPlaying && getTransitionWindowForFrame(prev.currentFrame) !== null;
@@ -1241,7 +1241,7 @@ export function usePreviewRenderPump({
         clearPendingFastScrubHandoff();
         bypassPreviewSeekRef.current = false;
 
-        // When leaving a transition frame (e.g. 12714→12715), the
+        // When leaving a transition frame (e.g. 12714â†’12715), the
         // StableVideoSequence pool lane needs time to re-seek from the
         // stabilized left clip position to the right clip. Render this
         // frame on the fast-scrub overlay so the Player isn't revealed
@@ -1330,8 +1330,8 @@ export function usePreviewRenderPump({
       if (shouldPreferPlayerForPreview(usePlaybackStore.getState().previewFrame)) return;
       // Without forceFastScrubOverlay, gizmo previews (transform, crop, etc.)
       // are handled by the DOM Player through React props. Activating the
-      // overlay here would switch from browser video seek (Ãƒâ€šÃ‚Â±1 frame) to
-      // mediabunny (exact), causing a visible frame shift ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â especially at
+      // overlay here would switch from browser video seek (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±1 frame) to
+      // mediabunny (exact), causing a visible frame shift ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â especially at
       // soft-edge crop boundaries where the content difference is amplified.
       if (!forceFastScrubOverlay) return;
       const unifiedPreviewChanged = state.preview !== prev.preview;
@@ -1388,7 +1388,7 @@ export function usePreviewRenderPump({
 
     const initialPlaybackState = usePlaybackStore.getState();
     if (initialPlaybackState.isPlaying && forceFastScrubOverlay) {
-      // Check if playback starts inside an active transition ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pin that
+      // Check if playback starts inside an active transition ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â pin that
       // session immediately so the render pump has the DOM video provider.
       const activeWindow = getTransitionWindowForFrame(initialPlaybackState.currentFrame);
       if (activeWindow) {
@@ -1447,7 +1447,7 @@ export function usePreviewRenderPump({
             })();
           }
         } else if (initialPausedActiveWindow) {
-          // Paused INSIDE a transition on initial mount ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pin session and
+          // Paused INSIDE a transition on initial mount ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â pin session and
           // render so the GPU transition is visible without forceFastScrubOverlay.
           pinTransitionPlaybackSession(initialPausedActiveWindow);
         } else {
@@ -1459,7 +1459,7 @@ export function usePreviewRenderPump({
       }
     }
 
-    // Paused inside a transition on initial mount ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â trigger a render so
+    // Paused inside a transition on initial mount ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â trigger a render so
     // the GPU transition is visible without forceFastScrubOverlay.
     if (isPausedTransitionOverlayActive(initialPlaybackState.currentFrame, initialPlaybackState)) {
       scrubRequestedFrameRef.current = initialPlaybackState.currentFrame;
