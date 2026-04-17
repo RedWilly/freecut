@@ -48,6 +48,386 @@
         {
           "title": "What's New dialog shows weekly changelog",
           "scope": "editor"
+        },
+        {
+          "title": "add What's New dialog with weekly changelog viewer",
+          "scope": "editor"
+        },
+        {
+          "title": "weekly CalVer changelog with auto-append and rollup",
+          "scope": "changelog"
+        },
+        {
+          "title": "multi-select with marquee, bulk delete, and double-click to open",
+          "scope": "projects"
+        },
+        {
+          "title": "add trash section with permanent delete",
+          "scope": "projects"
+        },
+        {
+          "title": "report legacy IDB migration progress to banner",
+          "scope": "migration"
+        },
+        {
+          "title": "soft-delete with undo, orphan sweep, and write-path locking",
+          "scope": "projects"
+        },
+        {
+          "title": "harden workspace concurrency, handle validation, and migration retry",
+          "scope": "storage"
+        },
+        {
+          "title": "split project master bus from per-device monitor volume",
+          "scope": "audio"
+        },
+        {
+          "title": "multi-workspace support, waveform mirroring, and real-filename media sources",
+          "scope": "storage"
+        },
+        {
+          "title": "migrate to workspace folder via File System Access API",
+          "scope": "storage"
+        },
+        {
+          "title": "compact clip shell for narrow clips with fade computation short-circuiting",
+          "scope": "timeline"
+        },
+        {
+          "title": "add draggable tuck handle to slide channel strips behind bus",
+          "scope": "mixer"
+        },
+        {
+          "title": "add compact Davinci-style clip EQ layout",
+          "scope": "audio-eq"
+        },
+        {
+          "title": "add per-clip pitch shift (semitones + cents) across preview and export",
+          "scope": "audio"
+        },
+        {
+          "title": "match clip EQ to six-band DaVinci-style controls"
+        },
+        {
+          "title": "add EQ curve editor and expand audio presets"
+        },
+        {
+          "title": "add Alt+C as alternate split-at-playhead shortcut",
+          "scope": "timeline"
+        },
+        {
+          "title": "add local MusicGen music generation with progress, cancellation, and presets",
+          "scope": "editor"
+        },
+        {
+          "title": "add explicit patch destination pickers and fix I/O point semantics",
+          "scope": "source-monitor"
+        },
+        {
+          "title": "add AI-powered media captioning with LFM vision model",
+          "scope": "media-library"
+        },
+        {
+          "title": "add LFM 2.5 VL as alternative scene detection model",
+          "scope": "analysis"
+        },
+        {
+          "title": "add fast histogram-based scene detection",
+          "scope": "analysis"
+        },
+        {
+          "title": "add local model cache management UI",
+          "scope": "settings"
+        },
+        {
+          "title": "upgrade VLM to Gemma-4-E4B and tune verification params",
+          "scope": "analysis"
+        },
+        {
+          "title": "enable Gemma-4 VLM scene cut verification",
+          "scope": "analysis"
+        },
+        {
+          "title": "add new feature implementation"
+        },
+        {
+          "title": "route delete shortcut to keyframe editor when active",
+          "scope": "keyframes"
+        },
+        {
+          "title": "track push/pull handle for multi-track gap adjustment",
+          "scope": "timeline"
+        },
+        {
+          "title": "edge halo system for trim handles with constraint feedback",
+          "scope": "timeline"
+        },
+        {
+          "title": "replace bottom info panel with per-card info popover",
+          "scope": "media-library"
+        },
+        {
+          "title": "add full-column toggle for properties and media sidebars",
+          "scope": "editor"
+        },
+        {
+          "title": "redesign source and program monitor toolbars for compact layouts",
+          "scope": "preview"
+        },
+        {
+          "title": "add smart ripple behavior to rate stretch tool",
+          "scope": "timeline"
+        },
+        {
+          "title": "add GPU scene detection pipeline with Gemma-4 verification (disabled)",
+          "scope": "analysis"
+        },
+        {
+          "title": "add TTS generate dialog, Alt+scroll track resize, and timeline improvements",
+          "scope": "editor"
+        },
+        {
+          "title": "add audio preview play button to media cards",
+          "scope": "media-library"
+        },
+        {
+          "title": "add AI Text-to-Speech panel with local WebGPU inference",
+          "scope": "editor"
+        },
+        {
+          "title": "add audio mixer fader and media hover-skim preview (#158)"
+        },
+        {
+          "title": "add mute button to bus master channel",
+          "scope": "mixer"
+        },
+        {
+          "title": "media library hover-skim preview in program monitor",
+          "scope": "preview"
+        },
+        {
+          "title": "add fader slider to bus master channel",
+          "scope": "mixer"
+        },
+        {
+          "title": "runtime codec capability checks in export dialog",
+          "scope": "export"
+        },
+        {
+          "title": "add AV1 codec support, centralize codec/container mappings",
+          "scope": "export"
+        },
+        {
+          "title": "expose default FPS, snap, preview quality, and export defaults in settings",
+          "scope": "settings"
+        },
+        {
+          "title": "nested-aware drop, deletion, navigation, and validation",
+          "scope": "compositions"
+        },
+        {
+          "title": "deep-nested compound clip summary, deletion, rename",
+          "scope": "compositions"
+        },
+        {
+          "title": "support nested compound clips with cycle detection",
+          "scope": "compositions"
+        },
+        {
+          "title": "SVG import support, image filmstrips, drag ghost, and drop guard",
+          "scope": "editor"
+        },
+        {
+          "title": "add soft-edge feathering to media crops with transition support",
+          "scope": "crop"
+        },
+        {
+          "title": "match project canvas/fps to first dropped video",
+          "scope": "editor"
+        },
+        {
+          "title": "apply visual fade in/out opacity during export",
+          "scope": "export"
+        },
+        {
+          "title": "add video fade in/out handles to video clips",
+          "scope": "timeline"
+        },
+        {
+          "title": "unify track visibility/mute into single disable toggle",
+          "scope": "timeline"
+        },
+        {
+          "title": "improve perf compare with port checks, auto-open, and ready detection",
+          "scope": "dev"
+        },
+        {
+          "title": "add floating/dockable mixer panel with expanded layout",
+          "scope": "editor"
+        },
+        {
+          "title": "redesign mixer with segmented LED meters, track colors, and playback-safe mute/solo",
+          "scope": "editor"
+        },
+        {
+          "title": "add per-track audio meter levels, mixer track detection, and mixer layout",
+          "scope": "editor"
+        },
+        {
+          "title": "scale per-track meter bars during mixer fader drag",
+          "scope": "editor"
+        },
+        {
+          "title": "real-time audio volume during mixer fader drag",
+          "scope": "editor"
+        },
+        {
+          "title": "add stereo L/R audio meter with interleaved waveform peaks",
+          "scope": "editor"
+        },
+        {
+          "title": "add audio meter panel to timeline",
+          "scope": "editor"
+        },
+        {
+          "title": "add duplicate drag and immediate cut behavior",
+          "scope": "keyframes"
+        },
+        {
+          "title": "add grouped dopesheet keyframe controls",
+          "scope": "keyframes"
+        },
+        {
+          "title": "streamline editor viewport controls",
+          "scope": "keyframes"
+        },
+        {
+          "title": "add mini zoom controls, combined value range for overlays, and graph interaction refinements",
+          "scope": "keyframes"
+        },
+        {
+          "title": "improve timing strip selection flow",
+          "scope": "keyframes"
+        },
+        {
+          "title": "persist graph curve visibility per clip in localStorage",
+          "scope": "dopesheet"
+        },
+        {
+          "title": "deselect active curve on background click and keep overlays visible",
+          "scope": "keyframes"
+        },
+        {
+          "title": "streamline active-curve graph editing",
+          "scope": "keyframes"
+        },
+        {
+          "title": "refactor easing icons, add graph pane keyboard shortcuts, and tune curve stroke",
+          "scope": "keyframes"
+        },
+        {
+          "title": "add multi-curve overlay, toggle visibility, and graph UX improvements",
+          "scope": "keyframes"
+        },
+        {
+          "title": "add bezier tangent mirroring, per-anchor handle visibility, and dopesheet enhancements",
+          "scope": "keyframes"
+        },
+        {
+          "title": "enable marquee selection from empty timeline areas",
+          "scope": "dopesheet"
+        },
+        {
+          "title": "add property accordion groups with collapsible sections",
+          "scope": "dopesheet"
+        },
+        {
+          "title": "add item size slider, fix marquee bounds, and unify card styles",
+          "scope": "media-library"
+        },
+        {
+          "title": "make media sidebar full-height and move keyframe editor into it",
+          "scope": "editor"
+        },
+        {
+          "title": "add compact navigator, clamp playhead to visible edges, and simplify dopesheet layout",
+          "scope": "keyframes"
+        },
+        {
+          "title": "extract frame-source policy and support standalone audio transitions",
+          "scope": "export"
+        },
+        {
+          "title": "move source patch controls to source monitor",
+          "scope": "preview"
+        },
+        {
+          "title": "drag-and-drop effects onto clips and draggable adjustment layers",
+          "scope": "timeline"
+        },
+        {
+          "title": "track-kind-aware item placement and draggable text/shape templates",
+          "scope": "timeline"
+        },
+        {
+          "title": "split/join compound wrappers, audio-only render mode, and crossfade playback",
+          "scope": "timeline"
+        },
+        {
+          "title": "compound wrapper speed support for playback, export, and rate stretch",
+          "scope": "timeline"
+        },
+        {
+          "title": "enable transitions, trim, slip/slide, and linked audio on compound wrappers",
+          "scope": "timeline"
+        },
+        {
+          "title": "linked compound clip wrappers with audio companion items",
+          "scope": "timeline"
+        },
+        {
+          "title": "add ripple-specific cursors, trim-through-transition, and smart zone refinements",
+          "scope": "timeline"
+        },
+        {
+          "title": "add tool operation overlay for trim, stretch, slip, and slide",
+          "scope": "timeline"
+        },
+        {
+          "title": "live preview linked companion edits during trim, stretch, and slip/slide",
+          "scope": "timeline"
+        },
+        {
+          "title": "add trim-edit tool with smart zone detection and constraint feedback",
+          "scope": "timeline"
+        },
+        {
+          "title": "propagate edit tools to synchronized linked items",
+          "scope": "timeline"
+        },
+        {
+          "title": "add transition drag tooltip and drop ghost polish",
+          "scope": "timeline"
+        },
+        {
+          "title": "migrate from overlap model to cut-centered handle-based transitions",
+          "scope": "transitions"
+        },
+        {
+          "title": "rework track drag to content-based lane moves",
+          "scope": "timeline"
+        },
+        {
+          "title": "add audio fade curves, volume controls, and linked audio sync",
+          "scope": "timeline"
+        },
+        {
+          "title": "add media drop zones and track drop preview system",
+          "scope": "timeline"
+        },
+        {
+          "title": "replace track groups with linked audio-video items",
+          "scope": "timeline"
         }
       ],
       "fixed": [
@@ -74,6 +454,712 @@
         {
           "title": "UI accessibility, transition alpha, and viewport clamp fixes",
           "scope": "editor"
+        },
+        {
+          "title": "use github.event.before for range and full fetch depth",
+          "scope": "changelog"
+        },
+        {
+          "title": "route projects import through contract adapter",
+          "scope": "workspace-gate"
+        },
+        {
+          "title": "skip fetch for unregistered blob URLs in decoder prewarm",
+          "scope": "preview"
+        },
+        {
+          "title": "retry video with fresh blob URL on stale-blob load errors",
+          "scope": "preview"
+        },
+        {
+          "title": "reset timeline and preview UI state by component identity"
+        },
+        {
+          "title": "move OPFS proxy loading into worker"
+        },
+        {
+          "title": "reduce proxy resolution to 960x540"
+        },
+        {
+          "title": "use resolved track states for lock/drop and exclude group headers"
+        },
+        {
+          "title": "keep disabled tracks editable and dim dropped clips"
+        },
+        {
+          "title": "preserve disabled track styling after reload"
+        },
+        {
+          "title": "default pen paths to shapes with 5s duration"
+        },
+        {
+          "title": "reveal pen mask tracks in classic timelines"
+        },
+        {
+          "title": "restore legacy render span source fallback"
+        },
+        {
+          "title": "use source-anchored render spans for transitions"
+        },
+        {
+          "title": "keep transition clips aligned to source time"
+        },
+        {
+          "title": "UI accessibility, transition alpha, and viewport clamp fixes"
+        },
+        {
+          "title": "share shader UV scaling helper and stabilize mixer drag"
+        },
+        {
+          "title": "preserve transition preroll and soften wipe endpoints"
+        },
+        {
+          "title": "fix detached EQ window stretching to full width on reopen",
+          "scope": "ui"
+        },
+        {
+          "title": "disable EQ controls when equalizer is toggled off",
+          "scope": "audio-eq"
+        },
+        {
+          "title": "match pop-out EQ window to floating panel layout and size",
+          "scope": "ui"
+        },
+        {
+          "title": "auto-height floating EQ panel and portal container support",
+          "scope": "ui"
+        },
+        {
+          "title": "align EQ bands and routing with Resolve behavior"
+        },
+        {
+          "title": "align EQ graph bounds with Resolve"
+        },
+        {
+          "title": "preserve preview playback on EQ toggle"
+        },
+        {
+          "title": "honor disabled EQ state in editor panel"
+        },
+        {
+          "title": "use audio clock as ground truth and backfill missing keyframe indices",
+          "scope": "preview"
+        },
+        {
+          "title": "use OPFS metadata for worker media sources"
+        },
+        {
+          "title": "use file-backed Mediabunny sources for local media"
+        },
+        {
+          "title": "prefer BlobSource for OPFS-backed mediabunny reads"
+        },
+        {
+          "title": "refresh stale filmstrip frames and throttle waveform redraws"
+        },
+        {
+          "title": "remove waveform zoom catch-up rendering"
+        },
+        {
+          "title": "defer import background media work during active editing"
+        },
+        {
+          "title": "persist conformed preview audio in background"
+        },
+        {
+          "title": "speed up custom audio startup warmup"
+        },
+        {
+          "title": "improve buffered custom audio seek warmup"
+        },
+        {
+          "title": "unify preview audio through shared clip graph"
+        },
+        {
+          "title": "extend pitch-preserved custom audio slices"
+        },
+        {
+          "title": "preview sync-locked ripple trim updates across tracks"
+        },
+        {
+          "title": "restyle vertical scrollbar to match navigator and reserve space",
+          "scope": "timeline"
+        },
+        {
+          "title": "address race conditions, group track filtering, and defensive guards"
+        },
+        {
+          "title": "route cross-feature imports through deps/ adapters"
+        },
+        {
+          "title": "sync timeline in-out points and lazy context menus"
+        },
+        {
+          "title": "eliminate drag preview flash when moving between tracks",
+          "scope": "timeline"
+        },
+        {
+          "title": "clamp stale timeline in and out points"
+        },
+        {
+          "title": "reduce timeline and media selection rerenders"
+        },
+        {
+          "title": "improve smart proxy generation and playback recovery"
+        },
+        {
+          "title": "scope broken media indicators to current project",
+          "scope": "media-library"
+        },
+        {
+          "title": "decouple filmstrip render width from visible width with 600px overscan",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent context menu submenu clicks from deselecting items",
+          "scope": "timeline"
+        },
+        {
+          "title": "remove unused DEFAULT_TRACK_HEIGHT import",
+          "scope": "timeline"
+        },
+        {
+          "title": "split linked items together and suppress rounding-only sync drift",
+          "scope": "timeline"
+        },
+        {
+          "title": "eliminate filmstrip edge gap and remove paint-thrashing CSS",
+          "scope": "timeline"
+        },
+        {
+          "title": "apply filmstrip render buffer unconditionally to prevent settle pop",
+          "scope": "timeline"
+        },
+        {
+          "title": "use coarse zoom quantization for filmstrip to avoid visual gap",
+          "scope": "timeline"
+        },
+        {
+          "title": "preserve aspect ratio, use JPEG, and free VRAM after verification",
+          "scope": "analysis"
+        },
+        {
+          "title": "harden thumbnail dimensions and extract dialog host",
+          "scope": "editor,media"
+        },
+        {
+          "title": "resolve PR review findings across editor, media, timeline, and persistence"
+        },
+        {
+          "title": "resolve PR review findings across editor, keyframes, media, and timeline"
+        },
+        {
+          "title": "lazy-load editor dialogs and update logger test mocks"
+        },
+        {
+          "title": "correct ripple delete coverage and test mocks"
+        },
+        {
+          "title": "increase same-origin transition cooldown to 500ms",
+          "scope": "preview"
+        },
+        {
+          "title": "eliminate frame pop at same-origin transition exit",
+          "scope": "preview"
+        },
+        {
+          "title": "clean up debug logging, simplify handoff gate",
+          "scope": "preview"
+        },
+        {
+          "title": "don't re-seek pool lane past clip end on session clear",
+          "scope": "preview"
+        },
+        {
+          "title": "check pool lane element directly in transition handoff gate",
+          "scope": "preview"
+        },
+        {
+          "title": "exclude pinned shadows from transition handoff gate",
+          "scope": "preview"
+        },
+        {
+          "title": "add handoff gate for same-origin transition exit",
+          "scope": "preview"
+        },
+        {
+          "title": "prevent black regions in glitch transition shader",
+          "scope": "transitions"
+        },
+        {
+          "title": "remove unused variable in video-timing test"
+        },
+        {
+          "title": "snap source times to frame boundaries to prevent floating-point frame skips",
+          "scope": "preview"
+        },
+        {
+          "title": "revert clampSlideDelta dep array — causes TDZ error",
+          "scope": "timeline"
+        },
+        {
+          "title": "shared slide limit box range for linked A/V with variable speed",
+          "scope": "timeline"
+        },
+        {
+          "title": "align overlay and bridge insets, remove bridge decorations",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent duplicate slide limit boxes on neighbor counterparts",
+          "scope": "timeline"
+        },
+        {
+          "title": "invert slip drag direction and delete overlapped clips on ripple",
+          "scope": "timeline"
+        },
+        {
+          "title": "close gap shifts all downstream items across every track",
+          "scope": "timeline"
+        },
+        {
+          "title": "multi-track slide clamping, companion trim, and drag wall preview",
+          "scope": "timeline"
+        },
+        {
+          "title": "slide wall clamping and linked limit box overlays",
+          "scope": "timeline"
+        },
+        {
+          "title": "3-layer z-ordering for edge halos and slide adjacency clamping",
+          "scope": "timeline"
+        },
+        {
+          "title": "overlay track section scrollbars and brighten A/V divider",
+          "scope": "timeline"
+        },
+        {
+          "title": "remove stale previewQuality from editor test mock",
+          "scope": "settings"
+        },
+        {
+          "title": "align slide mode bounds box with transition constraints",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent fade handle overlays from blocking pointer events",
+          "scope": "timeline"
+        },
+        {
+          "title": "Alt+scroll track resize in headers, compact track header layout",
+          "scope": "timeline"
+        },
+        {
+          "title": "detect and prevent overlapping items on same track",
+          "scope": "timeline"
+        },
+        {
+          "title": "suppress video embedded audio after unlinking from audio companion",
+          "scope": "timeline"
+        },
+        {
+          "title": "forward visible prop to Item in renderVideoItem",
+          "scope": "composition-runtime"
+        },
+        {
+          "title": "propagate parent visibility to nested precomp items",
+          "scope": "composition-runtime"
+        },
+        {
+          "title": "remove double-counted meter offset during fader drag",
+          "scope": "mixer"
+        },
+        {
+          "title": "stabilize timeline audio volume commits and waveform scaling"
+        },
+        {
+          "title": "align clip audio gain slider with bus range"
+        },
+        {
+          "title": "smooth clip volume dragging and preserve stereo waveform data"
+        },
+        {
+          "title": "persist clip volume edits and stereo waveform channels"
+        },
+        {
+          "title": "re-apply meter preview when level props update during drag",
+          "scope": "mixer"
+        },
+        {
+          "title": "immediate per-track meter preview during fader drag",
+          "scope": "mixer"
+        },
+        {
+          "title": "use gain correction ratio for live fader metering",
+          "scope": "mixer"
+        },
+        {
+          "title": "decouple channel and bus meters with post-fader levels",
+          "scope": "mixer"
+        },
+        {
+          "title": "bus fader live preview, knob visibility, and distinct color",
+          "scope": "mixer"
+        },
+        {
+          "title": "bus fader dB readout color updates during drag, cancel restores value",
+          "scope": "mixer"
+        },
+        {
+          "title": "show selection border on pre-comp items in media lib",
+          "scope": "media-library"
+        },
+        {
+          "title": "read live DOM metrics for scroll-to-frame visibility check",
+          "scope": "editor"
+        },
+        {
+          "title": "block pen path insertion on disabled tracks, prevent overlap, scroll to playhead",
+          "scope": "editor"
+        },
+        {
+          "title": "replace viewport div with CSS mask to eliminate sub-pixel seams",
+          "scope": "crop"
+        },
+        {
+          "title": "eliminate sub-pixel seam at uncropped edges",
+          "scope": "crop"
+        },
+        {
+          "title": "stop fast-scrub overlay activation on gizmo mousedown for non-GPU clips",
+          "scope": "preview"
+        },
+        {
+          "title": "prevent ±1 frame shift on mask gizmo mousedown",
+          "scope": "preview"
+        },
+        {
+          "title": "resolve live mask items during fast-scrub rendering",
+          "scope": "export"
+        },
+        {
+          "title": "clip masks show feathered on interaction due to stale mask refs",
+          "scope": "composition-runtime"
+        },
+        {
+          "title": "apply masks in composition space, not item space",
+          "scope": "composition-runtime"
+        },
+        {
+          "title": "remove auto-clear selection when playhead leaves clip range",
+          "scope": "timeline"
+        },
+        {
+          "title": "show GPU transition effect when paused on a transition frame",
+          "scope": "preview"
+        },
+        {
+          "title": "recover media library loading for migrated projects"
+        },
+        {
+          "title": "mount same-origin shadow videos earlier for transitions"
+        },
+        {
+          "title": "drop transition overlay after same-origin overlap ends"
+        },
+        {
+          "title": "stabilize video element reuse across split boundaries",
+          "scope": "composition-runtime"
+        },
+        {
+          "title": "optimize single-task GPU effect preview rendering"
+        },
+        {
+          "title": "restore clock hook exports",
+          "scope": "player"
+        },
+        {
+          "title": "keep color scopes off frame renders",
+          "scope": "preview"
+        },
+        {
+          "title": "isolate card layout during resize",
+          "scope": "media-library"
+        },
+        {
+          "title": "throttle source monitor resize work",
+          "scope": "preview"
+        },
+        {
+          "title": "stabilize source monitor playback sync",
+          "scope": "preview"
+        },
+        {
+          "title": "keep source monitor off the frame loop",
+          "scope": "preview"
+        },
+        {
+          "title": "refine mixer meter spacing and empty-strip feedback",
+          "scope": "editor"
+        },
+        {
+          "title": "keep compound volume commits from stalling playback",
+          "scope": "preview"
+        },
+        {
+          "title": "keep volume commits off the preview render path",
+          "scope": "editor"
+        },
+        {
+          "title": "remove unused clearMixerLiveGains import"
+        },
+        {
+          "title": "restore undo support for volume changes, keep live gains through re-render",
+          "scope": "editor"
+        },
+        {
+          "title": "keep meter dB offset after fader release",
+          "scope": "editor"
+        },
+        {
+          "title": "meter bars track fader position during drag via dB offset ref",
+          "scope": "editor"
+        },
+        {
+          "title": "handle NaN track volumes in audio mixer and meter pipeline",
+          "scope": "editor"
+        },
+        {
+          "title": "expand supported media types and fix MIME detection",
+          "scope": "media-library"
+        },
+        {
+          "title": "throttle interactive filmstrip extraction",
+          "scope": "timeline"
+        },
+        {
+          "title": "extract filmstrips at max track height to avoid re-extraction on resize",
+          "scope": "timeline"
+        },
+        {
+          "title": "move early return after hooks in compositions section",
+          "scope": "media-library"
+        },
+        {
+          "title": "hide slip and slide tool entry points",
+          "scope": "timeline"
+        },
+        {
+          "title": "keep marquee selection aligned across assets",
+          "scope": "media-library"
+        },
+        {
+          "title": "show seconds in the dopesheet ruler",
+          "scope": "keyframes"
+        },
+        {
+          "title": "simplify keyframe editor header",
+          "scope": "keyframes"
+        },
+        {
+          "title": "remove unused index parameter in media grid map",
+          "scope": "media-library"
+        },
+        {
+          "title": "stop legacy AV track repair from running on every load",
+          "scope": "timeline"
+        },
+        {
+          "title": "avoid stale blob fetch retries during prewarm",
+          "scope": "preview"
+        },
+        {
+          "title": "preserve transition metadata in exports",
+          "scope": "project-bundle"
+        },
+        {
+          "title": "eliminate transition audio doubling and add smart speed reset ripple",
+          "scope": "audio"
+        },
+        {
+          "title": "stabilize active index during same-origin transitions",
+          "scope": "preview"
+        },
+        {
+          "title": "replace trim edit icon and remove toolbar group border",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent header controls from overflowing at narrow widths",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent section divider from fully collapsing either pane",
+          "scope": "timeline"
+        },
+        {
+          "title": "replace bezier fade curves with power curve model and fix edge snapping",
+          "scope": "audio"
+        },
+        {
+          "title": "restore transition fade composition",
+          "scope": "audio"
+        },
+        {
+          "title": "widen replacement picker dialog",
+          "scope": "media-library"
+        },
+        {
+          "title": "expand missing media dialog for long filenames",
+          "scope": "media-library"
+        },
+        {
+          "title": "anchor ruler overlay positioning",
+          "scope": "timeline"
+        },
+        {
+          "title": "simplify rate-stretch to directional body drag",
+          "scope": "timeline"
+        },
+        {
+          "title": "prewarm incoming transition clip decoder",
+          "scope": "preview"
+        },
+        {
+          "title": "fix prewarm worker VideoSampleSink initialization",
+          "scope": "preview"
+        },
+        {
+          "title": "make track sizing roomier and easier to batch adjust",
+          "scope": "timeline"
+        },
+        {
+          "title": "stabilize A/V pane sizing and linked drag previews",
+          "scope": "timeline"
+        },
+        {
+          "title": "sync header resizing and drop duplicate gain UI",
+          "scope": "timeline"
+        },
+        {
+          "title": "keep the A/V divider anchored while resizing",
+          "scope": "timeline"
+        },
+        {
+          "title": "make track resizing feel anchored like Resolve",
+          "scope": "timeline"
+        },
+        {
+          "title": "clamp slide bridge inside preview clips",
+          "scope": "timeline"
+        },
+        {
+          "title": "clamp trim-edit slide at transitions",
+          "scope": "timeline"
+        },
+        {
+          "title": "restore razor cuts after edit tools",
+          "scope": "timeline"
+        },
+        {
+          "title": "keep trim-edit clicks selectable",
+          "scope": "timeline"
+        },
+        {
+          "title": "hide linked sync badges during edits",
+          "scope": "timeline"
+        },
+        {
+          "title": "support Resolve-style clip linking",
+          "scope": "timeline"
+        },
+        {
+          "title": "match Resolve linked selection behavior",
+          "scope": "timeline"
+        },
+        {
+          "title": "align trim-edit ripple feedback",
+          "scope": "timeline"
+        },
+        {
+          "title": "anchor rolling limits to the shared cut span",
+          "scope": "timeline"
+        },
+        {
+          "title": "ease trim-edit body mode switching",
+          "scope": "timeline"
+        },
+        {
+          "title": "clarify slip and slide limit edges",
+          "scope": "timeline"
+        },
+        {
+          "title": "keep trim-edit limit previews in sync",
+          "scope": "timeline"
+        },
+        {
+          "title": "read label row height from CSS custom property instead of constant",
+          "scope": "timeline"
+        },
+        {
+          "title": "prevent drag dim opacity during trim, stretch, and slip/slide edits",
+          "scope": "timeline"
+        },
+        {
+          "title": "clamp rolling trim delta to preserve adjacent transitions",
+          "scope": "timeline"
+        },
+        {
+          "title": "clamp ripple trim delta to preserve adjacent transitions",
+          "scope": "timeline"
+        },
+        {
+          "title": "swap trim/ripple cursor hotspot and icon orientation",
+          "scope": "timeline"
+        },
+        {
+          "title": "select transition when clicking its edge handle or bridged clip handle",
+          "scope": "timeline"
+        },
+        {
+          "title": "reject drops on incompatible tracks instead of silently rerouting",
+          "scope": "timeline"
+        },
+        {
+          "title": "improve audio volume drag UX and remove audio track transition bridges",
+          "scope": "timeline"
+        },
+        {
+          "title": "avoid eager project redirect",
+          "scope": "routes"
+        },
+        {
+          "title": "resolve TDZ error from transition registry accessed at module init",
+          "scope": "editor"
+        },
+        {
+          "title": "preserve existing wrapper source fields and cleanup redundant audio tracks on load",
+          "scope": "timeline"
+        },
+        {
+          "title": "clear preview frame on edit gestures and allow ripple through transitions",
+          "scope": "timeline"
+        },
+        {
+          "title": "improve transition bridge positioning and resize UX",
+          "scope": "timeline"
+        },
+        {
+          "title": "correct video lane indexing in legacy A/V track repair",
+          "scope": "timeline"
+        },
+        {
+          "title": "remove edit-time labels from audio fade handles",
+          "scope": "timeline"
+        },
+        {
+          "title": "simplify audio fade handle styling and overlay paths",
+          "scope": "timeline"
         }
       ],
       "improved": [
@@ -88,6 +1174,118 @@
         {
           "title": "Smaller 960×540 proxy resolution with worker-side loading",
           "scope": "preview"
+        },
+        {
+          "title": "fill zoom gaps with cover frame background and full-set fallback",
+          "scope": "filmstrip"
+        },
+        {
+          "title": "use live zoom subscription with compact clip cost amortization",
+          "scope": "timeline"
+        },
+        {
+          "title": "reduce ClipContent zoom subscriptions from 3 to 1",
+          "scope": "timeline"
+        },
+        {
+          "title": "skip filmstrip/waveform for sub-5px clips using reactive width",
+          "scope": "timeline"
+        },
+        {
+          "title": "eliminate scroll-driven re-renders from vertical scrollbar",
+          "scope": "timeline"
+        },
+        {
+          "title": "track live zoom in filmstrip — remove quantization",
+          "scope": "timeline"
+        },
+        {
+          "title": "pre-render filmstrip buffer and skip redundant zoom subscribers",
+          "scope": "timeline"
+        },
+        {
+          "title": "eliminate zoom-driven re-renders and fix flicker during zoom",
+          "scope": "timeline"
+        },
+        {
+          "title": "memo + ref-based drag updates for SliderInput",
+          "scope": "slider"
+        },
+        {
+          "title": "reduce filmstrip extraction concurrency for steadier cold starts",
+          "scope": "timeline"
+        },
+        {
+          "title": "real-time audio + zero-freeze commit for clip volume drag",
+          "scope": "timeline"
+        },
+        {
+          "title": "eliminate composition re-render on mixer fader release",
+          "scope": "editor"
+        },
+        {
+          "title": "defer mixer fader commit to next frame via rAF",
+          "scope": "editor"
+        },
+        {
+          "title": "fully decouple mixer fader drag from store writes",
+          "scope": "editor"
+        },
+        {
+          "title": "smooth mixer fader dragging with imperative DOM + rAF throttling",
+          "scope": "editor"
+        },
+        {
+          "title": "eager WASM warmup and batch prearm for transitions",
+          "scope": "preview"
+        },
+        {
+          "title": "batch scrub prewarm via samplesAtTimestamps",
+          "scope": "preview"
+        },
+        {
+          "title": "scale prewarm worker pool with hardware concurrency",
+          "scope": "preview"
+        },
+        {
+          "title": "always cache to GPU during forward playback",
+          "scope": "preview"
+        },
+        {
+          "title": "direction-aware cache eviction for scrubbing",
+          "scope": "preview"
+        },
+        {
+          "title": "batch preseek via samplesAtTimestamps and faster keyframe extraction",
+          "scope": "preview"
+        },
+        {
+          "title": "adaptive seek backtracking via keyframe index",
+          "scope": "preview"
+        },
+        {
+          "title": "reduce per-frame GPU alloc, audio decode cost, and worker contention",
+          "scope": "render"
+        },
+        {
+          "title": "expose preseek diagnostics",
+          "scope": "preview"
+        },
+        {
+          "title": "reuse matching preseek requests",
+          "scope": "preview"
+        },
+        {
+          "title": "reduce cold decode stalls during preseek",
+          "scope": "preview"
+        },
+        {
+          "title": "scope inspector subscriptions to selected items",
+          "scope": "keyframes"
+        },
+        {
+          "title": "narrow render-critical store subscriptions",
+          "scope": "timeline"
         }
       ]
     }
