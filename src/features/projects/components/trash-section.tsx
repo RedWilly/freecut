@@ -177,7 +177,7 @@ export function TrashSection() {
   }
 
   return (
-    <div className="mt-12" data-testid="trash-section">
+    <div className="mt-12" data-testid="trash-section" data-no-marquee>
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="flex items-center justify-between gap-2 mb-3">
           <CollapsibleTrigger

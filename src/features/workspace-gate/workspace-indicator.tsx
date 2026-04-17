@@ -209,8 +209,7 @@ export function WorkspaceIndicator() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      data-tooltip="Remove workspace"
-                      data-tooltip-side="top"
+                      aria-label="Remove workspace"
                       onClick={() => setConfirmRemoveId(record.id)}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
