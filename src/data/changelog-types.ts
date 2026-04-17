@@ -8,6 +8,7 @@ export type ChangelogItem = {
 export type ChangelogEntry = {
   version: string;
   date: string;
+  subtitle?: string;
   highlights?: string[];
   groups: Partial<Record<ChangelogGroup, ChangelogItem[]>>;
 };

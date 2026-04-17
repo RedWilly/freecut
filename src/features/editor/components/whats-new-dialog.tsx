@@ -46,8 +46,8 @@ function formatWeekRange(mondayIso: string): string {
 }
 
 function formatEntrySubtitle(entry: ChangelogEntry): string {
+  if (entry.subtitle) return entry.subtitle;
   if (entry.version === 'current') return `As of ${formatSingleDate(entry.date)}`;
-  if (entry.version.startsWith('2026.02.02')) return 'Initial release';
   return `Week of ${formatWeekRange(entry.date)}`;
 }
 

@@ -67,10 +67,10 @@ export const Toolbar = memo(function Toolbar({
     setHasUnseenWhatsNew(hasUnseenChangelog());
   }, []);
 
-  useEffect(() => {
-    if (!showWhatsNewDialog) return;
+  const openWhatsNew = () => {
     setHasUnseenWhatsNew(false);
-  }, [showWhatsNewDialog]);
+    setShowWhatsNewDialog(true);
+  };
 
   const handleBackClick = () => {
     if (isDirty) {
@@ -152,7 +152,7 @@ export const Toolbar = memo(function Toolbar({
           variant="outline"
           size="icon"
           className="h-7 w-7 relative"
-          onClick={() => setShowWhatsNewDialog(true)}
+          onClick={openWhatsNew}
           data-tooltip="What's New"
           data-tooltip-side="bottom"
           aria-label="What's new"

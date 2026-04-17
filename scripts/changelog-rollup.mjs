@@ -18,7 +18,7 @@
 //   git push && git push --tags
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -49,11 +49,13 @@ function parseArgs() {
 
 function lastMondayIso(today = new Date()) {
   const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  // Monday-start: day 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  // Monday-start: getUTCDay() → 0 = Sunday, 1 = Monday, ..., 6 = Saturday.
+  // We want the Monday of the most recent *completed* calendar week (Mon–Sun).
+  //   - Mon → 7 days back (last week's Monday)
+  //   - Tue → 8, Wed → 9, ..., Sat → 12
+  //   - Sun → 13 days back (previous week's Monday; the current Mon–Sun
+  //     week is still in progress until the next Monday).
   const dayOfWeek = d.getUTCDay();
-  // We want the Monday of the previous calendar week (the week that just closed).
-  // If today is Monday, last week's Monday is 7 days ago.
-  // If today is Sunday, last week's Monday is 6 days ago.
   const daysBack = ((dayOfWeek + 6) % 7) + 7;
   d.setUTCDate(d.getUTCDate() - daysBack);
   return d.toISOString().slice(0, 10);
@@ -126,10 +128,6 @@ function latestMainMergeSha() {
   return out;
 }
 
-function run(cmd) {
-  execSync(cmd, { stdio: 'inherit' });
-}
-
 function main() {
   const { sha: shaArg, dateOverride } = parseArgs();
   const mondayIso = dateOverride ?? lastMondayIso();
@@ -170,7 +168,11 @@ function main() {
   const tagMessage = `${tagName} — ${highlightLine}`;
 
   console.log(`\nTagging ${tagName} at ${sha.slice(0, 8)}`);
-  run(`git tag -a ${tagName} ${sha} -m "${tagMessage.replaceAll('"', '\\"')}"`);
+  // Pass args as an array and bypass the shell so backticks, $(), or other
+  // metacharacters inside tagMessage can't be interpreted.
+  execFileSync('git', ['tag', '-a', tagName, sha, '-m', tagMessage], {
+    stdio: 'inherit',
+  });
 
   console.log(`
 Rollup complete.
