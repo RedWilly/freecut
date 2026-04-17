@@ -617,7 +617,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
       return true;
     }
 
-    // Size is fixed from DETACHED_EQ_DEFAULT_BOUNDS; position is a hint Ã¢â‚¬â€
+    // Size is fixed from DETACHED_EQ_DEFAULT_BOUNDS; position is a hint ââ‚¬”
     // WindowPortal will apply the persisted position and force correct size
     // via resizeTo on mount.
     const nextWindow = window.open(
@@ -677,7 +677,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
     }
   }, [getTrackItemIds]);
 
-  // In-place mutation for mute/solo Ã¢â‚¬â€ same pattern as volume change.
+  // In-place mutation for mute/solo ââ‚¬” same pattern as volume change.
   // setTracks() triggers full composition re-render which stalls playback.
   // Live gains bridge the gap so audio responds immediately.
   const handleTrackMuteToggle = useCallback((trackId: string) => {
@@ -922,10 +922,10 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   }
 
   // ---------------------------------------------------------------------------
-  // Meter mode (default) Ã¢â‚¬â€ also shows floating mixer if enabled
+  // Meter mode (default) ââ‚¬” also shows floating mixer if enabled
   // ---------------------------------------------------------------------------
 
-  // Segmented LED mask Ã¢â‚¬â€ matches the mixer view segments
+  // Segmented LED mask ââ‚¬” matches the mixer view segments
   const segmentMask = 'repeating-linear-gradient(to top, black 0px, black 3px, transparent 3px, transparent 4px)';
   const unlitLedBg = 'repeating-linear-gradient(to top, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 3px, transparent 3px, transparent 4px)';
   const isScanningMeter = estimate.unresolvedSourceCount > 0 && estimate.resolvedSourceCount === 0;
@@ -987,7 +987,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
                       WebkitMaskImage: segmentMask,
                     }}
                   />
-                  {/* Peak hold Ã¢â‚¬â€ single bright segment */}
+                  {/* Peak hold ââ‚¬” single bright segment */}
                   <div
                     className="absolute inset-x-0 h-[3px] bg-white/85 shadow-[0_0_5px_rgba(255,255,255,0.5)] transition-[bottom] duration-100 ease-out"
                     style={{
@@ -1010,7 +1010,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
                       WebkitMaskImage: segmentMask,
                     }}
                   />
-                  {/* Peak hold Ã¢â‚¬â€ single bright segment */}
+                  {/* Peak hold ââ‚¬” single bright segment */}
                   <div
                     className="absolute inset-x-0 h-[3px] bg-white/85 shadow-[0_0_5px_rgba(255,255,255,0.5)] transition-[bottom] duration-100 ease-out"
                     style={{

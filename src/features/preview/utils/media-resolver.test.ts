@@ -315,7 +315,7 @@ describe('relinking regression', () => {
     expect(failedUrl).toBe('');
     expect(blobUrlManager.has('media-1')).toBe(false);
 
-    // Step 2: User relinks â€” invalidate is called (no-op since nothing cached)
+    // Step 2: User relinks — invalidate is called (no-op since nothing cached)
     blobUrlManager.invalidate('media-1');
 
     // Step 3: Re-resolve with the new (working) file handle
@@ -346,7 +346,7 @@ describe('relinking regression', () => {
     blobUrlManager.invalidate('media-1');
     expect(blobUrlManager.has('media-1')).toBe(false);
 
-    // Step 3: Re-resolve â€” should create new blob URL from new file handle
+    // Step 3: Re-resolve — should create new blob URL from new file handle
     (mediaLibraryService.getMediaFile as Mock).mockResolvedValue(
       new Blob(['relinked'])
     );

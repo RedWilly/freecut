@@ -69,7 +69,7 @@ interface AudioSegment {
   src: string;
   startFrame: number;        // Timeline position
   durationFrames: number;
-  sourceStartFrame: number;  // In source media (for trim) â€” in source-native FPS frames
+  sourceStartFrame: number;  // In source media (for trim) — in source-native FPS frames
   sourceFps: number;         // Source media FPS (sourceStartFrame is in these frames)
   volume: number;            // -60 to +12 dB
   fadeInFrames: number;

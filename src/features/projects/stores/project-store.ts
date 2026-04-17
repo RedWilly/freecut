@@ -235,7 +235,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
             if (!fsPermissionGranted) {
               logger.warn(`Permission denied to clear local files for project ${id}`);
               set({ isLoading: false });
-              throw new Error('Filesystem permission denied â€” project was not deleted. Please grant access and try again.');
+              throw new Error('Filesystem permission denied — project was not deleted. Please grant access and try again.');
             }
           }
 
@@ -298,14 +298,14 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
             return { localFilesDeleted };
           } catch (error) {
             if (localFilesDeleted || partialLocalDeletion) {
-              // Local files already deleted (fully or partially) â€” rolling back the UI would be misleading
+              // Local files already deleted (fully or partially) — rolling back the UI would be misleading
               const scope = localFilesDeleted ? 'All local files deleted' : 'Some local files deleted';
-              const errorMessage = `${scope} but database cleanup failed â€” project may be inconsistent`;
+              const errorMessage = `${scope} but database cleanup failed — project may be inconsistent`;
               logger.error(errorMessage, error);
               set({ error: errorMessage, isLoading: false });
               throw new Error(errorMessage, { cause: error });
             }
-            // Rollback on error (safe â€” no local files were touched)
+            // Rollback on error (safe — no local files were touched)
             set({ projects: previousProjects, currentProject: previousCurrentProject });
 
             const errorMessage =
@@ -443,7 +443,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
         clearError: () => set({ error: null }),
       }),
       {
-        // Zundo options â€” no static limit; trimmed dynamically via subscription below
+        // Zundo options — no static limit; trimmed dynamically via subscription below
         partialize: (state) => {
           // Only include projects in undo/redo history
           // Exclude UI state like loading, error, filters

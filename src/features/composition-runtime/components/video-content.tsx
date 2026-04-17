@@ -35,7 +35,7 @@ import {
 
 const videoLog = createLogger('NativePreviewVideo');
 const contentLog = createLogger('VideoContent');
-videoLog.setLevel(2); // WARN â€” suppress noisy per-frame debug logs
+videoLog.setLevel(2); // WARN — suppress noisy per-frame debug logs
 const POOL_RELEASE_STICKY_MS = 400;
 
 // Feature detection for requestVideoFrameCallback (avoids per-frame React sync)
@@ -670,7 +670,7 @@ const NativePreviewVideo: React.FC<{
                 if (gen === preWarmGenRef.current && !usePlaybackStore.getState().isPlaying) {
                   v.pause();
                 }
-                // Always unmute â€” if playback started or another scrub superseded
+                // Always unmute — if playback started or another scrub superseded
                 // this pre-warm, leaving muted=true causes silent playback.
                 v.muted = false;
               }).catch(() => {

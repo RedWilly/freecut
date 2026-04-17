@@ -297,7 +297,7 @@ export function PlaybackControls({ totalFrames, fps }: PlaybackControlsProps) {
         </Button>
       </div>
 
-      {/* Proxy toggle â€” hidden at narrow widths */}
+      {/* Proxy toggle — hidden at narrow widths */}
       <div className="hidden @min-[440px]:flex items-center gap-0.5 flex-shrink-0">
         <Separator orientation="vertical" className="h-4 flex-shrink-0" />
 
