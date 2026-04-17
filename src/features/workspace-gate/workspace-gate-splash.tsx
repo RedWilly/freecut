@@ -18,7 +18,7 @@ export function WorkspaceGateSplash({ status, onPickFolder, onReconnect }: Props
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6">
       <div className="max-w-lg w-full text-center">
-        <FreeCutLogo variant="full" size="lg" className="mx-auto mb-8" />
+        <FreeCutLogo variant="full" size="lg" className="justify-center mb-8" />
 
         {status.kind === 'initializing' && (
           <div className="flex items-center justify-center gap-2 text-muted-foreground">
